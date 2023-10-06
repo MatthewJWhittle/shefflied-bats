@@ -1,0 +1,151 @@
+from sre_constants import SUCCESS
+import stat
+import requests
+import pandas as pd
+import geopandas as gpd
+import xarray as xr
+import rioxarray as rxr
+from tqdm.asyncio import tqdm
+
+# A functino to download a layer from an esri feature service and use a query to filter the data for certain features
+def download_feature_layer(url, query="1=1"):
+    # Construct the query parameters
+    query_params = {
+        'where': query,
+        'outFields': '*',
+        'f': 'json'
+    }
+    # Make the request
+    r = requests.get(url, params=query_params)
+    # Check the status code
+    if r.status_code == 200:
+        # Get the response json
+        response = r.json()
+
+        gdf = gpd.read_file(response)
+
+        return gdf
+    
+
+import aiohttp
+import asyncio
+import os
+import hashlib
+import geopandas as gpd
+from shapely.geometry import box
+import rioxarray
+
+class ImageTileDownloader:
+    def __init__(self, base_url, cache_folder="tile_cache"):
+        self.base_url = base_url
+        self.cache_folder = cache_folder
+        os.makedirs(self.cache_folder, exist_ok=True)
+        self.chunk_size = 2000
+
+    async def fetch_tile(self, session, url, tile_hash):
+        cache_path = os.path.join(self.cache_folder, f"{tile_hash}.tif")
+        
+        if os.path.exists(cache_path):
+            return cache_path
+
+        retries = 0
+        success = False
+        status = None
+        while retries < 3 and not success and status != 200:
+            async with session.get(url) as response:
+                tile_data = await response.read()
+                with open(cache_path, "wb") as f:
+                    f.write(tile_data)
+                try:
+                    rioxarray.open_rasterio(cache_path)
+                    success = True
+                    status = response.status
+                except:
+                    retries += 1
+                    os.remove(cache_path)
+                    print(f"Retrying {url} - attempt {retries}")
+
+            return cache_path
+
+    async def fetch_tiles(self, tile_urls):
+        tasks = []
+        async with aiohttp.ClientSession() as session:
+            # Create all tasks
+            for url, tile_hash in tile_urls:
+                task = self.fetch_tile(session, url, tile_hash)
+                tasks.append(task)
+            
+            # Create an asynchronous progress bar
+            pbar = tqdm(total=len(tasks), desc="Downloading tiles", dynamic_ncols=True)
+            
+            # Wait for tasks to complete and update the progress bar
+            results = []
+            for f in asyncio.as_completed(tasks):
+                result = await f
+                pbar.update(1)
+                results.append(result)
+            
+            pbar.close()
+            return results
+    
+    def get_tile_urls(self, polygon, target_resolution):
+        # Convert polygon to bounding box 
+        bounding_box = polygon.bounds
+
+        # Tile the bounding box into smaller boxes
+        minx, miny, maxx, maxy = bounding_box
+        width = maxx - minx
+        height = maxy - miny
+        tile_step = self.chunk_size * target_resolution # This works out the size of the bounding box tile to achieve the specified resolution
+
+        tile_urls = []
+        for x in range(int(minx), int(maxx), tile_step):
+            for y in range(int(miny), int(maxy), tile_step):
+                tile_bbox = box(x, y, x + tile_step, y + tile_step)
+                
+                # Calculate parameters based on target resolution
+                params = {
+                    'bbox': f"{tile_bbox.bounds[0]},{tile_bbox.bounds[1]},{tile_bbox.bounds[2]},{tile_bbox.bounds[3]}", # This is the AOI
+                    'size': f"{self.chunk_size},{self.chunk_size}", # This is how many pixels are in the tile
+                    'format': 'tiff',
+                    'f' : 'image',
+                    'imageSR': 27700,
+                    "noData": -9999
+                }
+                tile_param = '&'.join([f"{k}={v}" for k, v in params.items()])
+                url = f"{self.base_url}/exportImage?{tile_param}"
+                tile_hash = hashlib.md5(url.encode()).hexdigest()
+                tile_urls.append((url, tile_hash))
+
+        return tile_urls
+
+    def download_image(self, polygon, target_resolution):
+        tile_urls = self.get_tile_urls(polygon, target_resolution)
+        downloaded_files = asyncio.run(self.fetch_tiles(tile_urls))
+        
+        # Create a rioxarray multi-file dataset
+        image = xr.open_mfdataset(downloaded_files, chunks={"x": self.chunk_size, "y": self.chunk_size}, engine="rasterio")
+
+        # Tidy up the image to just return an array
+        image = image.squeeze()
+        # Drop the band coordinate
+        image = image.drop("band")
+
+        # Get the array
+        image_array = image.band_data
+
+        # Name the image using the image server name from the url
+        image_array = image_array.rename(self.base_url.split("/")[-2])
+        
+        # Add the image as an property of the class
+        self.image = image_array
+
+
+        # Return a copy
+        return self.image.copy()
+    
+    def clear_cache(self):
+        for file in os.listdir(self.cache_folder):
+            os.remove(os.path.join(self.cache_folder, file))
+
+

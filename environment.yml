@@ -1,0 +1,24 @@
+name: bats
+
+channels:
+  - conda-forge
+  - defaults
+  - esri
+
+dependencies:
+  - python=3.11
+  - dask
+  - xarray
+  - rioxarray
+  - geopandas
+  - numpy
+  - pandas
+  - elapid
+  - pytest
+  - aiohttp
+  - tqdm
+  - earthengine-api
+  - geemap
+  - pip: 
+    - pyhere
+    - nest-asyncio
