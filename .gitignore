@@ -163,3 +163,10 @@ cython_debug/
 # Big Files
 data/raw/big-files/*
 test/data/test_cache/*
+
+
+# MLFLOW
+mlruns/*
+data/processed/os-feature-cover-100m.tif
+*.tif.aux.xml
+data/processed/dsm-10m.tif

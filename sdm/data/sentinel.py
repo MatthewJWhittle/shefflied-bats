@@ -118,3 +118,13 @@ class Sentinel2CloudMasker:
 # end_date = '2020-06-02'
 # masker = Sentinel2CloudMasker(aoi, start_date, end_date)
 # cloud_masked_image = masker.get_cloud_masked_image()
+
+import xarray as xr
+def load_sentinel(dir ='data/raw/big-files/sentinel-2'):
+    # Load the multi file dataset
+    sentinel_2 = xr.open_mfdataset(dir + "/*", combine='by_coords')
+    # Set the band names correctly
+    band_names = list(sentinel_2.band_data.attrs['long_name'])
+    sentinel_2 = sentinel_2.band_data.to_dataset(dim='band').rename({i + 1: "s2_" + band_names[i] for i in range(12)})
+    
+    return sentinel_2

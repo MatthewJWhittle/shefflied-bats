@@ -7,6 +7,8 @@ import xarray as xr
 import rioxarray as rxr
 from tqdm.asyncio import tqdm
 
+from sdm import data
+
 # A functino to download a layer from an esri feature service and use a query to filter the data for certain features
 def download_feature_layer(url, query="1=1"):
     # Construct the query parameters
@@ -33,7 +35,6 @@ import os
 import hashlib
 import geopandas as gpd
 from shapely.geometry import box
-import rioxarray
 
 class ImageTileDownloader:
     def __init__(self, base_url, cache_folder="tile_cache"):
@@ -57,7 +58,7 @@ class ImageTileDownloader:
                 with open(cache_path, "wb") as f:
                     f.write(tile_data)
                 try:
-                    rioxarray.open_rasterio(cache_path)
+                    rxr.open_rasterio(cache_path)
                     success = True
                     status = response.status
                 except:
@@ -148,4 +149,74 @@ class ImageTileDownloader:
         for file in os.listdir(self.cache_folder):
             os.remove(os.path.join(self.cache_folder, file))
 
+from pathlib import Path
+import rioxarray as rxr
 
+class ClimateData:
+    def __init__(self, cache_folder="data/raw/big-files/climate_cache"):
+        self.base_url = "https://geodata.ucdavis.edu/climate/worldclim/2_1/tiles/iso/GBR_wc2.1_30s_{var}.tif"
+        self.datasets = {
+            "tmin": "Minimum temperature",
+            "tmax": "Maximum temperature",
+            "tavg": "Average temperature",
+            "prec": "Precipitation",
+            "bio": "Bioclimatic variables",
+            "wind": "Wind speed",
+            "srad": "Solar radiation",
+        }
+        self.cache_folder = Path(cache_folder)
+        self._downloaded_datasets = set()
+        self.cache_folder.mkdir(parents=True, exist_ok=True)
+
+    
+    def _url(self, variable) -> str:
+        """Get the URL for a given climate variable."""
+        return self.base_url.format(var=variable)
+    
+    def _local_path(self, variable) -> Path:
+        """Get the local cache path for a given climate variable."""
+        return self.cache_folder / f"{variable}.tif"
+    
+    def download_dataset(self, variable):
+        """Download a climate variable dataset and cache it."""
+        cache_path = self._local_path(variable)
+        if not cache_path.exists():
+            rxr.open_rasterio(self._url(variable)).rio.to_raster(cache_path)
+            self._downloaded_datasets.add(variable)
+        return cache_path
+
+    def get_dataset(self, variable, aoi:gpd.GeoDataFrame):
+        """Retrieve a dataset. If bbox is provided, the dataset is clipped to the bbox."""
+        
+        assert variable in self.datasets.keys(), f"Variable must be one of {self.datasets.keys()}"
+
+        if variable not in self._downloaded_datasets:
+            self.download_dataset(variable)
+        
+        data = rxr.open_rasterio(self._local_path(variable))
+        
+        if aoi is not None:
+            #transform the bbox to the same crs as the data
+            aoi.to_crs(data.rio.crs, inplace=True)
+
+            # Get the bounding box of the AOI
+            aoi_bbox = tuple(aoi.total_bounds)
+            # Clip the data
+            data = data.rio.clip_box(*aoi_bbox)
+
+        # Write the nodata value 
+        data.rio.write_nodata(data.attrs["_FillValue"], inplace=True)
+        
+        return data
+    
+    def _set_band_names(self, data):
+        dataset = data.to_dataset(dim="band")
+        # Get the long name attribute and use it to rename the bands
+        var_names = data.attrs["long_name"]        
+        # Tidy up the name
+        var_names = [tidy_long_name(var_name) for var_name in var_names]
+        dataset = dataset.rename(dict(zip(dataset.data_vars, var_names)))
+        return dataset
+
+def tidy_long_name(long_name):
+            return long_name.replace("wc2.1_30s_", "").replace(" ", "_").lower()

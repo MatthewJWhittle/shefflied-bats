@@ -4,6 +4,7 @@ channels:
   - conda-forge
   - defaults
   - esri
+  - apple
 
 dependencies:
   - python=3.11
@@ -19,6 +20,11 @@ dependencies:
   - tqdm
   - earthengine-api
   - geemap
+  - seaborn
+  - scikit-learn
+  - mlflow
+  - pytorch
+  - torchvision
   - pip: 
     - pyhere
     - nest-asyncio
