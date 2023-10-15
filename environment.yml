@@ -25,6 +25,7 @@ dependencies:
   - mlflow
   - pytorch
   - torchvision
+  - richdem
   - pip: 
     - pyhere
     - nest-asyncio

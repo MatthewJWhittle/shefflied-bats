@@ -124,6 +124,9 @@ class ImageTileDownloader:
         tile_urls = self.get_tile_urls(polygon, target_resolution)
         downloaded_files = asyncio.run(self.fetch_tiles(tile_urls))
 
+        # Drop any files that didn't download
+        downloaded_files = [f for f in downloaded_files if Path(f).exists() == True]
+
         # Create a rioxarray multi-file dataset
         image = xr.open_mfdataset(
             downloaded_files,

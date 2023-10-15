@@ -162,5 +162,9 @@ def reproject_to_model_raster(raster):
     # Get the model raster
     model_raster = generate_model_raster()
     # Reproject the raster to the model raster
-    raster = raster.rio.reproject_match(model_raster)
-    return raster
+    raster_projected = raster.rio.reproject_match(model_raster)
+    # Set the no data value
+    raster_projected = raster_projected.where(raster_projected != raster_projected.rio.nodata, np.nan)
+    raster_projected.rio.write_nodata(np.nan, inplace=True)
+    
+    return raster_projected
