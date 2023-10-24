@@ -25,6 +25,7 @@ dependencies:
   - mlflow
   - pytorch
   - torchvision
+  - torchgeo
   - richdem
   - pip: 
     - pyhere

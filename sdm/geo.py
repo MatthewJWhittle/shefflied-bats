@@ -168,3 +168,29 @@ def reproject_to_model_raster(raster):
     raster_projected.rio.write_nodata(np.nan, inplace=True)
     
     return raster_projected
+
+def tile_bounding_box(xmin, ymin, xmax, ymax, tile_shape, resolution):
+    width = int(tile_shape[0] * resolution)
+    height = int(tile_shape[1] * resolution)
+
+    # Calculate padding needed for x and y dimensions
+    x_padding = width - ((xmax - xmin) % width)
+    y_padding = height - ((ymax - ymin) % height)
+
+    # Update xmax and ymax to include padding
+    xmax += x_padding
+    ymax += y_padding
+
+    x_tiles = (xmax - xmin) // width
+    y_tiles = (ymax - ymin) // height
+
+    tiles = []
+    for i in range(int(y_tiles)):
+        for j in range(int(x_tiles)):
+            tile_xmin = xmin + j * width
+            tile_xmax = tile_xmin + width
+            tile_ymin = ymin + i * height
+            tile_ymax = tile_ymin + height
+            tiles.append((tile_xmin, tile_ymin, tile_xmax, tile_ymax))
+
+    return tiles
