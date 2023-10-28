@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from scipy import spatial
 from sdm.geo import tile_bounding_box
 import pandas as pd
 import torch
@@ -7,7 +8,7 @@ import numpy as np
 import rioxarray as rxr
 import torch.nn.functional as F
 from torchvision.transforms import v2
-
+import json
 # import vision tensors
 from torchvision.tv_tensors import Image, Mask
 import xarray as xr
@@ -48,8 +49,6 @@ class S2Dataset(Dataset):
         ), "Band norm values must be the same length as the number of input bands"
         self.band_norm_values = torch.tensor(band_norm_values, dtype=torch.float32)
 
-        # Initialise spatial info dict
-        self.spatial_info = {}
 
     def _load_bboxs(self):
         """Load the bounding box csv. These are all the bboxes that don't contain NA values."""
@@ -84,8 +83,7 @@ class S2Dataset(Dataset):
         target_tensor, target_padding = self._pad_tensor(target_tensor, self.image_size)
 
         # Collect spatial information
-        self._collect_spatial_info(
-            idx,
+        spatial_info = self._collect_spatial_info(
             bbox=bbox,
             rio_transform=input_tile.rio.transform(),
             coords=input_tile.coords,
@@ -100,20 +98,27 @@ class S2Dataset(Dataset):
         if self.transforms:
             input_tensor, target_tensor = self.transforms(input_tensor, target_tensor)
 
-        return input_tensor, target_tensor, torch.LongTensor([idx])
+        return input_tensor, target_tensor, spatial_info
 
     def _collect_spatial_info(
-        self, idx, bbox, rio_transform, coords, padding: tuple
-    ) -> None:
+        self, bbox, rio_transform, coords, padding: tuple
+    ) -> str:
         """Collect the spatial information needed to convert the model output back to a raster."""
 
-        self.spatial_info[idx] = {
+        spatial_info_dict = {
             "bbox": bbox,
             "transform": rio_transform,
             "padding": padding,
-            "crs": self.crs,
-            "coords": coords,
+            "crs": self.crs.to_epsg(),
+            "coords": {
+                "x": coords["x"].values.tolist(),
+                "y": coords["y"].values.tolist(),
+            },
         }
+
+        spatial_info_json = json.dumps(spatial_info_dict)
+
+        return spatial_info_json
 
     def _pad_tensor(self, tensor, target_shape):
         """Pad tensor to the target shape."""

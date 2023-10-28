@@ -3,7 +3,7 @@ from sdm.models import S2Dataset, SpatialTransformer
 import numpy as np
 import torch
 import xarray as xr
-
+import json
 @pytest.fixture
 def dataset():
     train_dataset = S2Dataset()
@@ -17,7 +17,7 @@ def test_dataset(dataset):
         item = dataset[i]
         assert item[0].shape == (7, dataset.image_size[0], dataset.image_size[1])
         assert item[1].shape == (dataset.image_size[0], dataset.image_size[1])
-        assert item[2].shape == (1,)
+        assert isinstance(item[0], str)
 
 
 def test_dataset_normalisation(dataset):
@@ -41,16 +41,19 @@ def test_spatial_info(dataset):
     # Take a random sample from the dataset
     i = 43
     item = dataset[i]
+    transform = json.loads(item[2])
     # Check that the spatial information is collected correctly
-    assert dataset.spatial_info[i]["bbox"] == dataset.bbox_tile_list[i]
-    assert dataset.spatial_info[i]["crs"] == dataset.crs
+    assert transform["bbox"] == list(dataset.bbox_tile_list[i])
+    assert transform["crs"] == dataset.crs
 
 
 def test_spatial_transformer(dataset):
     i = 43
     item = dataset[i]
+    transform_str = item[2]
+    transform = json.loads(transform_str)
     # Create a spatial transformer
-    transformer = SpatialTransformer(**dataset.spatial_info[i])
+    transformer = SpatialTransformer(**transform)
     # Create a fake prediction based upon the height and width of the input tensor
     prediction = torch.rand(item[0].shape[-2], item[0].shape[-1])
     # Transform the prediction
