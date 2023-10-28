@@ -2,15 +2,17 @@ name: bats
 
 channels:
   - conda-forge
+  - pytorch
   - defaults
-  - esri
   - apple
 
 dependencies:
   - python=3.11
   - dask
+  - ipykernel
   - xarray
   - rioxarray
+  - rasterio
   - geopandas
   - numpy
   - pandas
@@ -23,9 +25,8 @@ dependencies:
   - seaborn
   - scikit-learn
   - mlflow
-  - pytorch
-  - torchvision
-  - torchgeo
+  - pytorch=2.1
+  - torchvision=0.16
   - richdem
   - pip: 
     - pyhere
