@@ -28,6 +28,9 @@ dependencies:
   - pytorch=2.1
   - torchvision=0.16
   - richdem
+  - openpyxl
+  - pyarrow
   - pip: 
     - pyhere
     - nest-asyncio
+    - os-grid-reference
