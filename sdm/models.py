@@ -204,7 +204,7 @@ class S2DatasetInference(Dataset):
         if self.transforms:
             input_tensor, na_mask_tensor = self.transforms(input_tensor, na_mask_tensor)
 
-        return input_tensor, na_mask_tensor, spatial_info
+        return {"inputs" : input_tensor, "na_mask" : na_mask_tensor, "spatial_info" : spatial_info}
 
     def _collect_spatial_info(
         self, bbox, rio_transform, coords, padding: tuple

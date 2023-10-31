@@ -30,6 +30,8 @@ dependencies:
   - richdem
   - openpyxl
   - pyarrow
+  - python-igraph
+  - plotly
   - pip: 
     - pyhere
     - nest-asyncio

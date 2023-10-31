@@ -164,8 +164,13 @@ def reproject_to_model_raster(raster):
     # Reproject the raster to the model raster
     raster_projected = raster.rio.reproject_match(model_raster)
     # Set the no data value
-    raster_projected = raster_projected.where(raster_projected != raster_projected.rio.nodata, np.nan)
-    raster_projected.rio.write_nodata(np.nan, inplace=True)
+    if isinstance(raster, xr.DataArray):
+        raster_projected = raster_projected.where(raster_projected != raster.rio.nodata, np.nan)
+        raster_projected.rio.write_nodata(np.nan, inplace=True)
+    else:
+        for var in raster.data_vars:
+            raster_projected[var] = raster_projected[var].where(raster_projected[var] != raster_projected[var].rio.nodata, np.nan)
+            raster_projected[var].rio.write_nodata(np.nan, inplace=True)
     
     return raster_projected
 
