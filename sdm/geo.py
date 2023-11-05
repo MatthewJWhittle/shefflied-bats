@@ -121,6 +121,7 @@ def load_boundary():
     return boundary
 
 import xarray as xr
+import rioxarray as rxr
 def generate_model_raster():
     # Generate an empty xarray raster using a 7km buffer around the boundary as the bounding box
     # And a resolution of 100m. This will be used to tranform other rasters using reproject match

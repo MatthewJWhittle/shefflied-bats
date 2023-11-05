@@ -32,6 +32,7 @@ dependencies:
   - pyarrow
   - python-igraph
   - plotly
+  - pygeos
   - pip: 
     - pyhere
     - nest-asyncio
