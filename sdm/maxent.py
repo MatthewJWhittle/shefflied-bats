@@ -134,3 +134,19 @@ def filter_gdf_to_grid(gdf, grid, tolerance=50):
     # Clean up the column names
     gdf_grid.drop(columns=["index_right", "distance"], inplace=True)
     return gdf_grid
+
+
+
+from sklearn.base import clone
+
+def eval_train_model(occurrence, model):
+    cv_models, cv_scores = cv_maxent(
+        model = clone(model),
+        occurrence = occurrence
+    )
+        # Train a model on all the data
+    full_model = train_maxent(
+        model=clone(model),
+        occurrence=occurrence,
+    )
+    return full_model, cv_models, cv_scores
