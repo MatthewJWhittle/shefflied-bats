@@ -1,3 +1,4 @@
+from re import T
 import matplotlib.pyplot as plt
 from pyparsing import restOfLine
 from scipy import spatial
@@ -28,7 +29,8 @@ class S2Dataset(Dataset):
 
         # Band Names and Indexes
         self.input_bands = [1, 2, 3, 4, 5, 6, 7]
-        self.target_band = self.input_bands[-1] + 1
+        # Use the is veg band, skip the veg height
+        self.target_band = 9
 
         # Grab the relevant bands
         self.input_data = self.data.sel(band=self.input_bands)  # type: ignore
@@ -134,7 +136,7 @@ class S2Dataset(Dataset):
 
 
 class S2DatasetInference(Dataset):
-    def __init__(self, path, image_size = (512, 512), transforms=None):
+    def __init__(self, path, image_size = (256, 256), transforms=None):
         self.path = path
         self.image_size = image_size
         self.transforms = transforms
@@ -146,7 +148,6 @@ class S2DatasetInference(Dataset):
 
         # Band Names and Indexes
         self.input_bands = [1, 2, 3, 4, 5, 6, 7]
-        self.target_band = self.input_bands[-1] + 1
 
         # Grab the relevant bands
         self.input_data = self.data.sel(band=self.input_bands)
@@ -307,7 +308,7 @@ import torch.nn.functional as F
 ## Models
 # Define the CNN model
 # TODO: Add dropout
-class VegHeightCNN(nn.Module):
+class VegCNN(nn.Module):
     """
     Vegetation Height Prediction CNN
 
@@ -320,7 +321,7 @@ class VegHeightCNN(nn.Module):
         tile_size (int): Size of the input tile. Defaults to 304.
     """
     def __init__(self, in_channels, tile_size=304, p_dropout=0.5):
-        super(VegHeightCNN, self).__init__()
+        super(VegCNN, self).__init__()
         self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm2d(32)
         # dropout
@@ -358,4 +359,4 @@ class VegHeightCNN(nn.Module):
         
         x = x + gate_values * original_x_matched  # element-wise multiplication followed by addition
 
-        return x.squeeze(1)
+        return torch.sigmoid(x).squeeze(1)

@@ -17,7 +17,7 @@ def test_dataset(dataset):
         item = dataset[i]
         assert item[0].shape == (7, dataset.image_size[0], dataset.image_size[1])
         assert item[1].shape == (dataset.image_size[0], dataset.image_size[1])
-        assert isinstance(item[0], str)
+        assert isinstance(item[2], str)
 
 
 def test_dataset_normalisation(dataset):
