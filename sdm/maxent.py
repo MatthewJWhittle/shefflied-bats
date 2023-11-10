@@ -150,3 +150,18 @@ def eval_train_model(occurrence, model):
         occurrence=occurrence,
     )
     return full_model, cv_models, cv_scores
+
+# Impliment a custom scaler that adds a small epsilon to the data to avoid zero values
+from sklearn.base import TransformerMixin
+from sklearn.preprocessing import FunctionTransformer
+
+
+def add_epsilon(X, epsilon=1e-5):
+    X = X.copy()
+    X += epsilon
+    return X
+
+class ZeroDivScaler(FunctionTransformer):
+    def __init__(self, epsilon=1e-5):
+        self.epsilon = epsilon
+        super().__init__(func=add_epsilon, kw_args={"epsilon": epsilon})
