@@ -22,14 +22,14 @@ def prepare_occurence_data(
     drop_na: bool = True,
     sample_weight_n_neighbors: int = 5,
 ):
-    presence_gdf = presence_gdf.copy()
-    background_gdf = background_gdf.copy()
+    presence_gdf = presence_gdf.copy() # type: ignore
+    background_gdf = background_gdf.copy() # type: ignore
     # Filter to the grid
     presence_gdf = filter_gdf_to_grid(presence_gdf, grid_gdf)
 
     # Keep only the geometry
-    presence_gdf = presence_gdf[input_vars + ["geometry"]]
-    background_gdf = background_gdf[input_vars + ["geometry"]]
+    presence_gdf = presence_gdf[input_vars + ["geometry"]] # type: ignore
+    background_gdf = background_gdf[input_vars + ["geometry"]] # type: ignore
 
     # Drop Missing Values
     if drop_na:
@@ -64,7 +64,7 @@ def filter_bats(gdf, genus=None, latin_name=None, activity_type=None):
     return gdf
 
 
-def extract_split(gdf: gpd.GeoDataFrame, idx: np.array) -> tuple:
+def extract_split(gdf: gpd.GeoDataFrame, idx: np.ndarray) -> tuple:
     split_gdf = gdf.iloc[idx].copy()
     # Extract the training data
     X = split_gdf.drop(columns=["class", "sample_weight", "geometry"])
