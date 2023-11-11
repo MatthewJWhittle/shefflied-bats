@@ -1,2 +1,4 @@
 *
 !.gitignore
+
+!data/evs/ev_clusters_selected.csv
