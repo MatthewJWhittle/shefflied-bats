@@ -171,3 +171,4 @@ data/processed/os-feature-cover-100m.tif
 *.tif.aux.xml
 data/processed/dsm-10m.tif
 data/sdm_predictions/temp/test.tif
+models/is-veg-cnn.pth
