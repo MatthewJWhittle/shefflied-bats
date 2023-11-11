@@ -26,6 +26,15 @@ def prepare_occurence_data(
     background_gdf = background_gdf.copy() # type: ignore
     # Filter to the grid
     presence_gdf = filter_gdf_to_grid(presence_gdf, grid_gdf)
+    background_gdf = filter_gdf_to_grid(background_gdf, grid_gdf)
+
+    # Drop any background points with the same grid index as a presence point
+    presence_grid_idx = presence_gdf["grid_index"].unique()
+    background_gdf = background_gdf[~background_gdf["grid_index"].isin(presence_grid_idx)]
+
+    # Drop the grid index column
+    presence_gdf.drop(columns=["grid_index"], inplace=True)
+    background_gdf.drop(columns=["grid_index"], inplace=True)
 
     # Keep only the geometry
     presence_gdf = presence_gdf[input_vars + ["geometry"]] # type: ignore
@@ -131,8 +140,10 @@ def filter_gdf_to_grid(gdf, grid, tolerance=50):
     )
     # Drop the duplicate records
     gdf_grid.drop_duplicates(subset="index_right", inplace=True)
+    # Rename to grid index 
+    gdf_grid.rename(columns={"index_right": "grid_index"}, inplace=True)
     # Clean up the column names
-    gdf_grid.drop(columns=["index_right", "distance"], inplace=True)
+    gdf_grid.drop(columns=["distance"], inplace=True)
     return gdf_grid
 
 
