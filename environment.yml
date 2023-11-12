@@ -37,3 +37,7 @@ dependencies:
     - pyhere
     - nest-asyncio
     - os-grid-reference
+    - shiny
+    - shinyswatch
+    - shinywidgets
+    - ipyleaflet
