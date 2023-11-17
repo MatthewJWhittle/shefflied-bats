@@ -27,14 +27,10 @@ css_path = Path(__file__).parent / "www" / "styles.css"
 results_df = pd.read_csv("data/sdm_predictions/results.csv")
 
 
-
-
 training_data_gdf = gpd.read_parquet(
     "data/sdm_predictions/training-occurrence-data.parquet"
 )  # type: gpd.GeoDataFrame
 training_data_gdf = training_data_gdf.to_crs(4326)
-
-
 
 
 def load_ev_df() -> pd.DataFrame:
@@ -48,11 +44,18 @@ def load_ev_df() -> pd.DataFrame:
 
     return ev_df
 
+
 def load_partial_dependence_data() -> pd.DataFrame:
     return pd.read_csv("data/sdm_predictions/partial-dependence-data.csv")
 
+
 partial_dependence_df = load_partial_dependence_data()
-dependence_range = partial_dependence_df.groupby(["latin_name", "activity_type", "feature"]).apply(lambda x: x.max() - x.min()).reset_index()
+dependence_range = (
+    partial_dependence_df.groupby(["latin_name", "activity_type", "feature"])["average"]
+    .apply(lambda x: x.max() - x.min())
+    .reset_index()
+)
+
 
 feature_names = load_ev_df().columns.tolist()
 
@@ -68,8 +71,6 @@ def get_layer(m, name):
     for layer in m.layers:
         if layer.name == name:
             return layer
-        
-
 
 
 def load_south_yorkshire():
@@ -95,44 +96,70 @@ app_ui = ui.page_fluid(
     shinyswatch.theme.minty(),
     ui.page_navbar(
         ui.nav(
-            "Results",
+            "Map",
+            output_widget("map"),
+            ui.panel_absolute(
+                ui.tags.h3("Select a Model"),
+                ui.input_selectize(
+                    id="species",
+                    label="",
+                    choices=results_df["latin_name"].unique().tolist(),
+                ),
+                ui.input_selectize(
+                    id="activity_type",
+                    label="",
+                    choices=results_df["activity_type"].unique().tolist(),
+                ),
+                ui.input_selectize(
+                    id = "map_ev",
+                    label = "",
+                    choices = feature_names,
+                ),
+                ui.div(
+                    ui.output_ui("model_description"),
+                    class_="model-description-container",
+                ),
+                class_="model-selection-container",
+            ),
+        ),
+        ui.nav(
+            "Model Inspection",
             ui.layout_sidebar(
                 ui.panel_sidebar(
-                    ui.tags.h3("Select a Model"),
                     ui.input_selectize(
-                        id="species",
+                        id="species_mi",
                         label="",
                         choices=results_df["latin_name"].unique().tolist(),
                     ),
                     ui.input_selectize(
-                        id="activity_type",
+                        id="activity_type_mi",
                         label="",
                         choices=results_df["activity_type"].unique().tolist(),
                     ),
                     ui.div(
-                        ui.output_ui("model_description"),
-                        class_="model-description-container",
-                    ),
-                    ui.div(
-                        ui.tags.h3("Partial Dependence"),
-                        ui.input_selectize(
-                            id="feature",
-                            label="Select a Feature",
-                            choices=feature_names,
-                        ),
-                        ui.output_plot("partial_dependence_plot"),
-                        class_="partial-dependence-container",
-                    ),
-                    width=3,
+                        ui.output_data_frame("dependence_summary_table"),
+                        class_="dependence-summary-table-container",
+                    )
                 ),
                 ui.panel_main(
-                    output_widget("map"),
-                    width=9,
+                    ui.row(
+                        ui.div(
+                            ui.input_selectize(
+                                id="feature_mi",
+                                label="",
+                                choices=feature_names,
+                            ),
+                        ),
+                        ui.row(
+                            ui.output_plot("partial_dependence_plot"),
+                            class_="partial-dependence-plot-container",
+                        ),
+                    )
                 ),
             ),
         ),
         ui.nav(
-            "Tables",
+            "Model Summary",
             ui.column(
                 8,  # Width
                 ui.tags.h3("Models"),
@@ -153,37 +180,47 @@ def server(input, output, session):
             (results_df["latin_name"] == input.species())
             & (results_df["activity_type"] == input.activity_type())
         ]
-    
-    @reactive.Calc
-    def selected_model():
-        model = selected_results()["final_model"].values[0]
-        return model
-    
+
+
     @reactive.Calc
     def ev_df() -> pd.DataFrame:
         return load_ev_df()
-    
+
     @reactive.Calc
     def feature_names() -> list[str]:
         return ev_df().columns.tolist()
-    
+
     @reactive.Calc
     def partial_dependence_range() -> pd.DataFrame:
-        return dependence_range[(dependence_range.latin_name == input.species()) & (dependence_range.activity_type == input.activity_type())].copy()
+        return dependence_range[
+            (dependence_range.latin_name == input.species_mi())
+            & (dependence_range.activity_type == input.activity_type_mi())
+        ].copy()
+    
+    @output
+    @render.data_frame()
+    def dependence_summary_table():
+        pd_df = partial_dependence_range()
+        pd_df["average"] = pd_df["average"].round(3)
+        pd_df = pd_df[["feature", "average"]].sort_values("average", ascending=False)
+        pd_df.rename(columns={"feature": "Feature", "average": "Influence Range"}, inplace=True)
+        return pd_df
 
     @reactive.Calc
     def partial_dependence_df_model():
-        return partial_dependence_df[(partial_dependence_df.latin_name == input.species()) & (partial_dependence_df.activity_type == input.activity_type())].copy()
-    
+        return partial_dependence_df[
+            (partial_dependence_df.latin_name == input.species_mi())
+            & (partial_dependence_df.activity_type == input.activity_type_mi())
+        ].copy()
+
     @output
     @render.plot
     def partial_dependence_plot():
         pd_df = partial_dependence_df_model()
-        pd_df = pd_df[pd_df["feature"] == input.feature()]
-        return pd_df.plot(x="values", y="average", title=f"Partial Dependence for {input.feature()}")
-    
-
-    
+        pd_df = pd_df[pd_df["feature"] == input.feature_mi()]
+        return pd_df.plot(
+            x="values", y="average"
+        )
 
     @output
     @render.ui()
@@ -225,6 +262,7 @@ def server(input, output, session):
         gdf = gdf[["geometry"]]
         return gdf
 
+
     @reactive.Calc
     def map_base():
         m = Map(width="100%", height="100%", zoom=18)
@@ -235,7 +273,7 @@ def server(input, output, session):
 
         m.add_layer(imagery)
 
-        m.add_control(LayersControl(position="topright"))
+        m.add_control(LayersControl(position="bottomleft"))
 
         sy_geo = GeoData(
             geo_dataframe=south_yorkshire,
@@ -264,7 +302,7 @@ def server(input, output, session):
 
         client = TileClient(filename=predictions_path())
         tile_layer = get_leaflet_tile_layer(
-            client, cmap="viridis", name="HSM Predictions", opacity=0.6
+            client, cmap="viridis", name="HSM Predictions", opacity=0.6, vmin = 0, vmax = 1
         )
 
         if layer_exists(m, "HSM Predictions"):
@@ -275,11 +313,18 @@ def server(input, output, session):
 
         # Check if the training data layer is already added
 
-        geo_data = GeoData(geo_dataframe=map_points(), name="Training Data", visible=False)
+        geo_data = GeoData(
+            geo_dataframe=map_points(), name="Training Data", visible=False
+        )
         if layer_exists(m, "Training Data"):
             old_layer = get_layer(m, "Training Data")
             m.remove_layer(old_layer)
         m.add_layer(geo_data)
+
+
+        # set the layer to not be visible by deafult
+        geo_data.visible = False
+
 
         return m
 
