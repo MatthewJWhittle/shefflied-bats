@@ -36,18 +36,6 @@ def prepare_occurence_data(
     presence_gdf.drop(columns=["grid_index"], inplace=True)
     background_gdf.drop(columns=["grid_index"], inplace=True)
 
-    # Sample the background points to be proportional to the number of presence points by 10x
-    min_background = 5000
-    max_background = 10000
-    
-    # Scale the number of background points to be proportional to the number of presence points
-    n_presence = len(presence_gdf)
-    n_background = np.clip(n_presence * 10, min_background, max_background)
-
-    background_gdf = background_gdf.sample(
-        n=n_background, replace=True, random_state=42
-    )
-
     # Keep only the geometry
     presence_gdf = presence_gdf[input_vars + ["geometry"]] # type: ignore
     background_gdf = background_gdf[input_vars + ["geometry"]] # type: ignore
