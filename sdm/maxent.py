@@ -28,9 +28,6 @@ def prepare_occurence_data(
     presence_gdf = filter_gdf_to_grid(presence_gdf, grid_gdf)
     background_gdf = filter_gdf_to_grid(background_gdf, grid_gdf)
 
-    # Drop any background points with the same grid index as a presence point
-    presence_grid_idx = presence_gdf["grid_index"].unique()
-    background_gdf = background_gdf[~background_gdf["grid_index"].isin(presence_grid_idx)]
 
     # Drop the grid index column
     presence_gdf.drop(columns=["grid_index"], inplace=True)
@@ -45,18 +42,13 @@ def prepare_occurence_data(
         presence_gdf.dropna(inplace=True)
         background_gdf.dropna(inplace=True)
 
-    # Calculate sample weights
-    presence_gdf["sample_weight"] = distance_weights(
-        presence_gdf, n_neighbors=sample_weight_n_neighbors
-    )
-    background_gdf["sample_weight"] = distance_weights(
-        background_gdf, n_neighbors=sample_weight_n_neighbors
-    )
-
     occurrence = ela.stack_geodataframes(
         presence_gdf,
         background_gdf,
         add_class_label=True,
+    )
+    occurrence["sample_weight"] = distance_weights(
+        occurrence, n_neighbors=sample_weight_n_neighbors
     )
 
     return occurrence
@@ -176,3 +168,4 @@ class ZeroDivScaler(FunctionTransformer):
     def __init__(self, epsilon=1e-5):
         self.epsilon = epsilon
         super().__init__(func=add_epsilon, kw_args={"epsilon": epsilon})
+

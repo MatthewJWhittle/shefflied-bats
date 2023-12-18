@@ -115,6 +115,7 @@ def generate_point_grid(bbox, resolution, crs) -> gpd.GeoDataFrame:
 
     return grid
 
+
 def load_boundary():
     # Load the boundary
     boundary = gpd.read_file("data/processed/boundary.geojson")
@@ -156,6 +157,17 @@ def generate_model_raster():
     da.rio.write_crs(crs, inplace=True)
     da.rio.set_spatial_dims(x_dim='x', y_dim='y', inplace=True)
     return da
+
+
+def model_point_grid():
+    model_raster = generate_model_raster()
+    # Cooridinates represent the center of each pixel
+    grid_df = model_raster.to_dataframe(name = "random").reset_index()
+    grid_points = gpd.GeoDataFrame(grid_df, geometry = gpd.points_from_xy(grid_df.x, grid_df.y), crs = 27700)
+    # Only keep the geometry column
+    grid_points = grid_points[["geometry"]]
+    return grid_points
+
 
 def reproject_to_model_raster(raster):
     # Reprojects a raster to the model raster
