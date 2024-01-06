@@ -19,34 +19,37 @@ from shapely.geometry import box
 from pathlib import Path
 import rioxarray as rxr
 import xarray as xr
-from sklearn.inspection import PartialDependenceDisplay, partial_dependence
 
 css_path = Path(__file__).parent / "www" / "styles.css"
 
 
-results_df = pd.read_csv("data/sdm_predictions/results.csv")
+results_df = pd.read_csv("dashboard/data/results.csv")
 
 
 training_data_gdf = gpd.read_parquet(
-    "data/sdm_predictions/training-occurrence-data.parquet"
+    "dashboard/data/training-occurrence-data.parquet"
 )  # type: gpd.GeoDataFrame
 training_data_gdf = training_data_gdf.to_crs(4326)
 
 
-def load_ev_df() -> pd.DataFrame:
-    evs = rxr.open_rasterio("data/sdm_predictions/evs.tif")
-    evs.coords["band"] = list(evs.attrs["long_name"])
-    evs = evs.to_dataset(dim="band")
+import numpy as np
+def load_predictions() -> xr.Dataset:
+    predictions = rxr.open_rasterio("dashboard/data/predictions.tif")
+    predictions.coords["band"] = list(predictions.attrs["long_name"])
+    # Set the nodata appropriately
+    nodata = -1
+    predictions = predictions.where(predictions >= 0, np.nan)
+    
+    # convert to a dataset to allow band name indexing
+    predictions = predictions.to_dataset(dim="band")
+    # Convert back to 0-1
+    predictions = predictions / 100
 
-    ev_df = evs.to_dataframe()
-    ev_df.drop("spatial_ref", axis=1, inplace=True)
-    ev_df.dropna(inplace=True)
-
-    return ev_df
+    return predictions
 
 
 def load_partial_dependence_data() -> pd.DataFrame:
-    return pd.read_csv("data/sdm_predictions/partial-dependence-data.csv")
+    return pd.read_parquet("dashboard/data/partial-dependence-data.parquet")
 
 
 partial_dependence_df = load_partial_dependence_data()
@@ -56,8 +59,7 @@ dependence_range = (
     .reset_index()
 )
 
-
-feature_names = load_ev_df().columns.tolist()
+feature_names= partial_dependence_df["feature"].unique().tolist()
 
 
 def layer_exists(m, name):
@@ -78,15 +80,9 @@ def load_south_yorkshire():
     This function loads the counties data which is a large file and filters it for those in south yorkshire
     """
     # Load the counties data
-    counties = gpd.read_file(
-        "data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson"
-    )
-    # Filter to just the counties we want
-    south_yorkshire = ["Barnsley", "Doncaster", "Rotherham", "Sheffield"]
-    counties = counties[counties["CTYUA23NM"].isin(south_yorkshire)]
-    counties = counties.to_crs(4326)
+    boundary = gpd.read_parquet("dashboard/data/boundary.parquet")
     # Return the dataframe
-    return counties
+    return boundary
 
 
 south_yorkshire = load_south_yorkshire()
@@ -109,11 +105,6 @@ app_ui = ui.page_fluid(
                     id="activity_type",
                     label="",
                     choices=results_df["activity_type"].unique().tolist(),
-                ),
-                ui.input_selectize(
-                    id = "map_ev",
-                    label = "",
-                    choices = feature_names,
                 ),
                 ui.div(
                     ui.output_ui("model_description"),
@@ -183,12 +174,9 @@ def server(input, output, session):
 
 
     @reactive.Calc
-    def ev_df() -> pd.DataFrame:
-        return load_ev_df()
-
-    @reactive.Calc
     def feature_names() -> list[str]:
-        return ev_df().columns.tolist()
+        features = partial_dependence_df["feature"].unique().tolist()
+        return features
 
     @reactive.Calc
     def partial_dependence_range() -> pd.DataFrame:
@@ -252,13 +240,12 @@ def server(input, output, session):
         return subset_gdf
 
     @reactive.Calc
-    def predictions_path():
-        return selected_results()["prediction_path"].values[0]
+    def predictions_band():
+        return selected_results()["band_name"].values[0]
 
     @reactive.Calc
     def map_points():
         gdf = selected_training_data()
-        gdf = gdf[gdf["class"] == 1]
         gdf = gdf[["geometry"]]
         return gdf
 
@@ -294,15 +281,26 @@ def server(input, output, session):
         m.fit_bounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]])
 
         return m
+    
+    @reactive.Calc
+    def prediction_bands():
+        return load_predictions().data_vars.keys()
+    
+    @reactive.Calc
+    def tile_client():
+        return TileClient(filename="dashboard/data/predictions.tif")
 
     @output
     @render_widget()
     def map() -> Map:
         m = map_base()
+        band_names = prediction_bands()
+        band_number = list(band_names).index(predictions_band())
 
-        client = TileClient(filename=predictions_path())
+        client = tile_client()
         tile_layer = get_leaflet_tile_layer(
-            client, cmap="viridis", name="HSM Predictions", opacity=0.6, vmin = 0, vmax = 1
+            client, cmap="viridis", name="HSM Predictions", opacity=0.6, vmin = 0, vmax = 100, 
+            band = band_number + 1
         )
 
         if layer_exists(m, "HSM Predictions"):
@@ -316,14 +314,15 @@ def server(input, output, session):
         geo_data = GeoData(
             geo_dataframe=map_points(), name="Training Data", visible=False
         )
+        # set the layer to not be visible by deafult
+        geo_data.visible = False
+
         if layer_exists(m, "Training Data"):
             old_layer = get_layer(m, "Training Data")
             m.remove_layer(old_layer)
         m.add_layer(geo_data)
 
 
-        # set the layer to not be visible by deafult
-        geo_data.visible = False
 
 
         return m

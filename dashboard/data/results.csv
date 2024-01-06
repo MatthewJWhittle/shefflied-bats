@@ -1,0 +1,26 @@
+,latin_name,activity_type,cv_scores,n_presence,n_background,mean_cv_score,std_cv_score,folds,band_name
+0,Pipistrellus pipistrellus,Foraging,[0.7456005  0.87633861 0.69795703],894,7546,0.773,0.075,3,Pipistrellus pipistrellus_Foraging
+1,Pipistrellus pipistrellus,Roost,[0.83785363 0.81441904 0.8475376 ],266,7546,0.833,0.014,3,Pipistrellus pipistrellus_Roost
+2,Pipistrellus pipistrellus,All,[0.85661864 0.71309215 0.81663247],1345,7546,0.795,0.06,3,Pipistrellus pipistrellus_All
+3,Pipistrellus pygmaeus,Foraging,[0.81287623 0.8346475  0.83823722],166,7546,0.829,0.011,3,Pipistrellus pygmaeus_Foraging
+4,Pipistrellus pygmaeus,Roost,[0.8455984  0.89067561 0.86729528],49,7546,0.868,0.018,3,Pipistrellus pygmaeus_Roost
+5,Pipistrellus pygmaeus,All,[0.76005134 0.77548317 0.86591313],247,7546,0.8,0.047,3,Pipistrellus pygmaeus_All
+6,Plecotus auritus,Foraging,[0.8909688  0.82640532 0.84927671],47,7546,0.856,0.027,3,Plecotus auritus_Foraging
+7,Plecotus auritus,Roost,[0.82915118 0.68309368 0.86460681],118,7546,0.792,0.079,3,Plecotus auritus_Roost
+8,Plecotus auritus,All,[0.79056155 0.71687505 0.85059469],182,7546,0.786,0.055,3,Plecotus auritus_All
+9,Myotis mystacinus,Foraging,[0.38826212 0.44785714 0.85849503],19,7546,0.565,0.209,3,Myotis mystacinus_Foraging
+10,Myotis mystacinus,Roost,[0.91674641 0.7245922  0.77929023],24,7546,0.807,0.081,3,Myotis mystacinus_Roost
+11,Myotis mystacinus,All,[0.55572676 0.69931062 0.88220732],73,7546,0.712,0.134,3,Myotis mystacinus_All
+12,Nyctalus noctula,Foraging,[0.81156422 0.79016855 0.80922077],134,7546,0.804,0.01,3,Nyctalus noctula_Foraging
+13,Nyctalus noctula,Roost,[0.86804553 0.69622353 0.71475875],25,7546,0.76,0.077,3,Nyctalus noctula_Roost
+14,Nyctalus noctula,All,[0.78230926 0.82391315 0.79512776],218,7546,0.8,0.017,3,Nyctalus noctula_All
+15,Myotis daubentonii,Foraging,[0.86374186 0.56902148 0.9350349 ],99,7546,0.789,0.158,3,Myotis daubentonii_Foraging
+16,Myotis daubentonii,Roost,[0.71501243 0.78368475 0.81832635],54,7546,0.772,0.043,3,Myotis daubentonii_Roost
+17,Myotis daubentonii,All,[0.86681118 0.74752457 0.83515549],188,7546,0.816,0.05,3,Myotis daubentonii_All
+18,Myotis nattereri,Foraging,[0.68093908 0.79710956 0.87617654],25,7546,0.785,0.08,3,Myotis nattereri_Foraging
+19,Myotis nattereri,Roost,[0.71723881 0.73189923 0.8236355 ],51,7546,0.758,0.047,3,Myotis nattereri_Roost
+20,Myotis nattereri,All,[0.70240285 0.85055388 0.83543867],78,7546,0.796,0.067,3,Myotis nattereri_All
+21,Nyctalus leisleri,Foraging,[0.61992893 0.72083892 0.58425656],58,7546,0.642,0.058,3,Nyctalus leisleri_Foraging
+22,Nyctalus leisleri,Roost,[0.57338735 0.89301698 0.77594039],16,7546,0.747,0.132,3,Nyctalus leisleri_Roost
+23,Nyctalus leisleri,All,[0.6957474  0.72205925 0.65180312],102,7546,0.69,0.029,3,Nyctalus leisleri_All
+24,Myotis brandtii,All,[0.42870515 0.98045977 0.91574331],15,7546,0.775,0.246,3,Myotis brandtii_All
