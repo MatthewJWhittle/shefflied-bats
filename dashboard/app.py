@@ -1,5 +1,3 @@
-import pickle
-from unittest import result
 from shiny import App, render, ui, reactive
 import shinyswatch
 from ipyleaflet import (
@@ -7,15 +5,12 @@ from ipyleaflet import (
     basemaps,
     GeoData,
     LayersControl,
-    WidgetControl,
-    TileLayer,
     basemap_to_tiles,
 )
 from localtileserver import get_leaflet_tile_layer, TileClient
 from shinywidgets import output_widget, render_widget
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import box
 from pathlib import Path
 import rioxarray as rxr
 import xarray as xr
@@ -33,13 +28,15 @@ training_data_gdf = training_data_gdf.to_crs(4326)
 
 
 import numpy as np
+
+
 def load_predictions() -> xr.Dataset:
     predictions = rxr.open_rasterio("dashboard/data/predictions.tif")
     predictions.coords["band"] = list(predictions.attrs["long_name"])
     # Set the nodata appropriately
     nodata = -1
     predictions = predictions.where(predictions >= 0, np.nan)
-    
+
     # convert to a dataset to allow band name indexing
     predictions = predictions.to_dataset(dim="band")
     # Convert back to 0-1
@@ -59,7 +56,7 @@ dependence_range = (
     .reset_index()
 )
 
-feature_names= partial_dependence_df["feature"].unique().tolist()
+feature_names = partial_dependence_df["feature"].unique().tolist()
 
 
 def layer_exists(m, name):
@@ -130,7 +127,7 @@ app_ui = ui.page_fluid(
                     ui.div(
                         ui.output_data_frame("dependence_summary_table"),
                         class_="dependence-summary-table-container",
-                    )
+                    ),
                 ),
                 ui.panel_main(
                     ui.row(
@@ -172,7 +169,6 @@ def server(input, output, session):
             & (results_df["activity_type"] == input.activity_type())
         ]
 
-
     @reactive.Calc
     def feature_names() -> list[str]:
         features = partial_dependence_df["feature"].unique().tolist()
@@ -184,14 +180,16 @@ def server(input, output, session):
             (dependence_range.latin_name == input.species_mi())
             & (dependence_range.activity_type == input.activity_type_mi())
         ].copy()
-    
+
     @output
     @render.data_frame()
     def dependence_summary_table():
         pd_df = partial_dependence_range()
         pd_df["average"] = pd_df["average"].round(3)
         pd_df = pd_df[["feature", "average"]].sort_values("average", ascending=False)
-        pd_df.rename(columns={"feature": "Feature", "average": "Influence Range"}, inplace=True)
+        pd_df.rename(
+            columns={"feature": "Feature", "average": "Influence Range"}, inplace=True
+        )
         return pd_df
 
     @reactive.Calc
@@ -206,9 +204,7 @@ def server(input, output, session):
     def partial_dependence_plot():
         pd_df = partial_dependence_df_model()
         pd_df = pd_df[pd_df["feature"] == input.feature_mi()]
-        return pd_df.plot(
-            x="values", y="average"
-        )
+        return pd_df.plot(x="values", y="average")
 
     @output
     @render.ui()
@@ -249,7 +245,6 @@ def server(input, output, session):
         gdf = gdf[["geometry"]]
         return gdf
 
-
     @reactive.Calc
     def map_base():
         m = Map(width="100%", height="100%", zoom=18)
@@ -281,11 +276,11 @@ def server(input, output, session):
         m.fit_bounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]])
 
         return m
-    
+
     @reactive.Calc
     def prediction_bands():
         return load_predictions().data_vars.keys()
-    
+
     @reactive.Calc
     def tile_client():
         return TileClient(filename="dashboard/data/predictions.tif")
@@ -299,8 +294,13 @@ def server(input, output, session):
 
         client = tile_client()
         tile_layer = get_leaflet_tile_layer(
-            client, cmap="viridis", name="HSM Predictions", opacity=0.6, vmin = 0, vmax = 100, 
-            band = band_number + 1
+            client,
+            cmap="viridis",
+            name="HSM Predictions",
+            opacity=0.6,
+            vmin=0,
+            vmax=100,
+            band=band_number + 1,
         )
 
         if layer_exists(m, "HSM Predictions"):
@@ -321,9 +321,6 @@ def server(input, output, session):
             old_layer = get_layer(m, "Training Data")
             m.remove_layer(old_layer)
         m.add_layer(geo_data)
-
-
-
 
         return m
 
