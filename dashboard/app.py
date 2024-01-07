@@ -6,15 +6,16 @@ from ipyleaflet import (
     GeoData,
     LayersControl,
     basemap_to_tiles,
+    Popup,
 )
 from localtileserver import get_leaflet_tile_layer, TileClient
-from shinywidgets import output_widget, render_widget
+from shinywidgets import output_widget, register_widget, render_widget
 import geopandas as gpd
 import pandas as pd
 from pathlib import Path
 import rioxarray as rxr
 import xarray as xr
-
+from map import record_popup, generate_basemap
 css_path = Path(__file__).parent / "www" / "styles.css"
 
 
@@ -22,13 +23,20 @@ results_df = pd.read_csv("dashboard/data/results.csv")
 
 
 training_data_gdf = gpd.read_parquet(
-    "dashboard/data/training-occurrence-data.parquet"
+    "dashboard/data/bat-records.parquet"
 )  # type: gpd.GeoDataFrame
 training_data_gdf = training_data_gdf.to_crs(4326)
 
 
 import numpy as np
 
+def generate_popup(feature, **kwargs):
+    print("Generating popup")
+    print(f"Feature: {feature}")
+    popup = Popup(
+        location=feature["geometry"]["coordinates"],
+        child=record_popup(feature["properties"]),
+    )
 
 def load_predictions() -> xr.Dataset:
     predictions = rxr.open_rasterio("dashboard/data/predictions.tif")
@@ -49,12 +57,24 @@ def load_partial_dependence_data() -> pd.DataFrame:
     return pd.read_parquet("dashboard/data/partial-dependence-data.parquet")
 
 
+
+def calculate_dependence_range(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    This function calculates the range of values for each feature
+    """
+    # Group by the latin name, activity type and feature
+    df = (
+        df.groupby(["latin_name", "activity_type", "feature"])["average"]
+        .apply(lambda x: x.max() - x.min())
+        .reset_index()
+    )
+    # Return the dataframe
+    return df
+
+
 partial_dependence_df = load_partial_dependence_data()
-dependence_range = (
-    partial_dependence_df.groupby(["latin_name", "activity_type", "feature"])["average"]
-    .apply(lambda x: x.max() - x.min())
-    .reset_index()
-)
+
+dependence_range = calculate_dependence_range(partial_dependence_df)
 
 feature_names = partial_dependence_df["feature"].unique().tolist()
 
@@ -229,10 +249,17 @@ def server(input, output, session):
 
     @reactive.Calc
     def selected_training_data() -> gpd.GeoDataFrame:
+        activity_type = input.activity_type()
+        latin_name = input.species()
+        
         subset_gdf = training_data_gdf[
-            (training_data_gdf["latin_name"] == input.species())
-            & (training_data_gdf["activity_type"] == input.activity_type())
+            (training_data_gdf["latin_name"] == latin_name)
         ]
+        # Only filter by activity type is 'All' isn't selected
+        if activity_type != "All":
+            subset_gdf = subset_gdf[
+                (subset_gdf["activity_type"] == activity_type)
+            ]
         return subset_gdf
 
     @reactive.Calc
@@ -242,40 +269,14 @@ def server(input, output, session):
     @reactive.Calc
     def map_points():
         gdf = selected_training_data()
-        gdf = gdf[["geometry"]]
+
+        #gdf = gdf[["geometry"]]
         return gdf
 
-    @reactive.Calc
-    def map_base():
-        m = Map(width="100%", height="100%", zoom=18)
-
-        imagery = basemap_to_tiles(basemaps.Esri.WorldImagery)
-        imagery.base = True
-        imagery.name = "Imagery"
-
-        m.add_layer(imagery)
-
-        m.add_control(LayersControl(position="bottomleft"))
-
-        sy_geo = GeoData(
-            geo_dataframe=south_yorkshire,
-            name="South Yorkshire Boundary",
-            style={
-                "color": "pink",
-                "fillColor": "pink",
-                "opacity": 0.6,
-                "weight": 1.9,
-                "dashArray": "2",
-                "fillOpacity": 0,
-            },
-        )
-        m.add_layer(sy_geo)
-
-        bbox = south_yorkshire.total_bounds
-
-        m.fit_bounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]])
-
-        return m
+    ## Map ----------------------------------------------------------------------
+    base_map = generate_basemap(south_yorkshire)
+    register_widget("map", base_map)
+    
 
     @reactive.Calc
     def prediction_bands():
@@ -288,7 +289,6 @@ def server(input, output, session):
     @output
     @render_widget()
     def map() -> Map:
-        m = map_base()
         band_names = prediction_bands()
         band_number = list(band_names).index(predictions_band())
 
@@ -303,27 +303,35 @@ def server(input, output, session):
             band=band_number + 1,
         )
 
-        if layer_exists(m, "HSM Predictions"):
-            old_layer = get_layer(m, "HSM Predictions")
-            m.remove_layer(old_layer)
+        if layer_exists(base_map, "HSM Predictions"):
+            old_layer = get_layer(base_map, "HSM Predictions")
+            base_map.remove_layer(old_layer)
 
-        m.add_layer(tile_layer)
+        base_map.add_layer(tile_layer)
 
         # Check if the training data layer is already added
 
         geo_data = GeoData(
-            geo_dataframe=map_points(), name="Training Data", visible=False
+            geo_dataframe=map_points(), 
+            name="Training Data", 
+            visible=False,
+            style={'color': 'black', 'radius':6, 'fillColor': '#F96E46', 'opacity':0.5, 'weight':1.3,  'fillOpacity':0.6},
+            hover_style={'fillColor': '#00E8FC' , 'fillOpacity': 0.2},
+            point_style={'radius': 5, 'color': '#00E8FC', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
         )
+        geo_data.on_click(generate_popup)
         # set the layer to not be visible by deafult
         geo_data.visible = False
 
-        if layer_exists(m, "Training Data"):
-            old_layer = get_layer(m, "Training Data")
-            m.remove_layer(old_layer)
-        m.add_layer(geo_data)
+        if layer_exists(base_map, "Training Data"):
+            old_layer = get_layer(base_map, "Training Data")
+            base_map.remove_layer(old_layer)
+        base_map.add_layer(geo_data)
 
-        return m
+        return base_map
+    
 
+    # Model Summary --------------------------------------------------------------
     @output
     @render.data_frame()
     def models_table():

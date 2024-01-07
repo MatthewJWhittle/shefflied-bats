@@ -1,4 +1,5 @@
 from pathlib import Path
+from regex import B
 import rioxarray as rxr
 from sklearn.inspection import partial_dependence
 from sympy import comp
@@ -46,6 +47,9 @@ def compress_predictions(input_dir:Path, output_file:Path):
 
     predictions.rio.to_raster(output_file, compress='lzw')
 
+    bounds = predictions.rio.bounds()
+    return bounds
+
 import shutil
 import pandas as pd
 
@@ -80,6 +84,8 @@ def load_south_yorkshire():
 
 
 def compress_boundary(output_file:Path):
+    if output_file.exists():
+        return
     # Load the counties data
     counties = load_south_yorkshire()
     # Save the counties data
@@ -94,12 +100,30 @@ def compress_occurence(input_file:Path, output_file:Path):
     occurence = gpd.read_parquet(input_file)
     occurence = occurence[occurence["class"] == 1]
     occurence.to_parquet(output_file)
+import json
+def copy_bat_records(input_file:Path, output_file:Path, raster_bounds:tuple[float]):
+    bats = gpd.read_parquet(input_file) # type: gpd.GeoDataFrame
+    assert bats.crs == 27700, "The bats dataframe must be in British National Grid to allow records to be filtered by raster bounds"
+    bats = bats[bats.accuracy <= 100]
 
+    source_data = bats.source_data.apply(json.loads).apply(pd.Series)
+
+    bats_gdf_full = bats.join(source_data)
+    bats_gdf_full = bats_gdf_full[[
+        'grid_reference', 'species_raw', 'activity_type', 'source_data', 'date',
+       'latin_name', 'common_name', 'genus', 'x', 'y', 'accuracy', 
+       'Recorder', "Notes", "Evidence", "Source", "row_id", 'geometry',
+    ]]
+
+    # Drop the records that are outside the raster bounds
+    bats_gdf_full = bats_gdf_full.cx[raster_bounds[0]:raster_bounds[2], raster_bounds[1]:raster_bounds[3]]
+
+    bats_gdf_full.to_parquet(output_file)
 
 def main():
     predictions_dir = Path("data/sdm_predictions")
     predictions_output_file = Path("dashboard/data/predictions.tif")
-    compress_predictions(predictions_dir, predictions_output_file)
+    raster_bounds = compress_predictions(predictions_dir, predictions_output_file)
 
     results_file = Path("data/sdm_predictions/results.csv")
     results_output_dir = Path("dashboard/data")
@@ -118,6 +142,12 @@ def main():
     compress_occurence(
         Path("data/sdm_predictions/training-occurrence-data.parquet"),
         Path("dashboard/data/training-occurrence-data.parquet")
+    )
+
+    copy_bat_records(
+        Path("data/processed/sybg-bats.parquet"),
+        Path("dashboard/data/bat-records.parquet"),
+        raster_bounds=raster_bounds
     )
 
 
