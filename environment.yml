@@ -30,10 +30,8 @@ dependencies:
   - richdem
   - openpyxl
   - pyarrow
-  - python-igraph
-  - lonboard
   - plotly
-  - pygeos
+  - pip
   - pip: 
     - pyhere
     - nest-asyncio
@@ -42,3 +40,4 @@ dependencies:
     - shinyswatch
     - shinywidgets
     - ipyleaflet
+    - localtileserver

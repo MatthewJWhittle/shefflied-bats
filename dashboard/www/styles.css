@@ -1,5 +1,8 @@
 .jupyter-widgets.leaflet-widgets{
-    height: 85vh;
+    height: 100%;
+}
+#map{
+    height: 90vh;
 }
 
 .model-selection-container{

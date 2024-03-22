@@ -17,11 +17,12 @@ import rioxarray as rxr
 import xarray as xr
 from map import record_popup, generate_basemap
 css_path = Path(__file__).parent / "www" / "styles.css"
-
+from sdm.config import species_name_mapping
 
 results_df = pd.read_csv("dashboard/data/results.csv")
 
-
+print(results_df)
+print(results_df.latin_name.unique())
 training_data_gdf = gpd.read_parquet(
     "dashboard/data/bat-records.parquet"
 )  # type: gpd.GeoDataFrame
@@ -109,14 +110,14 @@ app_ui = ui.page_fluid(
     shinyswatch.theme.minty(),
     ui.page_navbar(
         ui.nav(
-            "Map",
+            "HSM Maps",
             output_widget("map"),
             ui.panel_absolute(
-                ui.tags.h3("Select a Model"),
+                ui.tags.h3("Select a Species"),
                 ui.input_selectize(
                     id="species",
                     label="",
-                    choices=results_df["latin_name"].unique().tolist(),
+                    choices=species_name_mapping,
                 ),
                 ui.input_selectize(
                     id="activity_type",
@@ -131,7 +132,7 @@ app_ui = ui.page_fluid(
             ),
         ),
         ui.nav(
-            "Model Inspection",
+            "Variable Inspection",
             ui.layout_sidebar(
                 ui.panel_sidebar(
                     ui.input_selectize(
@@ -238,11 +239,9 @@ def server(input, output, session):
         folds = model_result["folds"].values[0]
 
         description = f"""
-        This model has an accuracy of **{round(score_mean * 100, 1)}%** (+/- {round(score_std * 100, 1)})%. This was tested using ROC/AUC scores under {folds}-fold cross validation.
+        This model has an accuracy of **{round(score_mean * 100, 1)}%** (+/- {round(score_std * 100, 1)})%.
         
-        Presence Points: {n_presence}
-
-        Background Points: {n_background}
+        Species Records: {n_presence}
         """
 
         return ui.markdown(description)
@@ -284,7 +283,7 @@ def server(input, output, session):
 
     @reactive.Calc
     def tile_client():
-        return TileClient(filename="dashboard/data/predictions.tif")
+        return TileClient(source="dashboard/data/predictions.tif")
 
     @output
     @render_widget()
@@ -313,8 +312,7 @@ def server(input, output, session):
 
         geo_data = GeoData(
             geo_dataframe=map_points(), 
-            name="Training Data", 
-            visible=False,
+            name="Species Records", 
             style={'color': 'black', 'radius':6, 'fillColor': '#F96E46', 'opacity':0.5, 'weight':1.3,  'fillOpacity':0.6},
             hover_style={'fillColor': '#00E8FC' , 'fillOpacity': 0.2},
             point_style={'radius': 5, 'color': '#00E8FC', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
@@ -327,6 +325,7 @@ def server(input, output, session):
             old_layer = get_layer(base_map, "Training Data")
             base_map.remove_layer(old_layer)
         base_map.add_layer(geo_data)
+        
 
         return base_map
     

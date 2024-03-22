@@ -41,7 +41,7 @@ def record_popup(feature) -> str:
 from ipyleaflet import Map, basemaps, basemap_to_tiles, GeoData, LayersControl
 def generate_basemap(south_yorkshire: gpd.GeoDataFrame):
         ## Map ----------------------------------------------------------------------
-    m = Map(width="100%", height="100%", zoom=18)
+    m = Map(width="100%", height="100%", zoom=13)
     print("Init Map")
 
     imagery = basemap_to_tiles(basemaps.Esri.WorldImagery)
@@ -50,7 +50,11 @@ def generate_basemap(south_yorkshire: gpd.GeoDataFrame):
 
     m.add_layer(imagery)
 
-    m.add_control(LayersControl(position="bottomleft"))
+    bbox = south_yorkshire.total_bounds
+
+    m.fit_bounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]])
+
+    m.add_control(LayersControl(position="bottomleft", collapsed=False))
 
     sy_geo = GeoData(
         geo_dataframe=south_yorkshire,
@@ -66,10 +70,6 @@ def generate_basemap(south_yorkshire: gpd.GeoDataFrame):
 
     )
     m.add_layer(sy_geo)
-
-    bbox = south_yorkshire.total_bounds
-
-    m.fit_bounds([[bbox[1], bbox[0]], [bbox[3], bbox[2]]])
 
     return m
 
