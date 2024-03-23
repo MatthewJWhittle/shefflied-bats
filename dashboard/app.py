@@ -21,8 +21,6 @@ from sdm.config import species_name_mapping
 
 results_df = pd.read_csv("dashboard/data/results.csv")
 
-print(results_df)
-print(results_df.latin_name.unique())
 training_data_gdf = gpd.read_parquet(
     "dashboard/data/bat-records.parquet"
 )  # type: gpd.GeoDataFrame
@@ -132,7 +130,7 @@ app_ui = ui.page_fluid(
             ),
         ),
         ui.nav(
-            "Variable Inspection",
+            "Explore Variable Importance",
             ui.layout_sidebar(
                 ui.panel_sidebar(
                     ui.input_selectize(
@@ -309,7 +307,7 @@ def server(input, output, session):
         base_map.add_layer(tile_layer)
 
         # Check if the training data layer is already added
-
+        layer_name = "Species Records"
         geo_data = GeoData(
             geo_dataframe=map_points(), 
             name="Species Records", 
@@ -321,9 +319,10 @@ def server(input, output, session):
         # set the layer to not be visible by deafult
         geo_data.visible = False
 
-        if layer_exists(base_map, "Training Data"):
-            old_layer = get_layer(base_map, "Training Data")
+        if layer_exists(base_map, layer_name):
+            old_layer = get_layer(base_map, layer_name)
             base_map.remove_layer(old_layer)
+        
         base_map.add_layer(geo_data)
         
 
