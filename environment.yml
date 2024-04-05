@@ -12,7 +12,6 @@ dependencies:
   - ipykernel
   - xarray
   - rioxarray
-  - rasterio
   - geopandas
   - numpy
   - pandas
@@ -31,6 +30,7 @@ dependencies:
   - openpyxl
   - pyarrow
   - plotly
+  - rasterio
   - pip
   - pip: 
     - pyhere
@@ -41,3 +41,4 @@ dependencies:
     - shinywidgets
     - ipyleaflet
     - localtileserver
+    - google-cloud-storage

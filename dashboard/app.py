@@ -8,7 +8,7 @@ from ipyleaflet import (
     basemap_to_tiles,
     Popup,
 )
-from localtileserver import get_leaflet_tile_layer, TileClient
+from localtileserver import get_leaflet_tile_layer, TileClient, validate_cog
 from shinywidgets import output_widget, register_widget, render_widget
 import geopandas as gpd
 import pandas as pd
@@ -16,18 +16,71 @@ from pathlib import Path
 import rioxarray as rxr
 import xarray as xr
 from map import record_popup, generate_basemap
-css_path = Path(__file__).parent / "www" / "styles.css"
 from sdm.config import species_name_mapping
+from google import auth
+from google.cloud import storage
+import numpy as np
 
-results_df = pd.read_csv("dashboard/data/results.csv")
+app_dir = Path(__file__).parent
+css_path = app_dir / "www" / "styles.css"
+
+def download_data():
+    """
+    This function downloads the data from the google cloud storage
+    """
+    # Create a client
+    # Download local files
+    local_dir = f"{app_dir}/data"
+    bucket_name = "sygb-data"
+    bucket_dir = "app_data"
+    file_dependencies = {
+        "results" : "results.csv",
+        "bat_records" : "bat-records.parquet",
+        "predictions" : "predictions_cog.tif",
+        "boundary" : "boundary.parquet",
+        "partial_dependence" : "partial-dependence-data.parquet",
+    }
+
+
+    client = storage.Client(project="sy-bats")
+    bucket = client.get_bucket(bucket_name)
+    local_files = {}
+    for key, file in file_dependencies.items():
+        blob = bucket.blob(f"{bucket_dir}/{file}")
+        local_path = Path(f"{local_dir}/{file}")
+        if not local_path.exists():
+            blob.download_to_filename(f"{local_dir}/{file}")
+        local_files[key] = f"{local_dir}/{file}"
+
+    return local_files
+
+#local_files = download_data()
+
+def setup_paths():
+    local_dir = f"{app_dir}/data"
+    file_dependencies = {
+        "results" : "results.csv",
+        "bat_records" : "bat-records.parquet",
+        "predictions" : "predictions_cog.tif",
+        "boundary" : "boundary.parquet",
+        "partial_dependence" : "partial-dependence-data.parquet",
+    }
+    local_files = {}
+    for key, file in file_dependencies.items():
+        local_files[key] = f"{local_dir}/{file}"
+    
+    return local_files
+
+local_files = setup_paths()
+
+results_df = pd.read_csv(local_files["results"])
 
 training_data_gdf = gpd.read_parquet(
-    "dashboard/data/bat-records.parquet"
+    local_files["bat_records"]
 )  # type: gpd.GeoDataFrame
 training_data_gdf = training_data_gdf.to_crs(4326)
 
 
-import numpy as np
 
 def generate_popup(feature, **kwargs):
     print("Generating popup")
@@ -38,7 +91,7 @@ def generate_popup(feature, **kwargs):
     )
 
 def load_predictions() -> xr.Dataset:
-    predictions = rxr.open_rasterio("dashboard/data/predictions.tif")
+    predictions = rxr.open_rasterio(local_files["predictions"])
     predictions.coords["band"] = list(predictions.attrs["long_name"])
     # Set the nodata appropriately
     nodata = -1
@@ -53,7 +106,7 @@ def load_predictions() -> xr.Dataset:
 
 
 def load_partial_dependence_data() -> pd.DataFrame:
-    return pd.read_parquet("dashboard/data/partial-dependence-data.parquet")
+    return pd.read_parquet(local_files["partial_dependence"])
 
 
 
@@ -96,7 +149,7 @@ def load_south_yorkshire():
     This function loads the counties data which is a large file and filters it for those in south yorkshire
     """
     # Load the counties data
-    boundary = gpd.read_parquet("dashboard/data/boundary.parquet")
+    boundary = gpd.read_parquet(local_files["boundary"])
     # Return the dataframe
     return boundary
 
@@ -281,7 +334,7 @@ def server(input, output, session):
 
     @reactive.Calc
     def tile_client():
-        return TileClient(source="dashboard/data/predictions.tif")
+        return TileClient(source=local_files["predictions"])
 
     @output
     @render_widget()
