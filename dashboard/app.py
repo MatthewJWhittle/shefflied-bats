@@ -1,58 +1,116 @@
+import os
+import json
+from pathlib import Path
+
+from matplotlib.cm import get_cmap
+import matplotlib.pyplot as plt
 from shiny import App, render, ui, reactive
-import shinyswatch
 from ipyleaflet import (
     Map,
-    basemaps,
     GeoData,
-    LayersControl,
-    basemap_to_tiles,
     Popup,
 )
-from localtileserver import get_leaflet_tile_layer, TileClient, validate_cog
-from shinywidgets import output_widget, register_widget, render_widget
+from localtileserver import get_leaflet_tile_layer, TileClient
+from shinywidgets import register_widget, render_widget
 import geopandas as gpd
 import pandas as pd
-from pathlib import Path
 import rioxarray as rxr
 import xarray as xr
-from map import record_popup, generate_basemap
-from sdm.config import species_name_mapping
-from google import auth
-from google.cloud import storage
 import numpy as np
+from dotenv import load_dotenv
+
+from map import record_popup, generate_basemap
+from app_config import species_name_mapping
+from ui import app_ui
 
 app_dir = Path(__file__).parent
 css_path = app_dir / "www" / "styles.css"
 
-def download_data():
+def load_deployment_config():
+    path = f"{app_dir}/rsconnect-python/dashboard.json"
+    with open(path, "r") as f:
+        config = json.load(f)
+    return config
+
+
+
+
+def normalize(array:np.ndarray, vmin=None, vmax=None):
     """
-    This function downloads the data from the google cloud storage
+    This function normalizes an array to be between 0 and 1.
     """
-    # Create a client
-    # Download local files
-    local_dir = f"{app_dir}/data"
-    bucket_name = "sygb-data"
-    bucket_dir = "app_data"
-    file_dependencies = {
-        "results" : "results.csv",
-        "bat_records" : "bat-records.parquet",
-        "predictions" : "predictions_cog.tif",
-        "boundary" : "boundary.parquet",
-        "partial_dependence" : "partial-dependence-data.parquet",
+    if vmin is None or vmax is None:
+        array = (array - np.nanmin(array)) / (np.nanmax(array) - np.nanmin(array))
+    else:
+        # clip the values to the min and max
+        array = array.clip(vmin, vmax)
+        array = (array - vmin) / (vmax - vmin)
+    return array
+
+
+def array_to_rgb(array:np.ndarray, colormap="viridis", vmin=None, vmax=None):
+    """
+    This function converts an array to a RGB array using a colormap.
+    """
+    colormap_fn = get_cmap(colormap)
+    # Normalize the band
+    array = normalize(array, vmin, vmax)
+    # apply the colormap to convert to RGD
+    rgb = colormap_fn(array)
+    return rgb
+
+def write_tif_to_pngs(
+        dataset:xr.Dataset,
+        out_dir:Path, 
+        colormap="viridis", 
+        vmin=None, 
+        vmax=None, 
+        overwrite=False
+        ) -> tuple[dict[str, Path], tuple, int]:
+    """
+    This function converts each band of a tif file to a RGB array and writes it to a PNG file.
+    """
+    # Get the band names
+    band_names = dataset.data_vars.keys()
+    output_paths  = {}
+
+    colormap_fn = get_cmap(colormap)
+    tif_bounds = dataset.rio.bounds()
+    tif_crs = dataset.rio.crs.to_epsg()
+    # Loop through each band
+    for band_name in band_names:
+        out_path = out_dir/f"{band_name}.png"
+        output_paths[band_name] = out_path
+
+        if out_path.exists() and not overwrite:
+            # Skip if the file already exists and user doesn't want to overwrite
+            continue
+
+        # Get the band
+        band = dataset[band_name].values
+        # flip the y axis to match the tif
+        band = np.flipud(band)
+        # Normalize the band
+        band = normalize(band, vmin, vmax)
+        # apply the colormap to convert to RGD
+        rgb = colormap_fn(band)
+        # Write the PNG file
+        plt.imsave(out_path, rgb)
+        
+
+    return output_paths, tif_bounds, tif_crs
+
+
+
+
+load_dotenv()
+running_env = os.getenv("ENV", "prod")
+def get_tile_client_spec(env:str):
+    urls = {
+    "dev": "127.0.0.1",
+    "prod": "https://api.shinyapps.io",
     }
-
-
-    client = storage.Client(project="sy-bats")
-    bucket = client.get_bucket(bucket_name)
-    local_files = {}
-    for key, file in file_dependencies.items():
-        blob = bucket.blob(f"{bucket_dir}/{file}")
-        local_path = Path(f"{local_dir}/{file}")
-        if not local_path.exists():
-            blob.download_to_filename(f"{local_dir}/{file}")
-        local_files[key] = f"{local_dir}/{file}"
-
-    return local_files
+    return urls[env]
 
 #local_files = download_data()
 
@@ -71,26 +129,33 @@ def setup_paths():
     
     return local_files
 
-local_files = setup_paths()
 
-results_df = pd.read_csv(local_files["results"])
-
-training_data_gdf = gpd.read_parquet(
-    local_files["bat_records"]
-)  # type: gpd.GeoDataFrame
-training_data_gdf = training_data_gdf.to_crs(4326)
-
-
+def load_training_data(path) -> gpd.GeoDataFrame:
+    """
+    This function loads the training data
+    """
+    # Load the training data
+    training_data_gdf = gpd.read_parquet(path)
+    training_data_gdf = training_data_gdf.to_crs(4326)
+    # Return the dataframe
+    return training_data_gdf
 
 def generate_popup(feature, **kwargs):
-    print("Generating popup")
-    print(f"Feature: {feature}")
+    """
+    Generate a popup for a feature on the map.
+    """
     popup = Popup(
         location=feature["geometry"]["coordinates"],
         child=record_popup(feature["properties"]),
     )
+    return popup
 
 def load_predictions() -> xr.Dataset:
+    """
+    Load the model predictions array.
+
+    This function loads the tif and processes it to be in the correct format for the dashboard.
+    """
     predictions = rxr.open_rasterio(local_files["predictions"])
     predictions.coords["band"] = list(predictions.attrs["long_name"])
     # Set the nodata appropriately
@@ -105,14 +170,19 @@ def load_predictions() -> xr.Dataset:
     return predictions
 
 
-def load_partial_dependence_data() -> pd.DataFrame:
-    return pd.read_parquet(local_files["partial_dependence"])
+def load_partial_dependence_data(path) -> pd.DataFrame:
+    return pd.read_parquet(path)
 
 
 
 def calculate_dependence_range(df: pd.DataFrame) -> pd.DataFrame:
     """
-    This function calculates the range of values for each feature
+    This function calculates the range of values for each feature.
+
+    Args:
+        df: pd.DataFrame - The dataframe of partial dependence values.
+
+    Returns: pd.DataFrame - The dataframe of feature ranges.
     """
     # Group by the latin name, activity type and feature
     df = (
@@ -123,113 +193,80 @@ def calculate_dependence_range(df: pd.DataFrame) -> pd.DataFrame:
     # Return the dataframe
     return df
 
+def layer_exists(
+        m: Map,
+          name: str):
+    """
+    Check if a layer exists in a map.
 
-partial_dependence_df = load_partial_dependence_data()
-
-dependence_range = calculate_dependence_range(partial_dependence_df)
-
-feature_names = partial_dependence_df["feature"].unique().tolist()
-
-
-def layer_exists(m, name):
+    Args:
+        m: ipyleaflet.Map
+        name: str
+    
+    Returns: bool - True if the layer exists, False otherwise
+    
+    """
     for layer in m.layers:
         if layer.name == name:
             return True
     return False
 
 
-def get_layer(m, name):
+def get_layer(
+        m: Map, 
+        name: str
+        ):
+    """
+    Get a layer from a map by name.
+
+    Args:
+        m: ipyleaflet.Map
+        name: str
+
+    Returns: ipyleaflet.Layer or None
+    """
     for layer in m.layers:
         if layer.name == name:
             return layer
+    return None
 
 
-def load_south_yorkshire():
+def load_south_yorkshire(path:Path):
     """
     This function loads the counties data which is a large file and filters it for those in south yorkshire
     """
     # Load the counties data
-    boundary = gpd.read_parquet(local_files["boundary"])
+    boundary = gpd.read_parquet(path)
     # Return the dataframe
     return boundary
 
+## Load all static app data ----------
+local_files = setup_paths()
+results_df = pd.read_csv(local_files["results"])
+training_data_gdf = load_training_data(
+    local_files["bat_records"]
+) 
+partial_dependence_df = load_partial_dependence_data(local_files["partial_dependence"])
+dependence_range = calculate_dependence_range(partial_dependence_df)
+feature_names = partial_dependence_df["feature"].unique().tolist()
+south_yorkshire = load_south_yorkshire(local_files["boundary"])
 
-south_yorkshire = load_south_yorkshire()
+png_dir = app_dir / "data/predictions_png/"
+png_dir.mkdir(exist_ok=True, parents=True)
+png_paths, tif_bounds, tif_crs = write_tif_to_pngs(
+    load_predictions(),
+    png_dir,
+    overwrite=False
+)
 
-app_ui = ui.page_fluid(
-    ui.include_css(css_path),
-    shinyswatch.theme.minty(),
-    ui.page_navbar(
-        ui.nav(
-            "HSM Maps",
-            output_widget("map"),
-            ui.panel_absolute(
-                ui.tags.h3("Select a Species"),
-                ui.input_selectize(
-                    id="species",
-                    label="",
-                    choices=species_name_mapping,
-                ),
-                ui.input_selectize(
-                    id="activity_type",
-                    label="",
-                    choices=results_df["activity_type"].unique().tolist(),
-                ),
-                ui.div(
-                    ui.output_ui("model_description"),
-                    class_="model-description-container",
-                ),
-                class_="model-selection-container",
-            ),
-        ),
-        ui.nav(
-            "Explore Variable Importance",
-            ui.layout_sidebar(
-                ui.panel_sidebar(
-                    ui.input_selectize(
-                        id="species_mi",
-                        label="",
-                        choices=results_df["latin_name"].unique().tolist(),
-                    ),
-                    ui.input_selectize(
-                        id="activity_type_mi",
-                        label="",
-                        choices=results_df["activity_type"].unique().tolist(),
-                    ),
-                    ui.div(
-                        ui.output_data_frame("dependence_summary_table"),
-                        class_="dependence-summary-table-container",
-                    ),
-                ),
-                ui.panel_main(
-                    ui.row(
-                        ui.div(
-                            ui.input_selectize(
-                                id="feature_mi",
-                                label="",
-                                choices=feature_names,
-                            ),
-                        ),
-                        ui.row(
-                            ui.output_plot("partial_dependence_plot"),
-                            class_="partial-dependence-plot-container",
-                        ),
-                    )
-                ),
-            ),
-        ),
-        ui.nav(
-            "Model Summary",
-            ui.column(
-                8,  # Width
-                ui.tags.h3("Models"),
-                ui.output_data_frame("models_table"),
-                offset=2,
-                style="display: flex; flex-direction: column; align-items: center; padding-top: 20px;",
-            ),
-        ),
-        title="Sheffield Bat Group - HSM",
-    ),
+### App UI
+
+main_app_ui = app_ui(
+    css_path=css_path,
+    species_name_mapping=species_name_mapping,
+    results_df=results_df,
+    feature_names=feature_names,
+    
 )
 
 
@@ -334,7 +371,10 @@ def server(input, output, session):
 
     @reactive.Calc
     def tile_client():
-        return TileClient(source=local_files["predictions"])
+        return TileClient(
+            source=local_files["predictions"],
+            host=get_tile_client_spec(running_env),
+            )
 
     @output
     @render_widget()
@@ -412,4 +452,4 @@ def server(input, output, session):
         return table
 
 
-app = App(app_ui, server)
+app = App(main_app_ui, server)

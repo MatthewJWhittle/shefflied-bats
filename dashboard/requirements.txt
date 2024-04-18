@@ -1,0 +1,13 @@
+shiny
+shinyswatch
+ipyleaflet
+localtileserver
+shinywidgets
+geopandas
+pandas
+rioxarray
+xarray
+numpy
+pyarrow
+matplotlib 
+python-dotenv

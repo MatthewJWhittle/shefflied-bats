@@ -172,4 +172,6 @@ data/processed/os-feature-cover-100m.tif
 data/processed/dsm-10m.tif
 data/sdm_predictions/temp/test.tif
 models/is-veg-cnn.pth
-dashboard/sy-bat-4c78e6926c83.json
+sy-bat-4c78e6926c83.json
+
+deploy-dash.sh

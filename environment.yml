@@ -42,3 +42,4 @@ dependencies:
     - ipyleaflet
     - localtileserver
     - google-cloud-storage
+    - rsconnect-python
