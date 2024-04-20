@@ -1,6 +1,5 @@
 shiny
 shinyswatch
-localtileserver
 shinywidgets
 geopandas
 pyproj
@@ -11,4 +10,4 @@ numpy
 pyarrow
 matplotlib 
 python-dotenv
-pydeck
+ipyleaflet

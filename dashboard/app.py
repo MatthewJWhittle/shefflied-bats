@@ -11,7 +11,6 @@ from ipyleaflet import (
     Popup,
     ImageOverlay,
 )
-from localtileserver import get_leaflet_tile_layer, TileClient
 from shinywidgets import register_widget, render_widget
 import geopandas as gpd
 import pandas as pd
@@ -142,15 +141,7 @@ def load_training_data(path) -> gpd.GeoDataFrame:
     # Return the dataframe
     return training_data_gdf
 
-def generate_popup(feature, **kwargs):
-    """
-    Generate a popup for a feature on the map.
-    """
-    popup = Popup(
-        location=feature["geometry"]["coordinates"],
-        child=record_popup(feature["properties"]),
-    )
-    return popup
+
 
 def load_predictions() -> xr.Dataset:
     """
@@ -317,7 +308,7 @@ def server(input, output, session):
         ].copy()
 
     @output
-    @render.data_frame()
+    @render.data_frame
     def dependence_summary_table():
         pd_df = partial_dependence_range()
         pd_df["average"] = pd_df["average"].round(3)
@@ -342,7 +333,7 @@ def server(input, output, session):
         return pd_df.plot(x="values", y="average")
 
     @output
-    @render.ui()
+    @render.ui
     def model_description():
         model_result = selected_results()
 
@@ -397,19 +388,8 @@ def server(input, output, session):
     register_widget("map", base_map)
     
 
-    @reactive.Calc
-    def prediction_bands():
-        return load_predictions().data_vars.keys()
-    
-    @reactive.Calc
-    def tile_client():
-        return TileClient(
-            source=local_files["predictions"],
-            host=get_tile_client_spec(running_env),
-            )
-
     @output
-    @render_widget()
+    @render_widget
     def main_map() -> Map:
         png_path = predictions_png_path()
 
@@ -431,18 +411,29 @@ def server(input, output, session):
 
         base_map.add_layer(image_overlay)
 
+
         # Check if the training data layer is already added
         layer_name = "Species Records"
         geo_data = GeoData(
             geo_dataframe=map_points(), 
             name="Species Records", 
-            style={'color': 'black', 'radius':6, 'fillColor': '#F96E46', 'opacity':0.5, 'weight':1.3,  'fillOpacity':0.6},
-            hover_style={'fillColor': '#00E8FC' , 'fillOpacity': 0.2},
-            point_style={'radius': 5, 'color': '#00E8FC', 'fillOpacity': 0.8, 'fillColor': 'blue', 'weight': 3},
+            point_style={'color': 'black', 'radius':6, 'fillColor': '#F96E46', 'opacity':0.8, 'weight':1.3,  'fillOpacity':0.8},
+            hover_style={'fillColor': '#00E8FC' , 'fillOpacity': 1},
         )
+        def generate_popup(event, properties, id, **kwargs):
+            """
+            Generate a popup for a feature on the map.
+            """
+            #print(properties)
+            popup_content = record_popup(properties)
+            popup = Popup(
+                location=properties["geometry"]["coordinates"],
+                child=popup_content,
+            )
+            # get the marker and open the popup
+            base_map.add(popup)
+
         geo_data.on_click(generate_popup)
-        # set the layer to not be visible by deafult
-        geo_data.visible = False
 
         if layer_exists(base_map, layer_name):
             old_layer = get_layer(base_map, layer_name)
@@ -456,7 +447,7 @@ def server(input, output, session):
 
     # Model Summary --------------------------------------------------------------
     @output
-    @render.data_frame()
+    @render.data_frame
     def models_table():
         table = results_df[
             [
