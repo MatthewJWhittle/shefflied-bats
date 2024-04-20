@@ -1,7 +1,7 @@
 .jupyter-widgets.leaflet-widgets{
     height: 100%;
 }
-#map{
+#main_map{
     height: 90vh;
 }
 
@@ -28,4 +28,8 @@
 
 .dependence-summary-table-container{
     font-size: 14px;
+}
+
+.leaflet-image-layer{
+    image-rendering: pixelated;
 }

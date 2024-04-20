@@ -42,7 +42,6 @@ def generate_basemap(south_yorkshire: gpd.GeoDataFrame):
         ## Map ----------------------------------------------------------------------
     m = Map(width="100%", height="100%", zoom=13)
     print("Init Map")
-
     imagery = basemap_to_tiles(basemaps.Esri.WorldImagery)
     imagery.base = True
     imagery.name = "Imagery"

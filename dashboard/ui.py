@@ -10,7 +10,7 @@ def app_ui(css_path, species_name_mapping, results_df, feature_names):
         ui.page_navbar(
             ui.nav_panel(
                 "HSM Maps",
-                output_widget("map"),
+                output_widget("main_map"),
                 ui.panel_absolute(
                     ui.tags.h3("Select a Species"),
                     ui.input_selectize(

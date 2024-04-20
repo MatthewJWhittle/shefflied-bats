@@ -9,6 +9,7 @@ from ipyleaflet import (
     Map,
     GeoData,
     Popup,
+    ImageOverlay,
 )
 from localtileserver import get_leaflet_tile_layer, TileClient
 from shinywidgets import register_widget, render_widget
@@ -18,6 +19,7 @@ import rioxarray as rxr
 import xarray as xr
 import numpy as np
 from dotenv import load_dotenv
+from pyproj import Transformer
 
 from map import record_popup, generate_basemap
 from app_config import species_name_mapping
@@ -251,13 +253,37 @@ dependence_range = calculate_dependence_range(partial_dependence_df)
 feature_names = partial_dependence_df["feature"].unique().tolist()
 south_yorkshire = load_south_yorkshire(local_files["boundary"])
 
-png_dir = app_dir / "data/predictions_png/"
+
+def project_bbox(bbox, from_crs, to_crs):
+    """
+    Project a bounding box from one CRS to another.
+
+    Parameters:
+    bbox (tuple or list): The bounding box to project, in the format (minx, miny, maxx, maxy).
+    from_crs (str): The current CRS of the bounding box.
+    to_crs (str): The CRS to project the bounding box to.
+
+    Returns:
+    tuple: The projected bounding box, in the format (minx, miny, maxx, maxy).
+    """
+    transformer = Transformer.from_crs(from_crs, to_crs)
+
+    minx, miny = transformer.transform(bbox[0], bbox[1])
+    maxx, maxy = transformer.transform(bbox[2], bbox[3])
+
+    return (minx, miny, maxx, maxy)
+
+## save the predictions to PNGs somewhere the app can GET them
+
+png_dir = app_dir / "data" / "predictions_png"
 png_dir.mkdir(exist_ok=True, parents=True)
 png_paths, tif_bounds, tif_crs = write_tif_to_pngs(
     load_predictions(),
     png_dir,
     overwrite=False
 )
+
+tif_bounds = project_bbox(tif_bounds, f"EPSG:{tif_crs}", "EPSG:4326")
 
 ### App UI
 
@@ -350,8 +376,14 @@ def server(input, output, session):
         return subset_gdf
 
     @reactive.Calc
-    def predictions_band():
-        return selected_results()["band_name"].values[0]
+    def predictions_png_path():
+        band_name = selected_results()["band_name"].values[0]
+        url =f"https://raw.githubusercontent.com/MatthewJWhittle/shefflied-bats/dashboard/dashboard/data/predictions_png/{band_name}.png?raw=true"
+        
+        # encode the url replacing spaces with %20
+        url = url.replace(" ", "%20")
+        #path = Path(app_dir) / "data/predictions_png/Pipistrellus pipistrellus_Foraging.png"
+        return url
 
     @reactive.Calc
     def map_points():
@@ -368,7 +400,7 @@ def server(input, output, session):
     @reactive.Calc
     def prediction_bands():
         return load_predictions().data_vars.keys()
-
+    
     @reactive.Calc
     def tile_client():
         return TileClient(
@@ -378,26 +410,26 @@ def server(input, output, session):
 
     @output
     @render_widget()
-    def map() -> Map:
-        band_names = prediction_bands()
-        band_number = list(band_names).index(predictions_band())
-
-        client = tile_client()
-        tile_layer = get_leaflet_tile_layer(
-            client,
-            cmap="viridis",
-            name="HSM Predictions",
-            opacity=0.6,
-            vmin=0,
-            vmax=100,
-            band=band_number + 1,
-        )
+    def main_map() -> Map:
+        png_path = predictions_png_path()
 
         if layer_exists(base_map, "HSM Predictions"):
             old_layer = get_layer(base_map, "HSM Predictions")
             base_map.remove_layer(old_layer)
 
-        base_map.add_layer(tile_layer)
+        # Get the bounds of the tif
+        sw_corner = [tif_bounds[0], tif_bounds[1]]
+        ne_corner = [tif_bounds[2], tif_bounds[3]]
+        bounds = [sw_corner, ne_corner]
+
+        image_overlay = ImageOverlay(
+            url=png_path,
+            bounds=bounds,
+            name="HSM Predictions",
+        )
+
+
+        base_map.add_layer(image_overlay)
 
         # Check if the training data layer is already added
         layer_name = "Species Records"

@@ -43,3 +43,4 @@ dependencies:
     - localtileserver
     - google-cloud-storage
     - rsconnect-python
+    - geoplot

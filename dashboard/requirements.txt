@@ -1,9 +1,9 @@
 shiny
 shinyswatch
-ipyleaflet
 localtileserver
 shinywidgets
 geopandas
+pyproj
 pandas
 rioxarray
 xarray
@@ -11,3 +11,4 @@ numpy
 pyarrow
 matplotlib 
 python-dotenv
+pydeck
