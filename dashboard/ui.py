@@ -27,15 +27,34 @@ def app_ui(css_path, species_name_mapping, results_df):
                         label="",
                         choices=results_df["activity_type"].unique().tolist(),
                     ),
+                    ui.input_slider(
+                        id="hsm_opacity",
+                        label="HSM Opacity",
+                        min=0,
+                        max=1,
+                        step=0.1,
+                        value=0.8,
+                    ),
                     ui.div(
                         ui.output_ui("model_description"),
                         class_="model-description-container",
+                    ),
+                    ui.tags.hr(),
+                    ui.div(
+                        ui.tags.h5("About"),
+                        ui.tags.p(
+                            "This app visualises the results of habitat suitability modelling work carried out by Greg Slack and Matthew Whittle on behalf of South Yorkshire Bat Group."),
+                            # add email as link
+                        ui.tags.p(
+                            "The app is built & maintained by: Matthew Whittle. If you have any questions or feedback, please get in touch (matthewjwhittle@gmail.com)."
+                        ),
+
                     ),
                     class_="model-selection-container",
                 ),
             ),
             ui.nav_panel(
-                "Explore Variable Importance",
+                "Variable Importance",
                 ui.layout_sidebar(
                     ui.panel_sidebar(
                         ui.input_selectize(
@@ -92,6 +111,6 @@ def app_ui(css_path, species_name_mapping, results_df):
                     style="display: flex; flex-direction: column; align-items: center; padding-top: 20px;",
                 ),
             ),
-            title="Sheffield Bat Group - HSM",
+            title="HSM: South Yorkshire Bat Group",
         ),
     )

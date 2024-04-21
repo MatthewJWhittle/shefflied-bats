@@ -410,6 +410,7 @@ def server(input, output, session):
             url=png_path,
             bounds=bounds,
             name="HSM Predictions",
+            opacity=input.hsm_opacity(),
         )
 
 
