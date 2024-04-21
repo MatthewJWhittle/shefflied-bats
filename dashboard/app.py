@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 from pyproj import Transformer
 
 from map import record_popup, generate_basemap
-from app_config import species_name_mapping
+from app_config import species_name_mapping, feature_names
 from ui import app_ui
 
 app_dir = Path(__file__).parent
@@ -241,7 +241,7 @@ training_data_gdf = load_training_data(
 ) 
 partial_dependence_df = load_partial_dependence_data(local_files["partial_dependence"])
 dependence_range = calculate_dependence_range(partial_dependence_df)
-feature_names = partial_dependence_df["feature"].unique().tolist()
+
 south_yorkshire = load_south_yorkshire(local_files["boundary"])
 
 
@@ -282,7 +282,6 @@ main_app_ui = app_ui(
     css_path=css_path,
     species_name_mapping=species_name_mapping,
     results_df=results_df,
-    feature_names=feature_names,
     
 )
 
@@ -295,10 +294,6 @@ def server(input, output, session):
             & (results_df["activity_type"] == input.activity_type())
         ]
 
-    @reactive.Calc
-    def feature_names() -> list[str]:
-        features = partial_dependence_df["feature"].unique().tolist()
-        return features
 
     @reactive.Calc
     def partial_dependence_range() -> pd.DataFrame:
@@ -313,6 +308,7 @@ def server(input, output, session):
         pd_df = partial_dependence_range()
         pd_df["average"] = pd_df["average"].round(3)
         pd_df = pd_df[["feature", "average"]].sort_values("average", ascending=False)
+        pd_df.feature.replace(feature_names, inplace=True)
         pd_df.rename(
             columns={"feature": "Feature", "average": "Influence Range"}, inplace=True
         )
@@ -330,7 +326,15 @@ def server(input, output, session):
     def partial_dependence_plot():
         pd_df = partial_dependence_df_model()
         pd_df = pd_df[pd_df["feature"] == input.feature_mi()]
-        return pd_df.plot(x="values", y="average")
+        ax = pd_df.plot(x="values", y="average")
+        feature_label = feature_names[input.feature_mi()]
+        ax.set_xlabel(feature_label)
+        ax.set_ylabel("Effect on Habitat Suitability Score")
+        # drop the legend
+        ax.get_legend().remove()
+        # round y axis to 2 decimal places
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.2f}"))
+        return ax
 
     @output
     @render.ui
@@ -457,18 +461,18 @@ def server(input, output, session):
                 "std_cv_score",
                 "n_presence",
                 "n_background",
-                "folds",
             ]
         ]
+        table["mean_cv_score"] = (table["mean_cv_score"] * 100).round(1)
+        table["std_cv_score"] = (table["std_cv_score"] * 100).round(1)
         table.rename(
             columns={
                 "latin_name": "Species",
                 "activity_type": "Activity Type",
-                "mean_cv_score": "Accuracy",
-                "std_cv_score": "Accuracy Std",
+                "mean_cv_score": "Accuracy (%)",
+                "std_cv_score": "Accuracy Std (±%)",
                 "n_presence": "Presence Points",
                 "n_background": "Background Points",
-                "folds": "CV Folds",
             },
             inplace=True,
         )

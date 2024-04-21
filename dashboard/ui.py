@@ -2,9 +2,13 @@ from shiny import ui, module
 from shiny import reactive
 import shinyswatch
 from shinywidgets import output_widget
+from app_config import feature_names
 
-def app_ui(css_path, species_name_mapping, results_df, feature_names):
-        return ui.page_fluid(
+partial_dependence_explanation = "A partial dependence plot (PDP) is a visualization tool used in habitat suitability modelling to show the relationship between a specific variable and the predicted suitability, while averaging out the effects of all other features in the model. It helps to understand how the predicted suitability depends on the feature of interest (e.g. woodland cover), regardless of the values of the other features. However, PDPs do not capture complex interactions between features, so they might not fully represent how various environmental factors together affect bat habitat suitability"
+
+
+def app_ui(css_path, species_name_mapping, results_df):
+    return ui.page_fluid(
         ui.include_css(css_path),
         shinyswatch.theme.minty(),
         ui.page_navbar(
@@ -37,7 +41,7 @@ def app_ui(css_path, species_name_mapping, results_df, feature_names):
                         ui.input_selectize(
                             id="species_mi",
                             label="",
-                            choices=results_df["latin_name"].unique().tolist(),
+                            choices=species_name_mapping,
                         ),
                         ui.input_selectize(
                             id="activity_type_mi",
@@ -51,6 +55,13 @@ def app_ui(css_path, species_name_mapping, results_df, feature_names):
                     ),
                     ui.panel_main(
                         ui.row(
+                            ui.column(
+                                3,
+                                # text
+                                ui.tags.p("Plot Influence of:"),
+                            ),
+                        ui.column(
+                            3,
                             ui.div(
                                 ui.input_selectize(
                                     id="feature_mi",
@@ -58,9 +69,14 @@ def app_ui(css_path, species_name_mapping, results_df, feature_names):
                                     choices=feature_names,
                                 ),
                             ),
+                            ),
                             ui.row(
+                                ui.div(
+
                                 ui.output_plot("partial_dependence_plot"),
                                 class_="partial-dependence-plot-container",
+                                ),
+                                ui.tags.p(partial_dependence_explanation),
                             ),
                         )
                     ),
