@@ -36,11 +36,6 @@ dependencies:
     - pyhere
     - nest-asyncio
     - os-grid-reference
-    - shiny
-    - shinyswatch
-    - shinywidgets
-    - ipyleaflet
-    - localtileserver
     - google-cloud-storage
-    - rsconnect-python
+    - rio-cogeo
     - geoplot

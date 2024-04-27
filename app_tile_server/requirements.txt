@@ -1,4 +1,0 @@
-shiny
-ipyleaflet
-localtileserver
-shinywidgets
