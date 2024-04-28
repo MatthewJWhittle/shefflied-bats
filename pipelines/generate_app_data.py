@@ -62,10 +62,13 @@ def load_predictions_cog_array(path) -> xr.Dataset:
     return predictions
 
 
-def compress_predictions(input_dir: Path, output_file: Path):
+def compress_predictions(input_dir: Path, output_file: Path, bbox: tuple[float, float, float, float]):
     prediction_files = list_predictions(input_dir)
 
     predictions = load_predictions(prediction_files)
+    predictions = predictions.rio.reproject("EPSG:4326")
+    predictions = predictions.rio.clip_box(*bbox)
+    predictions = predictions.rio.pad_box(*bbox)
 
     # Convert the predictions to int using a scaling factor
     predictions = predictions * 100
@@ -118,16 +121,21 @@ def load_south_yorkshire():
     return counties
 
 
-def compress_boundary(output_file: Path):
-    if output_file.exists():
-        return
+def compress_boundary(output_file: Path) -> tuple[tuple[float, float, float, float],...]:
     # Load the counties data
     counties = load_south_yorkshire()
-    # Save the counties data
+
     counties.to_parquet(output_file)
+    # Save the counties data
+    counties  = counties.to_crs(27700)
+    counties["geometry"] = counties.geometry.buffer(1000)
+    bbox_27700 = counties.total_bounds
+    counties = counties.to_crs(4326)
+    bbox_4326 = counties.total_bounds
+    return bbox_4326, bbox_27700
 
 
-def compress_evs(input_file: Path, output_file: Path):
+def compress_evs(input_file: Path):
     evs = rxr.open_rasterio(input_file)
     evs = evs.squeeze()
     evs.rio.to_raster(output_file, compress="lzw")
@@ -275,6 +283,10 @@ class GCSAppDataBucket:
     def upload_file(self, file: Path, destination: str):
         blob = self.bucket.blob(destination)
         blob.upload_from_filename(file)
+    
+    def upload_string(self, string: str, destination: str):
+        blob = self.bucket.blob(destination)
+        blob.upload_from_string(string)
 
 
 def translate_to_cog(src_path, dst_path, profile="webp", profile_options={}, **options):
@@ -332,6 +344,12 @@ def write_tif_to_pngs(
     output_paths = {}
 
     colormap_fn = get_cmap(colormap)
+    dataset = dataset.rio.reproject("EPSG:4326")
+    nodata = dataset["Pipistrellus pygmaeus_All"].rio.nodata
+    # Set the no data values to nan
+    dataset = dataset.where(dataset != nodata, np.nan)
+    for var in dataset.data_vars:
+        dataset[var] = dataset[var].rio.write_nodata(np.nan)
     tif_bounds = dataset.rio.bounds()
     tif_crs = dataset.rio.crs.to_epsg()
     # Loop through each band
@@ -346,7 +364,7 @@ def write_tif_to_pngs(
         # Get the band
         band = dataset[band_name].values
         # flip the y axis to match the tif
-        band = np.flipud(band)
+        #band = np.flipud(band)
         # Normalize the band
         band = normalize(band, vmin, vmax)
         # apply the colormap to convert to RGD
@@ -356,6 +374,16 @@ def write_tif_to_pngs(
 
     return output_paths, tif_bounds, tif_crs
 
+
+def generate_config(
+        prediction_bbox, 
+        bbox_crs,
+):
+    config = {
+        "prediction_bbox": prediction_bbox,
+        "bbox_crs": bbox_crs,
+    }
+    return config
 
 def main(env_type: str = "dev"):
     # Set up the GCS bucket
@@ -368,11 +396,15 @@ def main(env_type: str = "dev"):
     # Set up a temporary directory
     temp_dir = TemporaryDirectory(dir="data/temp")
     temp_dir_path = Path(temp_dir.name)
+    ## Boundary
+    # Convert the boundary to parquet
+    boundary_parquet = temp_dir_path / "boundary.parquet"
+    bbox_4326, bbox_27700 = compress_boundary(boundary_parquet)
 
     ## SDM Predictions
     predictions_dir = Path("data/sdm_predictions")
     predictions_output_file = temp_dir_path / "predictions.tif"
-    raster_bounds = compress_predictions(predictions_dir, predictions_output_file)
+    raster_bounds = compress_predictions(predictions_dir, predictions_output_file, bbox=bbox_4326)
     # translate the predictions to COG
     predictions_cog_output_file = temp_dir_path / "predictions_cog.tif"
     translate_to_cog(
@@ -382,7 +414,7 @@ def main(env_type: str = "dev"):
     predictions_png_output_dir = temp_dir_path / "predictions_png"
     predictions_png_output_dir.mkdir(exist_ok=True)
 
-    output_files, _, _ = write_tif_to_pngs(
+    output_files, tif_bounds, tif_crs = write_tif_to_pngs(
         load_predictions_cog_array(path =  predictions_cog_output_file), 
         predictions_png_output_dir
     )
@@ -398,10 +430,7 @@ def main(env_type: str = "dev"):
     partial_dependence_parquet = temp_dir_path / "partial-dependence-data.parquet"
     csv_to_parquet(partial_dependence_csv, partial_dependence_parquet)
 
-    ## Boundary
-    # Convert the boundary to parquet
-    boundary_parquet = temp_dir_path / "boundary.parquet"
-    compress_boundary(boundary_parquet)
+
 
     ## Occurence Data
     occurence_output_file = temp_dir_path / "training-occurrence-data.parquet"
@@ -415,12 +444,23 @@ def main(env_type: str = "dev"):
     copy_bat_records(
         Path("data/processed/sybg-bats.parquet"),
         bat_records_output_file,
-        raster_bounds=raster_bounds,
+        raster_bounds=bbox_27700,
     )
+
+    metadata = generate_config(
+        prediction_bbox=tif_bounds, 
+        bbox_crs=tif_crs,
+    )
+
+    print("Uploading to GCS")
+    # Write the config to json string
+    metadata_json = json.dumps(metadata)
+    # Upload the config to GCS
+    gcs_bucket.upload_string(metadata_json, f"{target_folder}/metadata.json")
+
 
     # Upload to GCS
     # predictions_cog.tif
-
     gcs_bucket.upload_file(
         predictions_cog_output_file, f"{target_folder}/predictions_cog.tif"
     )
@@ -453,6 +493,7 @@ def main(env_type: str = "dev"):
 
     # Clean up the temporary directory
     temp_dir.cleanup()
+    print("Done")
 
 
 if __name__ == "__main__":
