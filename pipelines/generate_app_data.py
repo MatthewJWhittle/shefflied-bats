@@ -497,4 +497,4 @@ def main(env_type: str = "dev"):
 
 
 if __name__ == "__main__":
-    main(env_type="dev")
+    main(env_type="prod")
