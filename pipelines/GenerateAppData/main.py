@@ -162,19 +162,13 @@ def align_to_grid(
     y: np.ndarray,
     origin: tuple,
     resolution: float,
-    tolerance: float = 1e-10,
     decimals: int = 10,
 ) -> tuple[np.ndarray, np.ndarray]:
     x_origin, y_origin = origin
 
     # Calculate offsets to align with grid
     offset_x = (x - x_origin) % resolution
-    # Adjust to the right edge if very close
-    offset_x = np.where(abs(offset_x - resolution) >= tolerance, offset_x, resolution)
-
     offset_y = (y - y_origin) % resolution
-    # Adjust to the top edge if very close
-    offset_y = np.where(abs(offset_y - resolution) >= tolerance, offset_y, resolution)
 
     # Apply the calculated offset to align the coordinates
     aligned_x = x - offset_x
@@ -210,6 +204,7 @@ def points_to_grid_squares(
             for x_min, y_min, x_max, y_max in zip(x_mins, y_mins, x_maxs, y_maxs)
         ],
         crs=points.crs,
+        index=points.index,
     )
 
     return grid_squares
