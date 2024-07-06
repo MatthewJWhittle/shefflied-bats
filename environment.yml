@@ -12,7 +12,6 @@ dependencies:
   - ipykernel
   - xarray
   - rioxarray
-  - rasterio
   - geopandas
   - numpy
   - pandas
@@ -30,15 +29,13 @@ dependencies:
   - richdem
   - openpyxl
   - pyarrow
-  - python-igraph
-  - lonboard
   - plotly
-  - pygeos
+  - rasterio
+  - pip
   - pip: 
     - pyhere
     - nest-asyncio
     - os-grid-reference
-    - shiny
-    - shinyswatch
-    - shinywidgets
-    - ipyleaflet
+    - google-cloud-storage
+    - rio-cogeo
+    - geoplot
