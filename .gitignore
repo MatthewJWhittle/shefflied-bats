@@ -175,3 +175,5 @@ models/is-veg-cnn.pth
 sy-bat-4c78e6926c83.json
 
 deploy-dash.sh
+
+.DS_Store
