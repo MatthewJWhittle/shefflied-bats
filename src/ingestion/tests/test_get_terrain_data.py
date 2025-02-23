@@ -27,8 +27,8 @@ async def test_init_wcs_downloaders():
     assert dtm_data is not None
     assert dsm_data is not None
 
-    assert isinstance(dtm_data, xr.DataArray)
-    assert isinstance(dsm_data, xr.DataArray)
+    assert isinstance(dtm_data, xr.Dataset)
+    assert isinstance(dsm_data, xr.Dataset)
 
 
 @pytest.fixture

@@ -7,41 +7,37 @@ import numpy as np
 import rioxarray as rxr
 import xarray as xr
 
-from src.utils.load import load_boundary, load_spatial_config, construct_transform_shift_bounds
+from src.utils.load import (
+    load_boundary,
+    load_spatial_config,
+    construct_transform_shift_bounds,
+)
 from src.utils.config import setup_logging
 from src.ingestion.geo_utils import reproject_data
 from src.ingestion.ogc import WCSDownloader
 
 
 def init_wcs_downloaders() -> dict[str, WCSDownloader]:
-    """
-    Create the WCS downloaders for each layer.
-
-    Returns:
-        dict: A dictionary of WCS downloaders.
-    """
-    wcs_downloaders = {}
+    """Create the WCS downloaders for each layer."""
     specification = {
-        "dsm" : {
-            "endpoint" : "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-surface-model-last-return-dsm-1m/wcs",
-             "coverage_id" : "9ba4d5ac-d596-445a-9056-dae3ddec0178__Lidar_Composite_Elevation_LZ_DSM_1m",
+        "dsm": {
+            "endpoint": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-surface-model-last-return-dsm-1m/wcs",
+            "coverage_id": "9ba4d5ac-d596-445a-9056-dae3ddec0178__Lidar_Composite_Elevation_LZ_DSM_1m",
+            "fill_value": np.nan,
         },
-        "dtm" : {
-            "endpoint" : "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs",
-            "coverage_id" : "13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m",
-        }
+        "dtm": {
+            "endpoint": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs",
+            "coverage_id": "13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m",
+            "fill_value": np.nan,
+        },
     }
-    for layer, spec in specification.items():
-        wcs_downloaders[layer] = WCSDownloader(**spec, fill_value=np.nan)
-    return wcs_downloaders
-
-
+    return {layer: WCSDownloader(**spec) for layer, spec in specification.items()}
 
 
 async def get_data(
-        output_dir: Union[str, Path] = "data/evs",
-        boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
-        buffer_distance: float = 7000,
+    output_dir: Union[str, Path] = "data/evs",
+    boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
+    buffer_distance: float = 7000,
 ):
     """
     Main function to process climate data based on a given boundary.
@@ -61,24 +57,33 @@ async def get_data(
     """
     setup_logging()
 
-    boundary = load_boundary(boundary_path, buffer_distance=buffer_distance, target_crs="EPSG:27700")
+    boundary = load_boundary(
+        boundary_path, buffer_distance=buffer_distance, target_crs="EPSG:27700"
+    )
     spatial_config = load_spatial_config()
-    boundary = boundary.to_crs(spatial_config["crs"])
-    model_transform, bounds = construct_transform_shift_bounds(tuple(boundary.total_bounds), spatial_config["resolution"])
+    boundary.to_crs(spatial_config["crs"], inplace=True)
+    model_transform, bounds = construct_transform_shift_bounds(
+        tuple(boundary.total_bounds), spatial_config["resolution"]
+    )
 
     wcs_downloaders = init_wcs_downloaders()
 
-
     results = []
     for layer, wcs_downloader in wcs_downloaders.items():
-        logging.info(f"Downloading {layer} data...")
-        data = await wcs_downloader.get_coverage(bbox=bounds, resolution=100, tile_size=(1024, 1024), max_concurrent=100)
-        data = reproject_data(data, spatial_config["crs"], model_transform, spatial_config["resolution"])
+        logging.info("Downloading %s data...", layer)
+        data = await wcs_downloader.get_coverage(
+            bbox=bounds, resolution=100, tile_size=(1024, 1024), max_concurrent=100
+        )
+        data = reproject_data(
+            data, spatial_config["crs"], model_transform, spatial_config["resolution"]
+        )
         results.append(data)
-    
+
     results = xr.merge(results)
     # rename the variables to dtm and dsm
-    name_mapping = {downloader.coverage_id: name for name, downloader in wcs_downloaders.items()}
+    name_mapping = {
+        downloader.coverage_id: name for name, downloader in wcs_downloaders.items()
+    }
     results = results.rename(name_mapping)
 
     # Write intermediate data to disk
@@ -91,9 +96,8 @@ async def get_data(
         results[name].rio.to_raster(output_dir / f"{name}_{resolution_int}m.tif")
         paths.append(output_dir / f"{name}_{resolution_int}m.tif")
 
-    logging.info(f"Data saved to {output_dir}")
-    return paths   
-
+    logging.info("Data saved to %s", output_dir)
+    return paths
 
 
 def main(
@@ -102,8 +106,6 @@ def main(
     buffer_distance: float = 7000,
 ):
     asyncio.run(get_data(output_dir, boundary_path, buffer_distance))
-
-
 
 
 if __name__ == "__main__":

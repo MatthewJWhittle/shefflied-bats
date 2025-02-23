@@ -9,8 +9,8 @@ import numpy as np
 
 
 def reproject_data(
-    array: xr.DataArray, crs: Union[int, str], transform: Affine, resolution: float
-) -> xr.DataArray:
+    array: Union[xr.DataArray, xr.Dataset], crs: Union[int, str], transform: Affine, resolution: float
+) -> Union[xr.DataArray, xr.Dataset]:
     """
     Reprojects the given array to a specified coordinate reference system (CRS) and transform.
 
@@ -32,6 +32,15 @@ def reproject_data(
     reprojected = reprojected.rio.reproject(
         crs, resampling=Resampling.bilinear, transform=transform
     )
-    reprojected = reprojected.where(reprojected != reprojected.rio.nodata, np.nan)
-    reprojected.rio.write_nodata(np.nan, inplace=True)
+    if isinstance(reprojected, xr.DataArray):
+        reprojected = reprojected.where(reprojected != reprojected.rio.nodata, np.nan)
+        reprojected.rio.write_nodata(np.nan, inplace=True)
+    elif isinstance(reprojected, xr.Dataset):
+        for var in reprojected.data_vars:
+            reprojected[var] = reprojected[var].where(
+                reprojected[var] != reprojected[var].rio.nodata, np.nan
+            ).rio.write_nodata(np.nan)
+    else:
+        raise ValueError("Unexpected output type from reproject method")
+        
     return reprojected
