@@ -1,9 +1,11 @@
 import asyncio
 import math
+import tempfile
+import shutil
 from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
-
+from pathlib import Path
 
 import aiohttp
 import numpy as np
@@ -13,6 +15,9 @@ import xarray as xr
 import rioxarray as rxr 
 import requests
 from tqdm.asyncio import tqdm_asyncio
+from src.ingestion.geo_utils import BoxTiler
+
+
 
 
 @dataclass
@@ -49,6 +54,8 @@ class WCSDownloader:
         endpoint: str,
         coverage_id: str,
         fill_value: Optional[float] = None,
+        use_temp_storage: bool = False,
+        request_tile_pixels: Tuple[int, int] = (512, 512),
     ):
         """Initializes the WCS downloader.
 
@@ -56,11 +63,26 @@ class WCSDownloader:
             endpoint: Base URL of the WCS service.
             coverage_id: Identifier for the coverage to download.
             fill_value: Value to use for missing or invalid data. Defaults to np.nan.
+            use_temp_storage: If True, saves downloaded tiles to disk to reduce memory usage.
         """
         self.endpoint = endpoint
         self.coverage_id = coverage_id
         self.fill_value = fill_value if fill_value is not None else np.nan
+        self.use_temp_storage = use_temp_storage
         self.axis_labels, self.native_crs = self._fetch_coverage_description()
+        self.max_tile_pixels = (4096, 4096) 
+        self.request_tile_pixels = request_tile_pixels
+        self.origin = (0, 0)
+        
+        if self.use_temp_storage:
+            self.temp_dir = Path(tempfile.mkdtemp(prefix="wcs_download_"))
+        else:
+            self.temp_dir = None
+
+    def __del__(self):
+        """Cleanup temporary files when the object is destroyed."""
+        if hasattr(self, 'temp_dir') and self.temp_dir and self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
 
     def __repr__(self):
         return f"WCSDownloader(endpoint={self.endpoint!r}, coverage_id={self.coverage_id!r})"
@@ -90,64 +112,7 @@ class WCSDownloader:
         srs_name = envelope.attrib.get("srsName", "")
         return axis_str.split(), srs_name
 
-    def split_bbox(
-        self, bbox: Tuple[float, float, float, float], tile_size: Tuple[float, float]
-    ) -> List[Tuple[Tuple[float, float, float, float], int, int]]:
-        """
-        Split an overall bounding box into smaller tiles of given size.
 
-        Args:
-            bbox: (minx, miny, maxx, maxy).
-            tile_size: (tile_width, tile_height).
-        Returns:
-            A list of tuples: (tile_bbox, col_index, row_index).
-        """
-        minx, miny, maxx, maxy = bbox
-        tile_w, tile_h = tile_size
-        cols = math.ceil((maxx - minx) / tile_w)
-        rows = math.ceil((maxy - miny) / tile_h)
-
-        tiles = []
-        for j in range(rows):  # j=0 is bottom row, j=rows-1 is top
-            for i in range(cols):
-                tx_min = minx + i * tile_w
-                tx_max = min(tx_min + tile_w, maxx)
-                ty_min = miny + j * tile_h
-                ty_max = min(ty_min + tile_h, maxy)
-                tiles.append(((tx_min, ty_min, tx_max, ty_max), i, j))
-        return tiles
-
-    def standardize_bbox(
-        self, bbox: Tuple[float, float, float, float], tile_size: Tuple[float, float]
-    ) -> List[Tuple[float, float, float, float]]:
-        """Splits a bounding box into standardized tiles.
-
-        Creates a set of tiles that align with a global grid to ensure consistent
-        tiling across different requests.
-
-        Args:
-            bbox: Tuple of (minx, miny, maxx, maxy) coordinates.
-            tile_size: Tuple of (width, height) for the tiles.
-
-        Returns:
-            List of tuples, each containing (minx, miny, maxx, maxy) for a tile.
-        """
-        minx, miny, maxx, maxy = bbox
-        tile_w, tile_h = tile_size
-
-        # Round to nearest tile boundary
-        start_x = math.floor(minx / tile_w) * tile_w
-        start_y = math.floor(miny / tile_h) * tile_h
-        end_x = math.ceil(maxx / tile_w) * tile_w
-        end_y = math.ceil(maxy / tile_h) * tile_h
-
-        standard_tiles = []
-        for y in np.arange(start_y, end_y, tile_h):
-            for x in np.arange(start_x, end_x, tile_w):
-                tile_bbox = (x, y, x + tile_w, y + tile_h)
-                standard_tiles.append(tile_bbox)
-
-        return standard_tiles
 
     async def _fetch_tile(
         self,
@@ -169,6 +134,20 @@ class WCSDownloader:
             "height": str(height),
         }
         minx, miny, maxx, maxy = bbox
+
+        # The resolution is controled by a scale factor parameter.
+        # I'm calculating this here but it could be done outside of this function if 
+        # we know the source resolution and the desired resolution
+        bbox_width = maxx - minx
+        bbox_height = maxy - miny
+
+        x_scale = width / bbox_width
+        y_scale = height / bbox_height
+        scalefactor = max(x_scale, y_scale)
+        # It is a float value, if source res is 1m and desired res is 10m, scalefactor = 0.1
+        params["scalefactor"] = str(scalefactor)
+
+
         # axis_labels[0] is typically "x" or "long", axis_labels[1] is "y" or "lat"
         params["subset"] = [
             f"{self.axis_labels[0]}({minx},{maxx})",
@@ -192,7 +171,6 @@ class WCSDownloader:
         self,
         bbox: Tuple[float, float, float, float],
         resolution: float,
-        tile_size: Optional[Tuple[float, float]] = None,
         max_concurrent: int = 10,
     ) -> xr.Dataset:
         """Downloads coverage data for a specified bounding box.
@@ -218,71 +196,60 @@ class WCSDownloader:
             raise ValueError("bbox must be a tuple (minx, miny, maxx, maxy).")
         if resolution <= 0:
             raise ValueError("resolution must be positive")
-        minx, miny, maxx, maxy = bbox
 
-        if tile_size is None:
-            tile_size = (maxx - minx, maxy - miny)
-        else:
-            if tile_size[0] <= 0 or tile_size[1] <= 0:
-                raise ValueError("tile_size must be positive")
 
+        # Clear temp files if using temp storage
+        if self.use_temp_storage and self.temp_dir:
+            for f in self.temp_dir.glob("*.tif"):
+                f.unlink()
+
+        tile_width_crs = self.request_tile_pixels[0] * resolution
+        tile_height_crs = self.request_tile_pixels[1] * resolution
+
+        tile_factory = BoxTiler(
+            tile_size=(tile_width_crs, tile_height_crs),
+            origin=self.origin,
+            )
+        
         # Get standardized tiles
-        standard_tiles = self.standardize_bbox(bbox, tile_size)
+        standard_tiles = tile_factory.tile_bbox(bbox)
+        
+        
+        arrays = await self._download_tiles(standard_tiles, max_concurrent)
+        merged = self._merge_tiles(arrays)
 
-        # Download missing tiles
-        downloaded_tiles = await self._download_tiles(
-            standard_tiles, resolution, max_concurrent
-        )
-
-        # Merge all tiles
-        merged_tiles = self._prepare_result(downloaded_tiles)
-        # add attrs
-        merged_tiles.attrs["source_url"] = self.endpoint
-        merged_tiles.attrs["coverage_id"] = self.coverage_id
-
-        return merged_tiles
+        merged.attrs.update({
+            "source_url": self.endpoint,
+            "coverage_id": self.coverage_id
+        })
+        
+        return merged
 
     async def _download_tiles(
         self,
         tiles: List[Tuple[float, float, float, float]],
-        resolution: float,
         max_concurrent: int,
     ) -> List[xr.DataArray]:
-        """Downloads multiple tiles concurrently.
-
-        Args:
-            tiles: List of bbox tuples defining the tiles to download.
-            resolution: Pixel size in coordinate system units.
-            max_concurrent: Maximum number of simultaneous downloads.
-
-        Returns:
-            List of xarray.DataArray objects, one per downloaded tile.
-
-        Raises:
-            aiohttp.ClientError: If any tile download fails.
-        """
+        """Download tiles and keep them in memory."""
         downloaded_tiles = []
         async with aiohttp.ClientSession() as session:
             tasks = []
             semaphore = asyncio.Semaphore(max_concurrent)
 
-            for tile_bbox in tiles:
-                w_px = int(np.ceil((tile_bbox[2] - tile_bbox[0]) / resolution))
-                h_px = int(np.ceil((tile_bbox[3] - tile_bbox[1]) / resolution))
-
+            for tile_bbox in tiles: 
+                w_px, h_px = self.request_tile_pixels
                 async def tile_task(bbox=tile_bbox, w=w_px, h=h_px):
                     async with semaphore:
                         data = await self._fetch_tile(session, bbox, w, h)
-                        return (bbox, data)
+                        return self._bytes_to_xarray(data)
 
                 tasks.append(tile_task())
 
             for fut in tqdm_asyncio.as_completed(
                 tasks, total=len(tasks), desc="Downloading tiles"
             ):
-                _, data = await fut
-                tile_array = self._bytes_to_xarray(data)
-                downloaded_tiles.append(tile_array)
+                tile = await fut
+                downloaded_tiles.append(tile)
 
         return downloaded_tiles
 
@@ -303,49 +270,17 @@ class WCSDownloader:
         """
         with MemoryFile(data) as mem:
             with mem.open() as ds:
-                arr = ds.read(1)
-                transform = ds.transform
-                width, height = ds.width, ds.height
-                nodata = ds.nodata
+                arr = rxr.open_rasterio(ds)
 
-        # Extract pixel size
-        res_x = transform.a  # Pixel width
-        res_y = -transform.e  # Pixel height (negative since Y decreases)
+        return arr
 
-        # Generate X and Y coordinates (centers of the cells)
-        x_coords = np.arange(width) * res_x + transform.xoff + (res_x / 2)
-        y_coords = np.arange(height) * res_y + transform.yoff + (res_y / 2)
+    def _save_tile(self, data: bytes, path: Path) -> Path:
+        """Save tile data to disk."""
+        with open(path, 'wb') as f:
+            f.write(data)
+        return path
 
-        # Flip Y to match array indexing (descending order)
-        y_coords = y_coords[::-1]
-
-        nodata = nodata if nodata is not None else self.fill_value
-
-        da = xr.DataArray(
-            arr,
-            dims=("y", "x"),
-            coords={
-                "y": y_coords,
-                "x": x_coords,
-            },
-        )
-        da.attrs["transform"] = transform
-        da.attrs["crs"] = self.native_crs
-        da.rio.write_nodata(nodata, inplace=True)
-        return da
-
-    def _prepare_result(self, tiles: List[xr.DataArray]) -> xr.Dataset:
-        """Merges downloaded tiles into a single dataset.
-
-        Args:
-            tiles: List of tile DataArrays to merge.
-
-        Returns:
-            xarray.Dataset containing the merged data with appropriate metadata.
-        """
+    def _merge_tiles(self, tiles: List[xr.DataArray]) -> xr.Dataset:
+        """Merge tiles held in memory."""
         all_tiles = [tile.rename(self.coverage_id) for tile in tiles]
-        merged = xr.merge([tile for tile in all_tiles])
-        merged.attrs.update(
-            {"source_url": self.endpoint, "coverage_id": self.coverage_id}
-        )
-        return merged
+        return xr.merge(all_tiles)

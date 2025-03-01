@@ -1,5 +1,6 @@
 "Module containing utility functions for geospatial data processing."
-from typing import Union
+from typing import Union, Tuple, List
+import math
 
 from rasterio.enums import Resampling
 from affine import Affine
@@ -44,3 +45,82 @@ def reproject_data(
         raise ValueError("Unexpected output type from reproject method")
         
     return reprojected
+
+
+
+class BoxTiler:
+    """
+    Class for tiling a bounding box into smaller tiles.
+    """
+    def __init__(self, 
+                 tile_size: Tuple[float, float],
+                 origin: Tuple[float, float],
+                 ):
+        """
+        Initialize the BoxTiler class.
+        
+        Args:
+            tile_size: Tuple of (width, height) for the tiles.
+            origin: Tuple of (x, y) for the origin of the grid
+            
+        """
+        self.tile_size = tile_size
+        self.origin = origin
+    
+    def pad_and_align(
+            self,
+            bbox: Tuple[float, float, float, float],
+    ) -> Tuple[float, float, float, float]:
+        """
+        Pads and aligns a bounding box to the tile grid.
+
+        Args:
+            bbox: Tuple of (minx, miny, maxx, maxy) coordinates.
+
+        Returns:
+            Tuple of (minx, miny, maxx, maxy) for the padded and aligned box.
+        """
+        minx, miny, maxx, maxy = bbox
+        tile_w, tile_h = self.tile_size
+        origin_x, origin_y = self.origin
+
+        # Align to the tile grid
+        start_x = math.floor((minx - origin_x) / tile_w) * tile_w + origin_x
+        start_y = math.floor((miny - origin_y) / tile_h) * tile_h + origin_y
+        end_x = math.ceil((maxx - origin_x) / tile_w) * tile_w + origin_x
+        end_y = math.ceil((maxy - origin_y) / tile_h) * tile_h + origin_y
+
+        return start_x, start_y, end_x, end_y
+
+
+    def tile_bbox(
+        self, 
+        bbox: Tuple[float, float, float, float], 
+    ) -> List[Tuple[float, float, float, float]]:
+        """
+        Splits a bounding box into standardized tiles.
+
+        Creates a set of tiles that align with a global grid to ensure consistent
+        tiling across different requests.
+
+        Args:
+            bbox: Tuple of (minx, miny, maxx, maxy) coordinates.
+            tile_size: Tuple of (width, height) for the tiles.
+
+        Returns:
+            List of tuples, each containing (minx, miny, maxx, maxy) for a tile.
+        """
+        tile_w, tile_h = self.tile_size
+
+        # Pad and align the bounding box to the tile grid
+        start_x, start_y, end_x, end_y = self.pad_and_align(bbox)
+
+        standard_tiles = []
+        for y in np.arange(start_y, end_y, tile_h):
+            for x in np.arange(start_x, end_x, tile_w):
+                tile_bbox = (x, y, x + tile_w, y + tile_h)
+                standard_tiles.append(tile_bbox)
+
+        return standard_tiles
+    
+
