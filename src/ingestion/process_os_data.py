@@ -253,15 +253,17 @@ def calculate_feature_cover(
     logging.info("Calculating feature cover at %dm resolution", target_resolution)
 
     boundary_union = boundary.unary_union
+    base_resolution = 10  # 10m resolution for rasterization
+    scale_factor = target_resolution // base_resolution
     def calculate_cover(gdf: gpd.GeoDataFrame, name: str) -> xr.Dataset:
         logging.debug("Processing cover for %s (%d features)", name, len(gdf))
         with NamedTemporaryFile() as f:
             rasterise_gdf(
-                gdf, resolution=1, output_file=f.name, bbox=boundary_union.bounds
+                gdf, resolution=base_resolution, output_file=f.name, bbox=boundary_union.bounds
             )
             cover : xr.Dataset = rxr.open_rasterio(f.name, chunks="auto")
             cover_area = cover.coarsen(
-                x=target_resolution, y=target_resolution, boundary="trim"
+                x=scale_factor, y=scale_factor, boundary="trim"
             ).sum()
             # log the % NA values
             logging.debug("NA values for %s: %.2f%%", name,

@@ -44,7 +44,7 @@ async def get_data(
     output_dir: Union[str, Path] = "data/evs",
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
     buffer_distance: float = 7000,
-):
+) -> dict[str, Path]:
     """
     Main function to process climate data based on a given boundary.
     Parameters:
@@ -96,11 +96,12 @@ async def get_data(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    paths = []
+    paths = {}
     for name in results.data_vars:
         resolution_int = int(round(spatial_config["resolution"]))
-        results[name].rio.to_raster(output_dir / f"{name}_{resolution_int}m.tif")
-        paths.append(output_dir / f"{name}_{resolution_int}m.tif")
+        path = output_dir / f"{name}_{resolution_int}m.tif"
+        results[name].rio.to_raster(path)
+        paths[name] = path
 
     logging.info("Data saved to %s", output_dir)
     return paths
@@ -110,7 +111,7 @@ def main(
     output_dir: Union[str, Path] = "data/evs",
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
     buffer_distance: float = 7000,
-):
+) -> dict[str, Path]:
     return asyncio.run(get_data(output_dir, boundary_path, buffer_distance))
 
 
