@@ -19,19 +19,20 @@ from src.ingestion.ogc import WCSDownloader
 
 def init_wcs_downloaders() -> dict[str, WCSDownloader]:
     """Create the WCS downloaders for each layer."""
+    tile_size = (1024, 1024)
     specification = {
-        "dsm": {
-            "endpoint": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-surface-model-last-return-dsm-1m/wcs",
-            "coverage_id": "9ba4d5ac-d596-445a-9056-dae3ddec0178__Lidar_Composite_Elevation_LZ_DSM_1m",
-            "fill_value": np.nan,
-        },
         "dtm": {
             "endpoint": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs",
             "coverage_id": "13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m",
             "fill_value": np.nan,
         },
     }
-    return {layer: WCSDownloader(**spec) for layer, spec in specification.items()}
+    return {
+        layer: WCSDownloader(
+            **spec, request_tile_pixels=tile_size, use_temp_storage=True
+        )
+        for layer, spec in specification.items()
+    }
 
 
 async def get_data(
@@ -72,7 +73,7 @@ async def get_data(
     for layer, wcs_downloader in wcs_downloaders.items():
         logging.info("Downloading %s data...", layer)
         data = await wcs_downloader.get_coverage(
-            bbox=bounds, resolution=100, tile_size=(1024, 1024), max_concurrent=100
+            bbox=bounds, resolution=10, max_concurrent=100
         )
         data = reproject_data(
             data, spatial_config["crs"], model_transform, spatial_config["resolution"]
@@ -109,4 +110,6 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    main(
+        boundary_path="data/processed/boundary.geojson",
+    )

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
+from hashlib import sha256
+from typing import Union
 
 import aiohttp
 import numpy as np
@@ -82,6 +84,11 @@ class WCSDownloader:
     def __del__(self):
         """Cleanup temporary files when the object is destroyed."""
         if hasattr(self, 'temp_dir') and self.temp_dir and self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
+
+    def clear_temp_storage(self):
+        """Clears temporary storage directory if used."""
+        if self.temp_dir and self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
 
     def __repr__(self):
@@ -202,7 +209,10 @@ class WCSDownloader:
         if self.use_temp_storage and self.temp_dir:
             for f in self.temp_dir.glob("*.tif"):
                 f.unlink()
-
+        # TODO: Rethink and fix this logic
+        # Where the user only wants a small area, this is causing usto download very large tiles. 
+        # the tile size should only be utilised when the user requests an area that is larger than the tile size
+        # otherwise we should just download the area requested.
         tile_width_crs = self.request_tile_pixels[0] * resolution
         tile_height_crs = self.request_tile_pixels[1] * resolution
 
@@ -214,9 +224,13 @@ class WCSDownloader:
         # Get standardized tiles
         standard_tiles = tile_factory.tile_bbox(bbox)
         
-        
-        arrays = await self._download_tiles(standard_tiles, max_concurrent)
-        merged = self._merge_tiles(arrays)
+
+        arrays_or_paths = await self._download_tiles(standard_tiles, max_concurrent)
+
+        if self.use_temp_storage:
+            merged = self._merge_arrays_disk(arrays_or_paths)
+        else:
+            merged = self._merge_arrays(arrays_or_paths)
 
         merged.attrs.update({
             "source_url": self.endpoint,
@@ -229,7 +243,7 @@ class WCSDownloader:
         self,
         tiles: List[Tuple[float, float, float, float]],
         max_concurrent: int,
-    ) -> List[xr.DataArray]:
+    ) -> Union[List[xr.DataArray], List[Path]]:
         """Download tiles and keep them in memory."""
         downloaded_tiles = []
         async with aiohttp.ClientSession() as session:
@@ -238,10 +252,17 @@ class WCSDownloader:
 
             for tile_bbox in tiles: 
                 w_px, h_px = self.request_tile_pixels
-                async def tile_task(bbox=tile_bbox, w=w_px, h=h_px):
+                async def tile_task(bbox=tile_bbox, w=w_px, h=h_px, to_disk=self.use_temp_storage):
                     async with semaphore:
                         data = await self._fetch_tile(session, bbox, w, h)
-                        return self._bytes_to_xarray(data)
+                        if to_disk:
+                            tile_id = str(bbox) + str((w_px, h_px))
+                            bbox_hash = sha256(tile_id.encode()).hexdigest()
+                            path = self.temp_dir / f"{bbox_hash}.tif"
+                            path = self._save_tile(data, path)
+                            return path
+                        else:
+                            return self._bytes_to_xarray(data)
 
                 tasks.append(tile_task())
 
@@ -280,7 +301,13 @@ class WCSDownloader:
             f.write(data)
         return path
 
-    def _merge_tiles(self, tiles: List[xr.DataArray]) -> xr.Dataset:
+    def _merge_arrays(self, tiles: List[xr.DataArray]) -> xr.Dataset:
         """Merge tiles held in memory."""
         all_tiles = [tile.rename(self.coverage_id) for tile in tiles]
         return xr.merge(all_tiles)
+
+    def _merge_arrays_disk(self, paths: List[Path]) -> xr.Dataset:
+        """Merge tiles saved to disk."""
+        arrays  = xr.open_mfdataset(paths, engine="rasterio", chunks={"x": self.request_tile_pixels[0], "y": self.request_tile_pixels[1]})
+        arrays = arrays.rename({"band_data" : self.coverage_id})
+        return arrays

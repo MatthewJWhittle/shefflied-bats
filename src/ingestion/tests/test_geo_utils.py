@@ -35,7 +35,7 @@ def test_aligning_many_tiles():
         assert ymin <= box[1]
         assert xmax >= box[2]
         assert ymax >= box[3]
-        
+
 
 
 def test_tile_bbox(bbox):
@@ -60,4 +60,8 @@ def test_tile_bbox(bbox):
 
 
 
+
+def test_align_big_box():
+    bbox = (412392.528344397, 447395.6376247584, 414044.85501631664, 449042.5684995359)
+    result = BoxTiler(tile_size=(100, 100), origin=(0, 0)).pad_and_align(bbox)
 
