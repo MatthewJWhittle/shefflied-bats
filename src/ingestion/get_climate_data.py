@@ -244,7 +244,9 @@ def calculate_climate_stats(temp_average, precipitation, wind, output_dir):
     climate_stats["wind_ann_avg"] = wind.mean(axis=0)
 
     climate_stats = climate_stats.drop_vars("zeros")
-    climate_stats.rio.to_raster(output_dir / "climate_stats.tif")
+    path = output_dir / "climate_stats.tif"
+    climate_stats.rio.to_raster(path)
+    return path
 
 
 def main(
@@ -280,7 +282,9 @@ def main(
     assign_variable_names(temp_average, precipitation, bioclim, wind)
     
     write_data(temp_average, precipitation, bioclim, wind, output_dir)
-    calculate_climate_stats(temp_average, precipitation, wind, output_dir)
+    stats_path = calculate_climate_stats(temp_average, precipitation, wind, output_dir)
+
+    return stats_path
 
 
 if __name__ == "__main__":

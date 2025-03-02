@@ -99,7 +99,7 @@ async def get_data(
         paths.append(output_dir / f"{name}_{resolution_int}m.tif")
 
     logging.info("Data saved to %s", output_dir)
-    return paths
+    return paths[0]
 
 
 def main(
@@ -107,7 +107,7 @@ def main(
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
     buffer_distance: float = 7000,
 ):
-    asyncio.run(get_data(output_dir, boundary_path, buffer_distance))
+    return asyncio.run(get_data(output_dir, boundary_path, buffer_distance))
 
 
 if __name__ == "__main__":
