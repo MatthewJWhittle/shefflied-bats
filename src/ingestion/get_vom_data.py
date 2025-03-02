@@ -21,14 +21,9 @@ def init_wcs_downloaders() -> dict[str, WCSDownloader]:
     """Create the WCS downloaders for each layer."""
     tile_size = (1024, 1024)
     specification = {
-        "dtm": {
-            "endpoint": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs",
-            "coverage_id": "13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m",
-            "fill_value": np.nan,
-        },
-        "dsm": {
-            "endpoint": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-surface-model-last-return-dsm-1m/wcs",
-            "coverage_id": "9ba4d5ac-d596-445a-9056-dae3ddec0178__Lidar_Composite_Elevation_LZ_DSM_1m",
+        "vom": {
+            "endpoint": "https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs",
+            "coverage_id": "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022",
             "fill_value": np.nan,
         },
     }
@@ -61,6 +56,7 @@ async def get_data(
     8. Writes the processed data to the specified output directory.
     9. Calculates and saves climate statistics based on the processed data.
     """
+    resolution = 10
     setup_logging()
 
     boundary = load_boundary(
@@ -69,7 +65,7 @@ async def get_data(
     spatial_config = load_spatial_config()
     boundary.to_crs(spatial_config["crs"], inplace=True)
     model_transform, bounds = construct_transform_shift_bounds(
-        tuple(boundary.total_bounds), spatial_config["resolution"]
+        tuple(boundary.total_bounds), resolution
     )
 
     wcs_downloaders = init_wcs_downloaders()
@@ -78,10 +74,10 @@ async def get_data(
     for layer, wcs_downloader in wcs_downloaders.items():
         logging.info("Downloading %s data...", layer)
         data = await wcs_downloader.get_coverage(
-            bbox=bounds, resolution=spatial_config["resolution"], max_concurrent=100
+            bbox=bounds, resolution=10, max_concurrent=100
         )
         data = reproject_data(
-            data, spatial_config["crs"], model_transform, spatial_config["resolution"]
+            data, spatial_config["crs"], model_transform, resolution
         )
         results.append(data)
 
@@ -98,7 +94,7 @@ async def get_data(
 
     paths = []
     for name in results.data_vars:
-        resolution_int = int(round(spatial_config["resolution"]))
+        resolution_int = int(round(resolution))
         results[name].rio.to_raster(output_dir / f"{name}_{resolution_int}m.tif")
         paths.append(output_dir / f"{name}_{resolution_int}m.tif")
 
