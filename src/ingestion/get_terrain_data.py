@@ -78,7 +78,7 @@ async def get_data(
     for layer, wcs_downloader in wcs_downloaders.items():
         logging.info("Downloading %s data...", layer)
         data = await wcs_downloader.get_coverage(
-            bbox=bounds, resolution=spatial_config["resolution"], max_concurrent=100
+            bbox=bounds, resolution=10, max_concurrent=100
         )
         data = reproject_data(
             data, spatial_config["crs"], model_transform, spatial_config["resolution"]

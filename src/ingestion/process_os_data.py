@@ -76,7 +76,7 @@ def rasterise_gdf(
     ) as dest:
         dest.write(mask.astype(rio.uint8), 1)
 
-    return output_file
+    return Path(output_file)
 
 
 def generate_point_grid(
@@ -148,6 +148,8 @@ def load_os_shps(
         logging.debug("Loading %d files for dataset %s", len(files), dataset)
         gdfs = [gpd.read_file(file) for file in files]
         gdf = gpd.GeoDataFrame(pd.concat(gdfs))
+        # add bounding box columns to use for filtering in parquet loading
+        gdf = pd.concat([gdf, gdf.geometry.bounds], axis=1)
         gdf["dataset"] = dataset
         logging.info("Loaded %d features for dataset %s", len(gdf), dataset)
         os_data.append(gdf)
@@ -300,7 +302,6 @@ def calculate_distances(
     logging.info("Calculating distance matrices at %dm resolution", resolution)
     
     bbox = tuple(boundary.total_bounds)
-    boundary_union = boundary.unary_union
     grid = generate_point_grid(bbox, resolution, boundary.crs)
     logging.info("Generated point grid with %d points", len(grid))
 
@@ -320,7 +321,6 @@ def calculate_distances(
         .set_index(["y", "x"])
         .to_xarray()
         .rio.write_crs(boundary.crs)
-        #.rio.clip([boundary_union], crs=boundary.crs)
         .drop_vars(["geometry"])
     )
     # log the na values
@@ -331,11 +331,36 @@ def calculate_distances(
     return distance_array
 
 
+def squeeze_dataset(ds: xr.Dataset) -> xr.Dataset:
+    """Squeeze a Dataset by dropping extra dimensions."""
+    for var in ds.data_vars:
+        ds[var] = ds[var].squeeze()
+    if "band" in ds.dims:
+        ds = ds.drop_dims("band")
+    return ds
+
+
+def bbox_filter(bounds:tuple, bounds_vars = ("minx", "miny", "maxx", "maxy")) -> list:
+    """
+    Generate a set of filters to use in loading parquet files.
+    """
+    xmin, ymin, xmax, ymax = bounds
+    xmin_label, ymin_label, xmax_label, ymax_label = bounds_vars
+    filters = [
+        (xmin_label, ">=", xmin),
+        (ymin_label, ">=", ymin),
+        (xmax_label, "<=", xmax),
+        (ymax_label, "<=", ymax)
+    ]
+
+    return filters
+
 def main(
     output_dir: Union[str, Path] = "data/evs",
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
     buffer_distance: float = 7000,
     debug : bool = False,
+    load_from_shp: bool = False
 ) -> Tuple[Path, Path]:
     """Process Ordnance Survey data to generate environmental variables.
 
@@ -348,6 +373,7 @@ def main(
         boundary_path: Path to GeoJSON file defining the area of interest.
         buffer_distance: Distance in meters to buffer the boundary.
         debug: Enable debug logging.
+        load_from_shp: Whether to load OS data from shapefiles instead of cached parquet files.
 
     Returns:
         Tuple containing:
@@ -381,10 +407,11 @@ def main(
     # Load OS data
     datasets = ["Building", "Water", "Woodland", "Road"]
     parquet_paths = generate_parquets(
-        datasets, dir="data/raw/big-files/os-data", boundary=box(*bounds)
+        datasets, dir="data/raw/big-files/os-data", boundary=box(*bounds), overwrite=load_from_shp
     )
+    bbox_filters = bbox_filter(bounds)
     os_data = {
-        name: gpd.read_parquet(path) for name, path in zip(datasets, parquet_paths)
+        name: gpd.read_parquet(path, filters = bbox_filters) for name, path in zip(datasets, parquet_paths)
     }
 
     # Process roads
@@ -409,7 +436,9 @@ def main(
     )
     logging.info("Writing feature cover raster")
     cover_path = output_dir / "os-feature-cover.tif"
-    feature_cover.to_array().squeeze().rio.to_raster(cover_path)
+    # write it as a dataset to keep band names
+    feature_cover = squeeze_dataset(feature_cover) # type: ignore
+    feature_cover.rio.to_raster(cover_path)
 
     # Calculate and save distance matrices
     distance_array = calculate_distances(feature_gdfs, boundary)
@@ -421,7 +450,8 @@ def main(
     )
     logging.info("Writing distance matrix raster")
     distance_path = output_dir / "os-distance-to-feature.tif"
-    distance_array.to_array().squeeze().rio.to_raster(
+    distance_array = squeeze_dataset(distance_array) # type: ignore
+    distance_array.rio.to_raster(
         distance_path
     )
 
@@ -432,5 +462,7 @@ def main(
 
 if __name__ == "__main__":
     main(
-        debug=False
+        boundary_path="data/raw/test-aoi.geojson",
+        debug=False,
+        load_from_shp=True
     )

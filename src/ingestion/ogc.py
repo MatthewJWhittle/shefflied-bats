@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 from hashlib import sha256
 from typing import Union
+from io import BytesIO
 
 import aiohttp
 import numpy as np
@@ -19,7 +20,21 @@ import requests
 from tqdm.asyncio import tqdm_asyncio
 from src.ingestion.geo_utils import BoxTiler
 
-
+def calculate_z_score(
+        array: xr.DataArray,
+        eps: float = 1e-8,
+) -> xr.DataArray:
+    """
+    Calculate the z-score of an array.
+    Args:
+        array (xr.DataArray): The input array.
+    Returns:
+        xr.DataArray: The z-score of the input array.
+    """
+    mean = array.mean(skipna=True)
+    std = array.std(skipna=True)
+    z_score = (array - mean) / (std + eps)
+    return z_score
 
 
 @dataclass
@@ -136,7 +151,7 @@ class WCSDownloader:
             "version": "2.0.1",
             "request": "GetCoverage",
             "coverageId": self.coverage_id,
-            "format": "image/tiff",
+            "format": "image/tiff;application=geotiff",
             "width": str(width),
             "height": str(height),
         }
@@ -232,6 +247,16 @@ class WCSDownloader:
         else:
             merged = self._merge_arrays(arrays_or_paths)
 
+        # set nodata value
+        # for dataset in datasets:
+        for var in merged.data_vars:
+            data_array = merged[var]
+            # sometimes arrays are returned with a fill value of above or below 1e30. not sure why
+            null_value = (data_array == data_array.rio.nodata)
+            data_array = data_array.where(~null_value, self.fill_value)
+            data_array.rio.write_nodata(self.fill_value, inplace=True)
+            merged[var] = data_array
+
         merged.attrs.update({
             "source_url": self.endpoint,
             "coverage_id": self.coverage_id
@@ -289,9 +314,8 @@ class WCSDownloader:
         Raises:
             ValueError: If the data cannot be read as a valid GeoTIFF.
         """
-        with MemoryFile(data) as mem:
-            with mem.open() as ds:
-                arr = rxr.open_rasterio(ds)
+        with BytesIO(data) as bytes_io:
+            arr = rxr.open_rasterio(bytes_io, masked=True)
 
         return arr
 

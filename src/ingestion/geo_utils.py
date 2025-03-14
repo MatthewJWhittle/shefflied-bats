@@ -10,7 +10,11 @@ import numpy as np
 
 
 def reproject_data(
-    array: Union[xr.DataArray, xr.Dataset], crs: Union[int, str], transform: Affine, resolution: float
+    array: Union[xr.DataArray, xr.Dataset], 
+    crs: Union[int, str], 
+    transform: Affine, 
+    resolution: float,
+    resampling: Resampling = Resampling.bilinear,
 ) -> Union[xr.DataArray, xr.Dataset]:
     """
     Reprojects the given array to a specified coordinate reference system (CRS) and transform.

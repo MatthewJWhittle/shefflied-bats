@@ -2,8 +2,10 @@ from pathlib import Path
 
 import pytest
 import xarray as xr
+import numpy as np
 
 from src.ingestion.get_terrain_data import init_wcs_downloaders, main
+from src.ingestion.ogc import WCSDownloader
 
 
 @pytest.mark.asyncio
@@ -39,11 +41,43 @@ def params(tmp_path) -> dict:
     }
 
 
-
 def test_main(params):
     main(**params, buffer_distance=0)
     output_dir = Path(params["output_dir"])
     assert output_dir.exists()
     assert len(list(output_dir.glob("*.tif"))) > 0
-    
 
+
+@pytest.mark.asyncio
+async def test_value_range():
+    dtm_downloader = WCSDownloader(
+        endpoint="https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs",
+        coverage_id="13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m",
+        fill_value=np.nan,
+    )
+    dataset = await dtm_downloader.get_coverage(
+        bbox=(403273, 515629, 405059, 517603),
+        resolution=1,
+    )
+
+    array = dataset[dtm_downloader.coverage_id]
+    assert array.min() >= -10
+    assert array.max() <= 1000
+
+
+@pytest.mark.asyncio
+async def test_value_range_use_disk():
+    dtm_downloader = WCSDownloader(
+        endpoint="https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs",
+        coverage_id="13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m",
+        fill_value=np.nan,
+        use_temp_storage=True,
+    )
+    dataset = await dtm_downloader.get_coverage(
+        bbox=(403273, 515629, 405059, 517603),
+        resolution=1,
+    )
+
+    array = dataset[dtm_downloader.coverage_id]
+    assert array.min() >= -10
+    assert array.max() <= 1000
