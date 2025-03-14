@@ -13,7 +13,7 @@ from src.utils.load import (
     construct_transform_shift_bounds,
 )
 from src.utils.config import setup_logging
-from src.ingestion.geo_utils import reproject_data
+from src.ingestion.geo_utils import reproject_data, squeeze_dataset
 from src.ingestion.ogc import WCSDownloader
 
 
@@ -40,11 +40,12 @@ def init_wcs_downloaders() -> dict[str, WCSDownloader]:
     }
 
 
+
 async def get_data(
     output_dir: Union[str, Path] = "data/evs",
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
     buffer_distance: float = 7000,
-) -> dict[str, Path]:
+) -> Path:
     """
     Main function to process climate data based on a given boundary.
     Parameters:
@@ -96,22 +97,21 @@ async def get_data(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    paths = {}
-    for name in results.data_vars:
-        resolution_int = int(round(spatial_config["resolution"]))
-        path = output_dir / f"{name}_{resolution_int}m.tif"
-        results[name].rio.to_raster(path)
-        paths[name] = path
+    resolution_int = int(spatial_config["resolution"])
+    path = output_dir / f"dtm_dsm_{resolution_int}m.tif"
+    results = squeeze_dataset(results)
+    results.rio.to_raster(path)
+    
 
     logging.info("Data saved to %s", output_dir)
-    return paths
+    return path
 
 
 def main(
     output_dir: Union[str, Path] = "data/evs",
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
     buffer_distance: float = 7000,
-) -> dict[str, Path]:
+) -> Path:
     return asyncio.run(get_data(output_dir, boundary_path, buffer_distance))
 
 

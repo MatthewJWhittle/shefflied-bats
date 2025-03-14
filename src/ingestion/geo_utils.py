@@ -128,3 +128,11 @@ class BoxTiler:
         return standard_tiles
     
 
+def squeeze_dataset(ds: xr.Dataset) -> xr.Dataset:
+    """Squeeze a Dataset by dropping extra dimensions."""
+    for var in ds.data_vars:
+        ds[var] = ds[var].squeeze()
+    if "band" in ds.dims:
+        ds = ds.drop_dims("band")
+    return ds
+

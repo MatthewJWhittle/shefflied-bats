@@ -13,7 +13,7 @@ from src.utils.load import (
     construct_transform_shift_bounds,
 )
 from src.utils.config import setup_logging
-from src.ingestion.geo_utils import reproject_data
+from src.ingestion.geo_utils import reproject_data, squeeze_dataset
 from src.ingestion.ogc import WCSDownloader
 
 
@@ -92,14 +92,15 @@ async def get_data(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    paths = []
-    for name in results.data_vars:
-        resolution_int = int(round(resolution))
-        results[name].rio.to_raster(output_dir / f"{name}_{resolution_int}m.tif")
-        paths.append(output_dir / f"{name}_{resolution_int}m.tif")
 
+    resolution_int = int(spatial_config["resolution"])
+    path = output_dir / f"vom_{resolution_int}m.tif"
+    results = squeeze_dataset(results)
+    results.rio.to_raster(path)
+    
     logging.info("Data saved to %s", output_dir)
-    return paths[0]
+    
+    return path
 
 
 def main(

@@ -30,9 +30,7 @@ def main(boundary_path: str, output_dir: str, debug: bool = False):
     climate_stats_path = get_climate_data(output_dir, boundary_path)
 
     # EA LiDAR data
-    terrain_paths = get_terrain_data(output_dir, boundary_path)
-    dtm_path = terrain_paths["dtm"]
-    dsm_path = terrain_paths["dsm"]
+    terrain_path = get_terrain_data(output_dir, boundary_path)
 
     # VOM data
     vom_path = get_vom_data(output_dir, boundary_path)
@@ -43,4 +41,4 @@ def main(boundary_path: str, output_dir: str, debug: bool = False):
     ceh_path = get_ceh_data(output_dir, boundary_path)
 
     ## Transform data
-    terrain_stats_path = process_terrain_stats(dtm_path, Path(output_dir) / "terrain_stats.tif")
+    terrain_stats_path = process_terrain_stats(terrain_path, dem_band=1, Path(output_dir) / "terrain_stats.tif")

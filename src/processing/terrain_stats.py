@@ -8,6 +8,7 @@ import richdem as rd
 import rioxarray as rxr
 
 from src.utils.config import setup_logging
+from src.ingestion.geo_utils import squeeze_dataset
 
 
 def calculate_slope_aspect(dem_rd: rd.rdarray) -> Tuple[rd.rdarray, rd.rdarray]:
@@ -125,6 +126,7 @@ def calculate_weighted_aspect(slope_da: xr.DataArray, aspect_eastness_da: xr.Dat
 
 def process_terrain_stats(
     dem_path: Union[str, Path],
+    dem_band: int = 1,
     window_size: int = 3,
 ) -> xr.Dataset:
     """
@@ -140,9 +142,10 @@ def process_terrain_stats(
     Returns:
         Dataset containing calculated terrain statistics
     """
-    # Load the DEM using RichDEM and rioxarray
-    dem_rd = rd.LoadGDAL(str(dem_path))
-    dem_rxr :xr.Dataset = rxr.open_rasterio(dem_path) # type: ignore
+    # Load the DEM using rioxarray
+    dem_rxr :xr.DataArray = rxr.open_rasterio(dem_path) # type: ignore
+    dem_rxr = dem_rxr.isel(band=dem_band-1)
+    dem_rd = rd.rdarray(dem_rxr.values, no_data=dem_rxr.rio.nodata)
     
     # Convert to dataset with 'dem' variable
     terrain = dem_rxr.to_dataset(name="dem")
@@ -197,9 +200,7 @@ def save_terrain_stats(
     # Drop the DEM to avoid duplication if requested
     terrain_stats = terrain.drop_vars("dem")
     
-    for var in terrain_stats.data_vars:
-        terrain_stats[var] = terrain_stats[var].squeeze()
-    terrain_stats = terrain_stats.drop_dims("band")
+    terrain_stats = squeeze_dataset(terrain_stats)
     # Write to file
     terrain_stats.rio.to_raster(output_path)
     
@@ -209,6 +210,7 @@ def save_terrain_stats(
 def main(
     dem_path: Union[str, Path],
     output_path: Union[str, Path],
+    dem_band: int = 1,
     window_size: int = 3,
 ) -> Path:
     """
@@ -232,6 +234,7 @@ def main(
     terrain = process_terrain_stats(
         dem_path=dem_path,
         window_size=window_size,
+        dem_band=dem_band,
     )
     
     # Save results
@@ -243,14 +246,9 @@ def main(
 
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Calculate terrain statistics from a DEM")
-    parser.add_argument("dem_path", help="Path to the input DEM file", default="data/evs/dtm_100m.tif")
-    parser.add_argument("--output", "-o", help="Path where output should be saved", default="data/evs/terrain_stats.tif")
-    parser.add_argument("--window", "-w", type=int, default=3, 
-                        help="Size of the window for neighborhood calculations")
-    
-    args = parser.parse_args()
-
-    main(args.dem_path, args.output, args.window)
+    main(
+        dem_path="data/evs/dtm_dsm_100m.tif",
+        output_path="data/evs/terrain_stats.tif",
+        window_size=3,
+        dem_band=1,
+    )
