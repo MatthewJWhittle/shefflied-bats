@@ -409,9 +409,8 @@ def main(
     parquet_paths = generate_parquets(
         datasets, dir="data/raw/big-files/os-data", boundary=box(*bounds), overwrite=load_from_shp
     )
-    bbox_filters = bbox_filter(bounds)
     os_data = {
-        name: gpd.read_parquet(path, filters = bbox_filters) for name, path in zip(datasets, parquet_paths)
+        name: gpd.read_parquet(path) for name, path in zip(datasets, parquet_paths)
     }
 
     # Process roads
@@ -462,7 +461,4 @@ def main(
 
 if __name__ == "__main__":
     main(
-        boundary_path="data/raw/test-aoi.geojson",
-        debug=False,
-        load_from_shp=True
     )
