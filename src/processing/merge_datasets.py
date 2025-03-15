@@ -35,7 +35,7 @@ def main(
     logging.info("Merging datasets...\n %s", str(datasets))
 
     # Load the boundary and spatial configuration
-    boundary = load_boundary(boundary_path, buffer_distance=buffer_distance)
+    boundary = load_boundary(boundary_path, buffer_distance=0)
     bounds = tuple(boundary.total_bounds)
     spatial_config = load_spatial_config()
     model_transform, _ = construct_transform_shift_bounds(
@@ -105,6 +105,7 @@ if __name__ == "__main__":
             "os_cover" : "data/evs/os-feature-cover-100m.tif",
             "os-distance" : "data/evs/os-distance-to-feature.tif",
             "climate" : "data/evs/climate_stats.tif",
+            "bgs-coast": "data/evs/coastal_distance.tif",
             },
         output_path="data/evs/all-evs.tif",
 

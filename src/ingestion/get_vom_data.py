@@ -17,22 +17,40 @@ from src.ingestion.geo_utils import reproject_data, squeeze_dataset
 from src.ingestion.ogc import WCSDownloader
 
 
-def init_wcs_downloaders() -> dict[str, WCSDownloader]:
-    """Create the WCS downloaders for each layer."""
-    tile_size = (1024, 1024)
-    specification = {
-        "vom": {
-            "endpoint": "https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs",
-            "coverage_id": "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022",
-            "fill_value": np.nan,
-        },
-    }
-    return {
-        layer: WCSDownloader(
-            **spec, request_tile_pixels=tile_size, use_temp_storage=True
+def summarise_vegetation_height(
+    data: xr.DataArray, target_resolution: int, name: str = "vegetation_height"
+) -> xr.Dataset:
+    """
+    Summarise the vegetation height by calculating the mean, min, max, and standard deviation.
+
+    Args:
+        data (xr.Dataset): The vegetation height data.
+        target_resolution (int): The target resolution to use in coarsening the data.
+    """
+
+    current_res = int(abs(data.rio.resolution()[0]))
+    scale_factor = target_resolution / current_res
+    if scale_factor <= 1:
+        raise ValueError(
+            f"The target resolution {target_resolution} must be less than the current resolution {current_res}."
         )
-        for layer, spec in specification.items()
-    }
+
+    scale_factor = int(scale_factor)
+    data_coarse = data.coarsen(x=scale_factor, y=scale_factor, boundary="pad")
+    data_mean = data_coarse.mean()
+    data_min = data_coarse.min()
+    data_max = data_coarse.max()
+    data_std = data_coarse.std()
+
+    summary = xr.Dataset(
+        {
+            f"{name}_mean": data_mean,
+            f"{name}_min": data_min,
+            f"{name}_max": data_max,
+            f"{name}_std": data_std,
+        }
+    )
+    return summary
 
 
 async def get_data(
@@ -68,38 +86,42 @@ async def get_data(
         tuple(boundary.total_bounds), resolution
     )
 
-    wcs_downloaders = init_wcs_downloaders()
+    wcs_downloader = WCSDownloader(
+        "https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs",
+        "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022",
+        request_tile_pixels=(1024, 1024),
+        use_temp_storage=True,
+    )
 
-    results = []
-    for layer, wcs_downloader in wcs_downloaders.items():
-        logging.info("Downloading %s data...", layer)
-        data = await wcs_downloader.get_coverage(
-            bbox=bounds, resolution=10, max_concurrent=100
-        )
-        data = reproject_data(
-            data, spatial_config["crs"], model_transform, resolution
-        )
-        results.append(data)
+    logging.info("Downloading vom data...")
+    results = await wcs_downloader.get_coverage(
+        bbox=bounds, resolution=10, max_concurrent=100
+    )
 
-    results = xr.merge(results)
     # rename the variables to dtm and dsm
-    name_mapping = {
-        downloader.coverage_id: name for name, downloader in wcs_downloaders.items()
-    }
+    var_name = "vegetation_height"
+    name_mapping = {wcs_downloader.coverage_id: var_name}
     results = results.rename(name_mapping)
 
+    result_summary = summarise_vegetation_height(
+        results.to_array().squeeze(), 
+        target_resolution=spatial_config["resolution"]
+    )
+
+    result_summary = reproject_data(
+        result_summary, spatial_config["crs"], model_transform, resolution
+    )
     # Write intermediate data to disk
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-
     resolution_int = int(spatial_config["resolution"])
     path = output_dir / f"vom_{resolution_int}m.tif"
-    results = squeeze_dataset(results)
-    results.rio.to_raster(path)
-    
+    result_summary = squeeze_dataset(result_summary)
+    result_summary.rio.to_raster(path)
+
     logging.info("Data saved to %s", output_dir)
-    
+
     return path
 
 
