@@ -14,7 +14,10 @@ import rasterio as rio
 from rasterio.features import geometry_mask
 from rasterio.transform import from_bounds as transform_from_bounds
 
-from src.ingestion.geo_utils import reproject_data
+from src.ingestion.geo_utils import (
+    reproject_data,
+    calculate_distances,
+    )
 from src.utils.config import setup_logging
 from src.utils.load import (
     load_boundary,
@@ -78,49 +81,6 @@ def rasterise_gdf(
 
     return Path(output_file)
 
-
-def generate_point_grid(
-    bbox: Tuple[float, float, float, float],
-    resolution: float,
-    crs: str
-) -> gpd.GeoDataFrame:
-    """Generate a regular grid of points within a bounding box.
-
-    Args:
-        bbox: Bounding box coordinates (minx, miny, maxx, maxy).
-        resolution: Spacing between points in CRS units.
-        crs: Coordinate reference system of the bounding box.
-
-    Returns:
-        GeoDataFrame containing points forming a regular grid.
-    """
-    xmin, ymin, xmax, ymax = bbox
-    # Pad the bounding box
-    width = xmax - xmin
-    height = ymax - ymin
-    # Pad the bounding box to make it fit the resolution
-    # This ensure that the grid is aligned with the raster
-    xmin -= width % resolution
-    ymin -= height % resolution
-    xmax += width % resolution
-    ymax += height % resolution
-
-    # Create a grid of points
-    x_coords = np.arange(xmin, xmax, resolution)
-    y_coords = np.arange(ymin, ymax, resolution)
-    xx, yy = np.meshgrid(x_coords, y_coords)
-    xx = xx.flatten()
-    yy = yy.flatten()
-
-    # Create a geo dataframe
-    grid = gpd.GeoDataFrame(geometry=gpd.points_from_xy(xx, yy))
-    grid.crs = crs
-
-    # Add x and y columns for easy access
-    grid["x"] = xx
-    grid["y"] = yy
-
-    return grid
 
 def load_os_shps(
     datasets: List[str], 
@@ -283,52 +243,6 @@ def calculate_feature_cover(
     #return feature_cover.rio.clip([boundary_union], crs=boundary.crs)
     return feature_cover
 
-
-def calculate_distances(
-    feature_gdfs: Dict[str, gpd.GeoDataFrame],
-    boundary: gpd.GeoDataFrame,
-    resolution: int = 100
-) -> xr.Dataset:
-    """Calculate distance to nearest feature for each feature type.
-
-    Args:
-        feature_gdfs: Dictionary of feature name to GeoDataFrame mappings.
-        boundary: GeoDataFrame containing the area of interest.
-        resolution: Resolution in meters for the output distance grids.
-
-    Returns:
-        xarray Dataset containing distance rasters for each feature type.
-    """
-    logging.info("Calculating distance matrices at %dm resolution", resolution)
-    
-    bbox = tuple(boundary.total_bounds)
-    grid = generate_point_grid(bbox, resolution, boundary.crs)
-    logging.info("Generated point grid with %d points", len(grid))
-
-    grid_points = np.array(grid[["x", "y"]])
-    for name, gdf in feature_gdfs.items():
-        logging.info("Calculating distances to %s features", name)
-        feature_points = np.array(
-            [[geom.x, geom.y] for geom in gdf.geometry.centroid]
-        )
-        tree = cKDTree(feature_points)
-        grid[f"distance_to_{name}"] = tree.query(grid_points, k=1)[0]
-        logging.debug("Completed distance calculation for %s", name)
-
-    logging.info("Converting distance grid to xarray")
-    distance_array = (
-        grid.sort_values(["y", "x"])
-        .set_index(["y", "x"])
-        .to_xarray()
-        .rio.write_crs(boundary.crs)
-        .drop_vars(["geometry"])
-    )
-    # log the na values
-    logging.debug("NA values for distance array: %.2f%%",
-                  100 * distance_array.isnull().mean())
-    logging.info("Distance matrix calculation complete")
-
-    return distance_array
 
 
 def squeeze_dataset(ds: xr.Dataset) -> xr.Dataset:

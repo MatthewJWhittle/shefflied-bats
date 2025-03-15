@@ -4,6 +4,7 @@ from pathlib import Path
 
 import geopandas as gpd
 from rasterio.transform import from_bounds
+from affine import Affine
 
 
 def load_boundary(
@@ -37,7 +38,7 @@ def load_spatial_config() -> dict:
     return spatial_config
 
 
-def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple:
+def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[Affine, tuple]:
     """
     Construct a transform based on the bounds and resolution.
 
@@ -67,3 +68,20 @@ def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple:
         west=xmin, south=ymin, east=xmax, north=ymax, width=width, height=height
     )
     return transform, (xmin, ymin, xmax, ymax)
+
+
+def load_boundary_and_transform(
+        boundary_path: Union[str, Path],
+        buffer_distance: Union[float, int] = 7000,
+) -> tuple[gpd.GeoDataFrame, Affine, tuple, dict]:
+    """
+    Load the boundary and construct the model transform.
+    """
+    spatial_config = load_spatial_config()
+    boundary = load_boundary(
+        boundary_path, buffer_distance=buffer_distance, target_crs=spatial_config["crs"]
+    )
+    model_transform, bounds = construct_transform_shift_bounds(
+        tuple(boundary.total_bounds), spatial_config["resolution"]
+    )
+    return boundary, model_transform, bounds, spatial_config

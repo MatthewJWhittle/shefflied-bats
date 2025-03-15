@@ -64,11 +64,10 @@ async def get_data(
     """
     setup_logging()
 
-    boundary = load_boundary(
-        boundary_path, buffer_distance=buffer_distance, target_crs="EPSG:27700"
-    )
     spatial_config = load_spatial_config()
-    boundary.to_crs(spatial_config["crs"], inplace=True)
+    boundary = load_boundary(
+        boundary_path, buffer_distance=buffer_distance, target_crs=spatial_config["crs"]
+    )
     model_transform, bounds = construct_transform_shift_bounds(
         tuple(boundary.total_bounds), spatial_config["resolution"]
     )
