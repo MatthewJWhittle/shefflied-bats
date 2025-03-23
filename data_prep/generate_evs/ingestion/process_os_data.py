@@ -14,12 +14,12 @@ import rasterio as rio
 from rasterio.features import geometry_mask
 from rasterio.transform import from_bounds as transform_from_bounds
 
-from src.ingestion.geo_utils import (
+from generate_evs.ingestion.geo_utils import (
     reproject_data,
     calculate_distances,
     )
-from src.utils.config import setup_logging
-from src.utils.load import (
+from generate_evs.utils.config import setup_logging
+from generate_evs.utils.load import (
     load_boundary,
     load_spatial_config,
     construct_transform_shift_bounds,

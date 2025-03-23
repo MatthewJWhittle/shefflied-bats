@@ -7,9 +7,8 @@ import rioxarray
 from tqdm import tqdm
 from rasterio import float32 as rio_float32
 
-from src.ingestion.geo_utils import reproject_data, squeeze_dataset
-from src.utils.config import setup_logging
-from src.utils.load import (
+from generate_evs.ingestion.geo_utils import reproject_data, squeeze_dataset
+from generate_evs.utils.load import (
     load_boundary,
     load_spatial_config,
     construct_transform_shift_bounds,
@@ -17,10 +16,9 @@ from src.utils.load import (
 
 
 def main(
-    datasets: dict[str, str],
+    datasets: dict[str, Union[str, Path]],
     output_path: Union[str, Path],
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
-    buffer_distance: float = 7000,
 ) -> Path:
     """
     Merges multiple datasets into a single multiband tiff file.

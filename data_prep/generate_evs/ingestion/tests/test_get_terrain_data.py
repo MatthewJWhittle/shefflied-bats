@@ -4,8 +4,8 @@ import pytest
 import xarray as xr
 import numpy as np
 
-from src.ingestion.get_terrain_data import init_wcs_downloaders, main
-from src.ingestion.ogc import WCSDownloader
+from generate_evs.ingestion.get_terrain_data import init_wcs_downloaders, main
+from generate_evs.ingestion.ogc import WCSDownloader
 
 
 @pytest.mark.asyncio

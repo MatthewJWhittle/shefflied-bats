@@ -7,8 +7,8 @@ import xarray as xr
 import richdem as rd
 import rioxarray as rxr
 
-from src.utils.config import setup_logging
-from src.ingestion.geo_utils import squeeze_dataset
+from generate_evs.utils.config import setup_logging
+from generate_evs.ingestion.geo_utils import squeeze_dataset
 
 
 def calculate_slope_aspect(dem_rd: rd.rdarray) -> Tuple[rd.rdarray, rd.rdarray]:

@@ -6,7 +6,7 @@ import richdem as rd
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from src.processing.terrain_stats import (
+from generate_evs.processing.terrain_stats import (
     calculate_slope_aspect,
     calculate_aspect_components,
     calculate_twi,

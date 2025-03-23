@@ -7,8 +7,8 @@ import numpy as np
 from rasterio.enums import Resampling
 import xarray as xr
 
-from src.utils.load import load_boundary, load_spatial_config, construct_transform_shift_bounds
-from src.ingestion.geo_utils import reproject_data
+from generate_evs.utils.load import load_boundary, load_spatial_config, construct_transform_shift_bounds
+from generate_evs.ingestion.geo_utils import reproject_data
 
 
 

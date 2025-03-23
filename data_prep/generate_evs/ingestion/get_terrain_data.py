@@ -7,14 +7,14 @@ import numpy as np
 import rioxarray as rxr
 import xarray as xr
 
-from src.utils.load import (
+from generate_evs.utils.load import (
     load_boundary,
     load_spatial_config,
     construct_transform_shift_bounds,
 )
-from src.utils.config import setup_logging
-from src.ingestion.geo_utils import reproject_data, squeeze_dataset
-from src.ingestion.ogc import WCSDownloader
+from generate_evs.utils.config import setup_logging
+from generate_evs.ingestion.geo_utils import reproject_data, squeeze_dataset
+from generate_evs.ingestion.ogc import WCSDownloader
 
 
 def init_wcs_downloaders() -> dict[str, WCSDownloader]:

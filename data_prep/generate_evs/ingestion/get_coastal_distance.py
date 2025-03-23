@@ -7,9 +7,9 @@ import xarray as xr
 import rioxarray as rxr
 from shapely.geometry.base import BaseGeometry
 
-from src.ingestion.geo_utils import reproject_data, squeeze_dataset, generate_point_grid
-from src.utils.load import load_boundary_and_transform
-from src.utils.config import setup_logging
+from generate_evs.ingestion.geo_utils import reproject_data, squeeze_dataset, generate_point_grid
+from generate_evs.utils.load import load_boundary_and_transform
+from generate_evs.utils.config import setup_logging
 
 
 def calculate_distance(

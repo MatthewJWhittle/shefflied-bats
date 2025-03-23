@@ -8,7 +8,7 @@ import xarray as xr
 import rioxarray as rxr
 from rasterio.transform import from_bounds
 
-from src.ingestion.process_os_data import (
+from generate_evs.ingestion.process_os_data import (
     generate_point_grid,
     process_roads,
     calculate_distances,

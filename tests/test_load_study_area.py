@@ -1,4 +1,4 @@
-from src.ingestion.load_study_area import load_study_area
+from generate_evs.ingestion.load_study_area import load_study_area
 import pytest
 import geopandas as gpd
 

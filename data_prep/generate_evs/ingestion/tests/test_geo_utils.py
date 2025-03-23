@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 
-from src.ingestion.geo_utils import BoxTiler
+from generate_evs.ingestion.geo_utils import BoxTiler
 
 
 @pytest.fixture
