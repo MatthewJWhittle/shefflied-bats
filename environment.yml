@@ -40,3 +40,4 @@ dependencies:
     - google-cloud-storage
     - rio-cogeo
     - geoplot
+    - pygeos
