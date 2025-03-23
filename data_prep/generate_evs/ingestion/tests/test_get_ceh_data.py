@@ -3,7 +3,7 @@ import xarray as xr
 import numpy as np
 from pathlib import Path
 
-from generate_evs.ingestion.get_ceh_data import (
+from data_prep.generate_evs.ingestion.get_ceh_data import (
     ceh_lc_types, 
     get_land_cover_category, 
     create_broad_habitat_categories,

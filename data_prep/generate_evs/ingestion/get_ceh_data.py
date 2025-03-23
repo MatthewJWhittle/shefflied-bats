@@ -6,12 +6,12 @@ import xarray as xr
 import numpy as np
 import rioxarray as rxr
 
-from generate_evs.utils.load import (
+from data_prep.utils.load import (
     load_boundary,
     load_spatial_config,
     construct_transform_shift_bounds,
 )
-from generate_evs.utils.config import setup_logging
+from data_prep.utils.config import setup_logging
 
 
 def ceh_lc_types() -> Dict[str, str]:

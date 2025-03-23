@@ -4,7 +4,7 @@ import rioxarray as rxr
 import numpy as np
 from pathlib import Path
 
-from generate_evs.ingestion.ogc import WCSDownloader
+from data_prep.generate_evs.ingestion.ogc import WCSDownloader
 
 
 @pytest.fixture

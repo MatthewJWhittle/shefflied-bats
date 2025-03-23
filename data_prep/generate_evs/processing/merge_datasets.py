@@ -7,8 +7,8 @@ import rioxarray
 from tqdm import tqdm
 from rasterio import float32 as rio_float32
 
-from generate_evs.ingestion.geo_utils import reproject_data, squeeze_dataset
-from generate_evs.utils.load import (
+from data_prep.generate_evs.ingestion.geo_utils import reproject_data, squeeze_dataset
+from data_prep.utils.load import (
     load_boundary,
     load_spatial_config,
     construct_transform_shift_bounds,

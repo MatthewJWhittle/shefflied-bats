@@ -18,7 +18,7 @@ import xarray as xr
 import rioxarray as rxr 
 import requests
 from tqdm.asyncio import tqdm_asyncio
-from generate_evs.ingestion.geo_utils import BoxTiler
+from data_prep.generate_evs.ingestion.geo_utils import BoxTiler
 
 def calculate_z_score(
         array: xr.DataArray,

@@ -1,4 +1,4 @@
-from generate_evs.ingestion.load_study_area import load_study_area
+from data_prep.generate_evs.ingestion.load_study_area import load_study_area
 import pytest
 import geopandas as gpd
 
