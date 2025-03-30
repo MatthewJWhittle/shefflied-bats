@@ -100,7 +100,7 @@ if __name__ == "__main__":
             "vom" : "data/evs/vom_100m.tif",
             "terrain_stats" : "data/evs/terrain_stats.tif",
             "terrain" : "data/evs/dtm_dsm_100m.tif",
-            "os_cover" : "data/evs/os-feature-cover-100m.tif",
+            "os_cover" : "data/evs/os-feature-cover.tif",
             "os-distance" : "data/evs/os-distance-to-feature.tif",
             "climate" : "data/evs/climate_stats.tif",
             "bgs-coast": "data/evs/coastal_distance.tif",
