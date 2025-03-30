@@ -3,14 +3,15 @@ Module for generating background points for species distribution modeling.
 """
 
 from pathlib import Path
+from typing import Union, Tuple, Optional, Literal
 import logging
+
 import numpy as np
 import geopandas as gpd
 import xarray as xr
 from scipy.ndimage import gaussian_filter
 from shapely.geometry import box
-import rioxarray as rxr
-from typing import Union, Tuple, Optional, Literal
+import rioxarray as rxr  # noqa: F401
 
 from data_prep.utils.load import (
     load_boundary,
@@ -21,7 +22,7 @@ from data_prep.utils.config import setup_logging
 
 
 def generate_model_grid(
-    boundary_path: Union[str, Path], resolution: Optional[float] = None
+    boundary_path: Union[str, Path], resolution: Optional[int] = None
 ) -> Tuple[xr.DataArray, Tuple]:
     """Generate a model grid based on the study area boundary.
 
@@ -37,17 +38,21 @@ def generate_model_grid(
     boundary = load_boundary(boundary_path)
     # Load spatial config
     spatial_config = load_spatial_config()
+
     if resolution is None:
-        resolution: int = spatial_config["resolution"]
+        grid_resolution: int = spatial_config["resolution"]
+    else:
+        grid_resolution = resolution
+
     # Get model transform and bounds
     _, bounds = construct_transform_shift_bounds(
-        tuple(boundary.total_bounds), resolution
+        tuple(boundary.total_bounds), grid_resolution
     )
 
     # Create coordinate arrays
     minx, miny, maxx, maxy = bounds
-    x_coords = np.arange(minx + resolution / 2, maxx, resolution)
-    y_coords = np.arange(maxy - resolution / 2, miny, -resolution)
+    x_coords = np.arange(minx + grid_resolution / 2, maxx, grid_resolution)
+    y_coords = np.arange(maxy - grid_resolution / 2, miny, -grid_resolution)
 
     # Create empty grid with coordinates
     grid = xr.DataArray(
@@ -65,10 +70,12 @@ def generate_background_points(
     boundary_path: Union[str, Path],
     output_dir: Union[str, Path],
     n_background_points: int = 10000,
-    background_method: Literal["contrast", "percentile", "scale", "fixed", "binary"] = "contrast",
+    background_method: Literal[
+        "contrast", "percentile", "scale", "fixed", "binary"
+    ] = "contrast",
     background_value: float = 0.3,
     sigma: float = 1.5,
-    resolution: Optional[float] = None,
+    resolution: Optional[int] = None,
     transform_method: Literal["log", "sqrt", "presence", "cap", "rank"] = "log",
     cap_percentile: float = 90.0,
 ) -> gpd.GeoDataFrame:
@@ -135,7 +142,7 @@ def generate_background_points(
     occurrences = occurrences[occurrences.intersects(bbox_poly)]
 
     logging.info(
-        f"Using %s occurrence points to generate density surface", len(occurrences)
+        "Using %s occurrence points to generate density surface", len(occurrences)
     )
 
     # Generate density array based on histogram of occurrences
@@ -160,7 +167,7 @@ def generate_background_points(
         point_counts = (point_counts > 0).astype(float)
     elif transform_method == "cap":
         # Cap counts at a percentile threshold
-        logging.info(f"Capping counts at {cap_percentile}th percentile")
+        logging.info("Capping counts at %sth percentile", cap_percentile)
         non_zero = point_counts[point_counts > 0]
         if len(non_zero) > 0:
             cap_value = np.percentile(non_zero, cap_percentile)
@@ -169,11 +176,14 @@ def generate_background_points(
         # Rank-based normalization
         logging.info("Applying rank-based normalization")
         from scipy.stats import rankdata
+
         point_counts_flat = point_counts.flatten()
         ranks = rankdata(point_counts_flat) / len(point_counts_flat)
         point_counts = ranks.reshape(point_counts.shape)
     else:
-        logging.warning(f"Unknown transform method: {transform_method}, using raw counts")
+        logging.warning(
+            "Unknown transform method: %s, using raw counts", transform_method
+        )
 
     # Apply Gaussian smoothing
     point_counts = gaussian_filter(point_counts, sigma=sigma)
@@ -195,33 +205,48 @@ def generate_background_points(
     original_mean = density_array.mean().item()
     original_non_zero_mean = density_array.where(density_array > 0).mean().item()
     original_min = density_array.min().item()
-    
+
     # Apply the background probability floor in a more intuitive way
     if background_method == "contrast":
         # NEW METHOD: Use a contrast ratio to control concentration
         # background_value ranges from 0 (concentrated) to 1 (uniform)
         if background_value < 0 or background_value > 1:
-            logging.warning(f"Contrast value should be between 0 and 1, got {background_value}. Clamping to range [0, 1].")
+            logging.warning(
+                "Contrast value should be between 0 and 1, got %s. Clamping to range [0, 1].",
+                background_value
+            )
             background_value = max(0, min(1, background_value))
-        
+
         # When background_value = 0, floor_probability = 0 (concentrated)
         # When background_value = 1, floor_probability = max_value (uniform)
         floor_probability = original_max * background_value
-        
-        logging.info(f"Using contrast method: floor = max * {background_value:.4f} = {floor_probability:.8f}")
+
+        logging.info(
+            "Using contrast method: floor = max * %.4f = %.8f",
+            background_value,
+            floor_probability
+        )
     elif background_method == "percentile":
         # Calculate percentile using ALL values, not just non-zero
         all_values = density_array.values.flatten()
         floor_probability = np.percentile(all_values, background_value)
-        logging.info(f"Using {background_value}th percentile of ALL values: {floor_probability:.8f}")
+        logging.info(
+            "Using %sth percentile of ALL values: %.8f",
+            background_value,
+            floor_probability
+        )
     elif background_method == "scale":
         # Original behavior: background as a fraction of max
         floor_probability = np.max(density_array) * background_value
-        logging.info(f"Using {background_value:.4f} * max for background: {floor_probability:.8f}")
+        logging.info(
+            "Using %.4f * max for background: %.8f",
+            background_value,
+            floor_probability
+        )
     elif background_method == "fixed":
         # Use background_value as a literal fixed value
         floor_probability = background_value
-        logging.info(f"Using fixed background value: {floor_probability:.8f}")
+        logging.info("Using fixed background value: %.8f", floor_probability)
     elif background_method == "binary":
         # Use binary presence/absence (converts to 1 where there's data, retains 0 elsewhere)
         density_array = density_array > 0
@@ -231,20 +256,33 @@ def generate_background_points(
     else:
         # Default to contrast method
         floor_probability = original_max * 0.3  # Default 0.3 contrast
-        logging.info(f"Using default contrast method (0.3): {floor_probability:.8f}")
-    
+        logging.info("Using default contrast method (0.3): %.8f", floor_probability)
+
     # Apply the floor probability if not using binary method
     if background_method != "binary" and floor_probability is not None:
-        density_array = density_array.where(density_array > floor_probability, floor_probability)
-        
+        density_array = density_array.where(
+            density_array > floor_probability, floor_probability
+        )
+
         # Log statistics about how the floor changed the distribution
         with_floor_max = density_array.max().item()
         with_floor_mean = density_array.mean().item()
         with_floor_min = density_array.min().item()
-        
-        logging.info(f"Density stats before floor - min: {original_min:.8f}, mean: {original_mean:.8f}, non-zero mean: {original_non_zero_mean:.8f}, max: {original_max:.8f}")
-        logging.info(f"Density stats after floor - min: {with_floor_min:.8f}, mean: {with_floor_mean:.8f}, max: {with_floor_max:.8f}")
-        
+
+        logging.info(
+            "Density stats before floor - min: %.8f, mean: %.8f, non-zero mean: %.8f, max: %.8f",
+            original_min,
+            original_mean,
+            original_non_zero_mean,
+            original_max
+        )
+        logging.info(
+            "Density stats after floor - min: %.8f, mean: %.8f, max: %.8f",
+            with_floor_min,
+            with_floor_mean,
+            with_floor_max
+        )
+
         # Calculate and log how much of probability mass is in background vs. occurrences
         if with_floor_max > 0:
             # Calculate percent of total probability that's from background
@@ -252,8 +290,14 @@ def generate_background_points(
             floor_cells = np.sum(density_array.values == floor_probability)
             floor_contribution = floor_cells * floor_probability
             background_percent = (floor_contribution / total_sum) * 100
-            logging.info(f"Background accounts for {background_percent:.1f}% of total probability")
-            logging.info(f"Concentration ratio (max/min): {with_floor_max/with_floor_min:.1f}x")
+            logging.info(
+                "Background accounts for %.1f%% of total probability",
+                background_percent
+            )
+            logging.info(
+                "Concentration ratio (max/min): %.1fx",
+                with_floor_max / with_floor_min
+            )
 
     # Normalize the density array to sum to 1
     density_array = density_array / density_array.sum()
@@ -266,7 +310,7 @@ def generate_background_points(
     density_df = density_df.reset_index()
 
     # Sample points based on density
-    logging.info(f"Sampling %s background points", n_background_points)
+    logging.info("Sampling %s background points", n_background_points)
     samples_idx = np.random.choice(
         density_df.index.values,
         size=n_background_points,
@@ -304,7 +348,7 @@ def generate_background_points(
         output_dir / "background-points.geojson", driver="GeoJSON"
     )
 
-    logging.info(f"Background points saved to %s", output_dir)
+    logging.info("Background points saved to %s", output_dir)
     return background_points
 
 
@@ -313,10 +357,12 @@ def main(
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
     output_dir: Union[str, Path] = "data/processed",
     n_background_points: int = 40000,
-    background_method: str = "contrast",
+    background_method: Literal[
+        "contrast", "percentile", "scale", "fixed", "binary"
+    ] = "contrast",
     background_value: float = 0.3,
-    resolution: Optional[float] = None,
-    transform_method: str = "log",
+    resolution: Optional[int] = None,
+    transform_method: Literal["log", "sqrt", "presence", "cap", "rank"] = "log",
     cap_percentile: float = 90.0,
 ) -> gpd.GeoDataFrame:
     """Main function to generate background points.
@@ -350,7 +396,7 @@ def main(
         cap_percentile=cap_percentile,
     )
 
-    logging.info(f"Generated %s background points", len(background_points))
+    logging.info("Generated %s background points", len(background_points))
     return background_points
 
 
@@ -359,10 +405,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Generate background points for SDM")
     parser.add_argument(
-        "--occurrence_path", 
+        "--occurrence_path",
         default="data/processed/bats-tidy.geojson",
-        type=str, 
-        help="Path to occurrence data (GeoJSON or Parquet)"
+        type=str,
+        help="Path to occurrence data (GeoJSON or Parquet)",
     )
     parser.add_argument(
         "--boundary",
@@ -371,10 +417,7 @@ if __name__ == "__main__":
         help="Path to boundary file",
     )
     parser.add_argument(
-        "--output", 
-        type=str, 
-        default="data/processed", 
-        help="Output directory"
+        "--output", type=str, default="data/processed", help="Output directory"
     )
     parser.add_argument(
         "--n-points",
@@ -393,7 +436,7 @@ if __name__ == "__main__":
         "--background-value",
         type=float,
         default=0.0005,
-        help="Value to use with background method (contrast, percentile, scale factor, or fixed value)",
+        help="Value to use with background method",
     )
     parser.add_argument(
         "--transform",
