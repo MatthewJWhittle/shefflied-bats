@@ -29,7 +29,7 @@ def main(boundary_path: str, output_dir: str, debug: bool = False):
 
     # ETL data
     # Climate data
-    climate_stats_path = get_climate_data(output_dir, boundary_path)
+    climate_stats_paths = get_climate_data(output_dir, boundary_path)
 
     # EA LiDAR data
     terrain_path = get_terrain_data(output_dir, boundary_path)
@@ -43,23 +43,28 @@ def main(boundary_path: str, output_dir: str, debug: bool = False):
     ceh_path = get_ceh_data(output_dir, boundary_path)
 
     ## Transform data
-    terrain_stats_path = process_terrain_stats(terrain_path, dem_band=1, Path(output_dir) / "terrain_stats.tif")
+    terrain_stats_path = process_terrain_stats(terrain_path, dem_band=1, output_path=Path(output_dir) / "terrain_stats.tif")
 
     # Coastal distance
     coastal_distance_path = get_coastal_distance(output_dir, boundary_path)
 
-
-    # Merge all datasets
-    merge_datasets(
-    datasets={
+    dataset_paths = {
         "ceh_landcover" : ceh_path,
         "vom" : vom_path,
         "terrain_stats" : terrain_stats_path,
         "terrain" : terrain_path,
         "os_cover" : os_cover_path,
         "os-distance" : os_distance_path,
-        "climate" : climate_stats_path,
         "bgs-coast": coastal_distance_path,
-        },
+        }
+    
+    # add the climate stats to the dataset mapping
+    dataset_paths.update(
+        climate_stats_paths
+    )
+
+    # Merge all datasets
+    merge_datasets(
+    datasets=dataset_paths,
         output_path=Path(output_dir) / "all-evs.tif",
     )

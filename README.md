@@ -2,6 +2,20 @@
 
 # Modelling steps
 
+1. Generate the study area
+2. Download the datasets (see Prepare EVs)
+3. Prepare the datasets (see Prepare EVs) (run `data_prep/generate_evs/main.py`)
+4. Work through the `data_prep/prep_model_data/feature-engineering.ipynb` notebook to generate the features for the model. This will output a file called `ev_clusters.csv` which you annotate a copy of (`ev_clusters_selected.csv`) with the features you want to use in the model. This will be used in the next step.
+5. Prepare the occurrence data (see Prepare Occurence Data) & save as `data/processed/bats-tidy.geojson`
+6. Generate the background points using:
+```bash
+python data_prep/generate_background_points.py --occurrence_path data/processed/bats-tidy.geojson --boundary data/processed/boundary.geojson --output data/processed
+```
+Which will create a file called `data/processed/background-points.geojson`. 
+
+
+
+
 ## Define the Study Area
 Update the logic in `data_prep/generate_evs/ingestion/load_study_area.py` to create a study area for the model. The study area should be a geodataframe.
 

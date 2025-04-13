@@ -1,6 +1,7 @@
-from typing import Union
+from typing import Union, Mapping
 from pathlib import Path
 import logging
+import re
 
 import xarray as xr
 import rioxarray
@@ -15,8 +16,32 @@ from data_prep.utils.load import (
 )
 
 
+
+def tidy_name(name: str) -> str:
+    """
+    Cleans up the name of the variable by replacing dashes and spaces with underscores, 
+    converting to lowercase, and stripping whitespace.
+
+    Args:
+        name: The name of the variable
+
+    Returns:
+        The cleaned up name
+    """
+    # Replace dashes and spaces with underscores
+    name = re.sub(r'[- ]', '_', name)
+    # Convert to lowercase
+    name = name.lower()
+    # Strip whitespace
+    name = name.strip()
+    # Remove any leading or trailing underscores
+    name = name.strip('_')
+    # Remove any trailing underscores
+    name = name.rstrip('_')
+    return name
+
 def main(
-    datasets: dict[str, Union[str, Path]],
+    datasets: Mapping[str, Union[str, Path]],
     output_path: Union[str, Path],
     boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
 ) -> Path:
@@ -81,6 +106,16 @@ def main(
     logging.info("Merging %s datasets...", len(xr_datasets))
     merged_ds = xr.merge(xr_datasets)
 
+    # Tidy up the names
+    logging.info("Tidying up variable names...")
+    name_mapping = {
+        var: tidy_name(str(var)) for var in merged_ds.data_vars
+    }
+    merged_ds = merged_ds.rename(name_mapping)
+    # update long_name attribute
+    for var in merged_ds.data_vars:
+        merged_ds[var].attrs["long_name"] = str(var)
+        
     # clip to the boundary
     logging.info("Clipping to boundary...")
     merged_ds = merged_ds.rio.clip([boundary.unary_union], crs=boundary.crs)
@@ -102,8 +137,9 @@ if __name__ == "__main__":
             "terrain" : "data/evs/dtm_dsm_100m.tif",
             "os_cover" : "data/evs/os-feature-cover.tif",
             "os-distance" : "data/evs/os-distance-to-feature.tif",
-            "climate" : "data/evs/climate_stats.tif",
-            "bgs-coast": "data/evs/coastal_distance.tif",
+            "climate_stats" : "data/evs/climate_stats.tif",
+            "climate_bioclim" : "data/evs/bioclim.tif",
+            "bgs_coast": "data/evs/coastal_distance.tif",
             },
         output_path="data/evs/all-evs.tif",
 

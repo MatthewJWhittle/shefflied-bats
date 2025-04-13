@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Union
+from typing import Union, Dict
 
 import geopandas as gpd
 import rioxarray as rxr
@@ -193,19 +193,19 @@ def assign_variable_names(temp_average, precipitation, bioclim, wind):
     corresponding element in the data array.
     """
     temp_average.attrs["long_name"] = tuple(
-        [f"temp_average_{i}" for i in range(1, temp_average.shape[0] + 1)]
+        [f"temp_{i}" for i in range(1, temp_average.shape[0] + 1)]
     )
     precipitation.attrs["long_name"] = tuple(
-        [f"precipitation_{i}" for i in range(1, precipitation.shape[0] + 1)]
+        [f"prec_{i}" for i in range(1, precipitation.shape[0] + 1)]
     )
     bioclim.attrs["long_name"] = tuple(
-        [f"bioclim_{i}" for i in range(1, bioclim.shape[0] + 1)]
+        [f"bio_{i}" for i in range(1, bioclim.shape[0] + 1)]
     )
     wind.attrs["long_name"] = tuple([f"wind_{i}" for i in range(1, wind.shape[0] + 1)])
 
 
 
-def write_data(temp_average, precipitation, bioclim, wind, output_dir):
+def write_data(temp_average, precipitation, bioclim, wind, output_dir) -> Dict[str, Path]:
     """
     Writes climate data to raster files in the specified output directory.
 
@@ -221,10 +221,28 @@ def write_data(temp_average, precipitation, bioclim, wind, output_dir):
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    temp_average.rio.to_raster(output_dir / "temp_average.tif")
-    precipitation.rio.to_raster(output_dir / "precipitation.tif")
-    bioclim.rio.to_raster(output_dir / "bioclim.tif")
-    wind.rio.to_raster(output_dir / "wind.tif")
+    # Temperature
+    temp_path = output_dir / "temp_average.tif"
+    temp_average.rio.to_raster(temp_path)
+
+    # Precipitation variables
+    precipitation_path = output_dir / "precipitation.tif"
+    precipitation.rio.to_raster(precipitation_path)
+
+    # Bioclimatic variables
+    bioclim_path = output_dir / "bioclim.tif"
+    bioclim.rio.to_raster(bioclim_path)
+    
+    # Wind variables
+    wind_path = output_dir / "wind.tif"
+    wind.rio.to_raster(wind_path)
+
+    return {
+        "temp_average": temp_path,
+        "precipitation": precipitation_path,
+        "bioclim": bioclim_path,
+        "wind": wind_path,
+    }
 
 
 def calculate_climate_stats(temp_average, precipitation, wind, output_dir):
@@ -252,7 +270,7 @@ def calculate_climate_stats(temp_average, precipitation, wind, output_dir):
 def main(
         output_dir: Union[str, Path] = "data/evs",
         boundary_path: Union[str, Path] = "data/processed/boundary.geojson",
-):
+) -> Dict[str, Path]:
     """
     Main function to process climate data based on a given boundary.
     Parameters:
@@ -281,10 +299,14 @@ def main(
     )
     assign_variable_names(temp_average, precipitation, bioclim, wind)
     
-    write_data(temp_average, precipitation, bioclim, wind, output_dir)
+    variable_paths = write_data(temp_average, precipitation, bioclim, wind, output_dir)
+
+
     stats_path = calculate_climate_stats(temp_average, precipitation, wind, output_dir)
 
-    return stats_path
+    variable_paths["climate_stats"] = stats_path
+
+    return variable_paths
 
 
 if __name__ == "__main__":

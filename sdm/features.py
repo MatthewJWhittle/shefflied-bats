@@ -40,6 +40,8 @@ def interpolate_nas(dataset: xr.Dataset) -> xr.Dataset:
 
 
 def calculate_multiscale_variables(dataset: xr.Dataset, window: int) -> xr.Dataset:
+    original_names = dataset.data_vars
+
     vars = (
         dataset.rolling(x=window, y=window, center=True)
         .mean(skipna=True)
@@ -47,4 +49,11 @@ def calculate_multiscale_variables(dataset: xr.Dataset, window: int) -> xr.Datas
             {name: f"{name}_{round((window/2) * 100)}m" for name in dataset.data_vars}
         )
     )
+    # Assign nodata from the original dataset
+    for new_name, old_name in zip(vars.data_vars, original_names):
+        vars[new_name].rio.write_nodata(
+            dataset[old_name].rio.nodata, inplace=True
+        )
+
+
     return vars
