@@ -2,11 +2,12 @@
 MaxEnt Species Distribution Modelling for Sheffield Bats.
 
 This module implements the MaxEnt modelling pipeline for bat species distribution
-in the Sheffield area, including data preparation, model training, evaluation,
-and prediction generation.
+in the Sheffield area, including data preparation, model training, and evaluation.
+Prediction functionality has been moved to model_inference.py.
 """
 
 import os
+from typing import Optional
 import json
 import argparse
 import numpy as np
@@ -18,14 +19,20 @@ from pathlib import Path
 from itertools import product
 from tempfile import NamedTemporaryFile
 from tqdm import tqdm
+import pickle
+import multiprocessing
+from joblib import Parallel, delayed
 
 from pyhere import here
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+import mlflow
+from mlflow import log_metric, log_param, log_params, log_artifacts, log_artifact
+
 
 from elapid import MaxentModel
 
-from sdm.maxent import (
+from modelling.maxent_utils import (
     prepare_occurence_data,
     filter_bats, 
     eval_train_model
@@ -69,8 +76,8 @@ def parse_arguments():
     parser.add_argument(
         "--output-dir", 
         type=str,
-        default="data/sdm_predictions",
-        help="Directory for output files."
+        default="data/sdm_models",
+        help="Directory for output model files."
     )
     
     parser.add_argument(
@@ -85,6 +92,20 @@ def parse_arguments():
         type=int,
         default=15,
         help="Minimum number of presence records required."
+    )
+    
+    parser.add_argument(
+        "--cpus",
+        type=int,
+        default=None,
+        help="Number of CPUs to use. Default is 80%% of available CPUs."
+    )
+    
+    parser.add_argument(
+        "--max-threads-per-model",
+        type=int,
+        default=2,
+        help="Maximum number of threads per model. Default is 2."
     )
     
     return parser.parse_args()
@@ -124,8 +145,8 @@ def load_grid_points(grid_points_path):
 def annotate_points(bats, background, ev_raster, ev_columns):
     """Annotate bat and background points with environmental variables."""
     bats_ant = ela.annotate(
-        bats, 
-        str(ev_raster), 
+        bats,
+        str(ev_raster),
         labels=ev_columns
     )
     background = ela.annotate(
@@ -148,6 +169,9 @@ def create_maxent_model(n_jobs=1):
                     beta_multiplier=6,
                     n_cpus=n_jobs,
                     class_weights="balanced",
+                    # Additional parameters to optimize performance
+                    convergence_tolerance=1e-5,
+                    n_lambdas=1000,
                 ),
             ),
         ]
@@ -155,7 +179,7 @@ def create_maxent_model(n_jobs=1):
     return model
 
 
-def generate_training_data(bats_ant, background, grid_points, latin_name, activity_type, ev_columns, min_presence=15):
+def generate_training_data(bats_ant, background, grid_points, latin_name, activity_type, ev_columns, min_presence=15, subset:Optional[int]=None):
     """Generate training data for all valid combinations of species and activity types."""
     training_data = []
     filter_combinations = list(product(latin_name, activity_type))
@@ -167,9 +191,18 @@ def generate_training_data(bats_ant, background, grid_points, latin_name, activi
             print(f"Skipping {latin_name} - {activity_type}: Only {len(presence)} presence records (minimum {min_presence} required)")
             continue
 
+        if subset is not None:
+            n_presence = len(presence)
+            presence = presence.sample(n=min(subset, n_presence), random_state=42)
+
+            n_background = len(background)
+            background = background.sample(n=min(subset, n_background), random_state=42)
+
         occurrence = prepare_occurence_data(
             presence, background, grid_points, input_vars=ev_columns
         )
+        
+
         training_data.append({
             "latin_name": latin_name,
             "activity_type": activity_type,
@@ -179,18 +212,61 @@ def generate_training_data(bats_ant, background, grid_points, latin_name, activi
     return training_data
 
 
-def train_models(training_data, n_jobs):
-    """Train MaxEnt models for each set of training data."""
-    results = []
-    for data in tqdm(training_data):
+def train_models_parallel(training_data, max_threads_per_model=2, n_jobs=None):
+    """Train MaxEnt models in parallel for each set of training data.
+    
+    Args:
+        training_data: List of training data dicts
+        max_threads_per_model: Maximum number of threads per model
+        n_jobs: Number of parallel jobs (models trained simultaneously)
+    """
+    # Calculate optimal number of jobs if not specified
+    if n_jobs is None:
+        total_cpus = os.cpu_count()
+        # Use 80% of available CPUs by default
+        n_jobs = max(1, int(total_cpus * 0.8) // max_threads_per_model)
+    
+    print(f"Training with {n_jobs} parallel jobs, {max_threads_per_model} threads per model")
+    
+    # Define the function to train a single model
+    def train_single_model(data):
         try:
-            result = eval_train_model(data["occurrence"], create_maxent_model(n_jobs=n_jobs))
-            results.append(result)
+            # Create model with appropriate thread count
+            model = create_maxent_model(n_jobs=max_threads_per_model)
+            result = eval_train_model(data["occurrence"], model)
+            return {
+                "success": True,
+                "result": result,
+                "latin_name": data["latin_name"],
+                "activity_type": data["activity_type"]
+            }
         except Exception as e:
             print(f"Error processing {data['latin_name']} - {data['activity_type']}: {e}")
-            continue
+            return {
+                "success": False,
+                "error": str(e),
+                "latin_name": data["latin_name"],
+                "activity_type": data["activity_type"]
+            }
     
-    return results
+    # Execute training in parallel
+    results = Parallel(n_jobs=n_jobs, verbose=10)(
+        delayed(train_single_model)(data) for data in training_data
+    )
+    
+    # Extract successful results
+    successful_results = [r["result"] for r in results if r["success"]]
+    
+    # Report failed models
+    failed_models = [f"{r['latin_name']} - {r['activity_type']}: {r['error']}" 
+                     for r in results if not r["success"]]
+    if failed_models:
+        print("Failed models:")
+        for failure in failed_models:
+            print(f"  {failure}")
+    
+    print(f"Successfully trained {len(successful_results)} models out of {len(training_data)} attempts")
+    return successful_results
 
 
 def prepare_results_dataframe(results, training_data):
@@ -231,48 +307,57 @@ def prepare_results_dataframe(results, training_data):
     return results_df
 
 
-def make_predictions(results_df, ev_raster, output_dir):
-    """Apply trained models to make predictions across the study area."""
-    # Ensure output directory exists
+def save_models(results_df, output_dir, ev_columns):
+    """Save models and metadata to disk."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    prediction_paths = []
-    # Define the arguments for each task
-    tasks = []
-    for _, row in results_df.iterrows():
-        latin_name = row.latin_name
-        activity_type = row.activity_type
-        model = row.final_model
-        path_predict = output_dir / f"{latin_name}_{activity_type}.tif"
-        prediction_paths.append(path_predict)
-        tasks.append({
-            "model": model,
-            "raster_paths": [ev_raster],
-            "output_path": path_predict,
-            "latin_name": latin_name,
-            "activity_type": activity_type,
-        })
+    # Save the environmental variable names for later inference
+    with open(output_dir / "ev_columns.json", "w") as f:
+        json.dump(ev_columns, f)
     
-    # Iterate through the tasks and apply the model to the raster
-    for task in tqdm(tasks):
-        try:
-            output_path = ela.apply_model_to_rasters(**task)
-        except Exception as e:
-            print(f"Error applying model to raster: {e}")
-            continue
+    # Save each model with its metadata
+    for idx, row in results_df.iterrows():
+        # Create unique filename for the model
+        model_filename = f"{row['latin_name']}_{row['activity_type']}_model.pkl"
+        model_path = output_dir / model_filename
+        
+        # Save the actual model
+        with open(model_path, "wb") as f:
+            pickle.dump(row["final_model"], f)
+        
+        # Create metadata for this model
+        metadata = {
+            "latin_name": row["latin_name"],
+            "activity_type": row["activity_type"],
+            "n_presence": int(row["n_presence"]),
+            "n_background": int(row["n_background"]),
+            "mean_cv_score": float(row["mean_cv_score"]),
+            "std_cv_score": float(row["std_cv_score"]),
+            "folds": int(row["folds"]),
+            "model_file": model_filename,
+        }
+        
+        # Save metadata to JSON
+        metadata_path = output_dir / f"{row['latin_name']}_{row['activity_type']}_metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f)
     
-    results_df["prediction_path"] = prediction_paths
-    return results_df
+    # Save model index for easy lookup
+    model_index = results_df[["latin_name", "activity_type", "mean_cv_score", "n_presence"]].copy()
+    model_index["model_file"] = model_index.apply(
+        lambda row: f"{row['latin_name']}_{row['activity_type']}_model.pkl", axis=1
+    )
+    model_index.to_csv(output_dir / "model_index.csv", index=False)
+    
+    return model_index
 
 
 def log_models_to_mlflow(results_df, ev_columns, output_dir):
     """Log models, parameters, and metrics to MLFlow."""
-    import mlflow
-    from mlflow import log_metric, log_param, log_params, log_artifacts, log_artifact
     
     # Ensure models directory exists
-    models_dir = Path("models")
+    models_dir = Path(output_dir) / "models"
     models_dir.mkdir(exist_ok=True)
     
     input_var_json_path = models_dir / 'input_variables.json'
@@ -280,45 +365,53 @@ def log_models_to_mlflow(results_df, ev_columns, output_dir):
     with open(input_var_json_path, 'w') as f:
         json.dump(ev_columns, f)
     
-    mlflow.set_tracking_uri("./mlruns")
+    # Set MLFlow tracking URI to a local directory relative to current working directory
+    # This ensures we don't try to write to paths that might need special permissions
+    mlflow_dir = Path("./mlruns").resolve()
+    mlflow_dir.mkdir(exist_ok=True)
+    mlflow.set_tracking_uri(str(mlflow_dir))
+    
+    # Set experiment name
     mlflow.set_experiment("Sheffield Bat Group - SDM - Maxent")
     
     # Iterate over the results dataframe to log models, parameters and metrics
     for _, row in tqdm(results_df.iterrows()):
-        with mlflow.start_run(run_name=f"Model_{row['latin_name']}_{row['activity_type']}"):
-            mlflow.set_tag("model", "Maxent")
-            # Generate a species code from the first 3 letters of the genus and species
-            # This makes it easier to identify the species in mlflow
-            genus = row["latin_name"].split(" ")[0]
-            species = row["latin_name"].split(" ")[1]
-            species_code = genus[:3] + "_" + species[:3]
-            mlflow.set_tag("species_code", species_code)
-            
-            mlflow.set_tag("latin_name", row["latin_name"])
-            mlflow.set_tag("activity_type", row["activity_type"])
-            # Log the parameters
-            log_params(row[["n_presence", "n_background", "folds"]].to_dict())
-            # Log model parameters
-            log_params(row["final_model"].get_params())
-            
-            # Log the input variables which exceed the param length limit
-            log_artifact(input_var_json_path, "input_variables")
-            
-            # Log the training data
-            with NamedTemporaryFile(suffix=".parquet") as f:
-                occurence_gdf = row["occurrence"]
-                occurence_gdf.to_parquet(f.name)
-                log_artifact(f.name, "training_data")
-            
-            # Log the metrics
-            log_metric("mean_cv_score", row["mean_cv_score"])
-            log_metric("std_cv_score", row["std_cv_score"])
-            
-            # Log the predictions as an artifact
-            log_artifact(row["prediction_path"], "predictions_raster")
-            
-            # Log the model
-            mlflow.sklearn.log_model(row["final_model"], "model")
+        try:
+            with mlflow.start_run(run_name=f"Model_{row['latin_name']}_{row['activity_type']}"):
+                mlflow.set_tag("model", "Maxent")
+                # Generate a species code from the first 3 letters of the genus and species
+                # This makes it easier to identify the species in mlflow
+                genus = row["latin_name"].split(" ")[0]
+                species = row["latin_name"].split(" ")[1]
+                species_code = genus[:3] + "_" + species[:3]
+                mlflow.set_tag("species_code", species_code)
+                
+                mlflow.set_tag("latin_name", row["latin_name"])
+                mlflow.set_tag("activity_type", row["activity_type"])
+                # Log the parameters
+                log_params(row[["n_presence", "n_background", "folds"]].to_dict())
+                # Log model parameters
+                log_params(row["final_model"].get_params())
+                
+                # Log the input variables which exceed the param length limit
+                log_artifact(input_var_json_path, "input_variables")
+                
+                # Log the training data
+                with NamedTemporaryFile(suffix=".parquet") as f:
+                    occurence_gdf = row["occurrence"]
+                    occurence_gdf.to_parquet(f.name)
+                    log_artifact(f.name, "training_data")
+                
+                # Log the metrics
+                log_metric("mean_cv_score", row["mean_cv_score"])
+                log_metric("std_cv_score", row["std_cv_score"])
+                
+                # Log the model
+                mlflow.sklearn.log_model(row["final_model"], "model")
+        except Exception as e:
+            print(f"Error logging model for {row['latin_name']} - {row['activity_type']}: {e}")
+            # Continue with next model even if this one fails
+            continue
 
 
 def save_results(results_df, output_dir):
@@ -347,11 +440,14 @@ def main(
     bats_path : str = "data/processed/bats-tidy.geojson",
     background_path : str = "data/processed/background-points.geojson",
     grid_points_path : str = "data/evs/grid-points.parquet",
-    output_dir : str = "data/sdm_predictions",
+    output_dir : str = "data/sdm_models",
     accuracy_threshold : int = 100,
-    min_presence : int = 15
+    min_presence : int = 15,
+    cpus : int = None,
+    max_threads_per_model : int = 2,
+    subset : Optional[int] = None,
 ):
-    """Run the full MaxEnt modelling pipeline."""
+    """Run the MaxEnt model training pipeline."""
     
     # Load data
     print("Loading data...")
@@ -359,6 +455,17 @@ def main(
     background = load_background_points(background_path)
     evs_to_model, ev_raster = load_environmental_variables(ev_path)
     grid_points = load_grid_points(grid_points_path)
+    
+    # Calculate optimal CPU usage if not provided
+    if cpus is None:
+        total_cpus = os.cpu_count()
+        cpus = max(1, int(total_cpus * 0.8))
+        print(f"Automatically using {cpus} CPUs out of {total_cpus} available")
+    else:
+        print(f"Using {cpus} CPUs as specified")
+    
+    # Calculate number of parallel jobs based on threads per model
+    n_parallel_jobs = max(1, cpus // max_threads_per_model)
     
     # Extract unique species and activity types
     latin_name = bats.latin_name.unique().tolist()
@@ -381,23 +488,27 @@ def main(
         latin_name, 
         activity_type, 
         ev_columns,
-        min_presence=min_presence
+        min_presence=min_presence,
+        subset=subset
     )
     
     print(f"Generated {len(training_data)} valid training datasets")
     
-    # Train models
+    # Train models in parallel
     print("Training models...")
-    num_cpus = os.cpu_count()
-    results = train_models(training_data, num_cpus)
+    results = train_models_parallel(
+        training_data, 
+        max_threads_per_model=max_threads_per_model,
+        n_jobs=n_parallel_jobs
+    )
     
     # Prepare results dataframe
     print("Preparing results...")
     results_df = prepare_results_dataframe(results, training_data)
     
-    # Make predictions
-    print("Making predictions...")
-    results_df = make_predictions(results_df, ev_raster, output_dir)
+    # Save models to disk
+    print("Saving models...")
+    save_models(results_df, output_dir, ev_columns)
     
     # Log models to MLFlow
     print("Logging models to MLFlow...")
@@ -407,7 +518,7 @@ def main(
     print("Saving results...")
     save_results(results_df, output_dir)
     
-    print("Modelling complete!")
+    print("Model training complete!")
     return results_df
 
 
@@ -422,5 +533,8 @@ if __name__ == "__main__":
         grid_points_path=args.grid_points_path,
         output_dir=args.output_dir,
         accuracy_threshold=args.accuracy_threshold,
-        min_presence=args.min_presence
+        min_presence=args.min_presence,
+        cpus=args.cpus,
+        max_threads_per_model=args.max_threads_per_model,
+        subset=500
     )
