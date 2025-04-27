@@ -1,6 +1,8 @@
 import warnings
+from typing import Optional
 import numpy as np
 import geopandas as gpd
+import pandas as pd
 from sklearn.metrics import roc_auc_score
 import elapid as ela
 from elapid import distance_weights
@@ -27,24 +29,71 @@ from elapid.geo import (
 
 tqdm = get_tqdm()
 
+
+def calculate_background_points(n_presences, min_bg=1000, max_bg=10000, factor=10):
+    """
+    Calculate a recommended number of background (pseudo-absence) points
+    based on the number of presence records.
+    
+    Args:
+        n_presences (int): Number of presence records.
+        min_bg (int): Minimum number of background points (default 1,000).
+        max_bg (int): Maximum number of background points (default 10,000).
+        factor (int): Multiplier factor for presences (default 10).
+        
+    Returns:
+        int: Calculated number of background points.
+    """
+    # Scale by factor, then cap between min_bg and max_bg
+    n_bg = max(min(n_presences * factor, max_bg), min_bg)
+    return int(n_bg)
+
 def prepare_occurence_data(
     presence_gdf: gpd.GeoDataFrame,
     background_gdf: gpd.GeoDataFrame,
+    background_density: pd.Series,
     grid_gdf: gpd.GeoDataFrame,
     input_vars: list,
     drop_na: bool = True,
     sample_weight_n_neighbors: int = 5,
+    filter_to_grid: bool = True,
+    subset_background: bool = True,
 ):
     presence_gdf = presence_gdf.copy() # type: ignore
     background_gdf = background_gdf.copy() # type: ignore
     # Filter to the grid
-    presence_gdf = filter_gdf_to_grid(presence_gdf, grid_gdf)
-    background_gdf = filter_gdf_to_grid(background_gdf, grid_gdf)
+    if filter_to_grid:
+        
+        # TODO: Improve this grid filtering - dropping too many points
+        # Also not removing conficts between presence and background (
+        # .eg squares where both presence and background points are present)
+        presence_gdf = filter_gdf_to_grid(presence_gdf, grid_gdf)
+        background_gdf = filter_gdf_to_grid(background_gdf, grid_gdf)
+
+        # Drop background points that have a grid_index in the presence points
+        background_gdf = background_gdf[
+            ~background_gdf["grid_index"].isin(presence_gdf["grid_index"])
+        ]
+        # filter the density to gdf index
+        background_density = background_density.loc[
+            background_gdf.index
+        ]
 
 
-    # Drop the grid index column
-    presence_gdf.drop(columns=["grid_index"], inplace=True)
-    background_gdf.drop(columns=["grid_index"], inplace=True)
+        # Drop the grid index column
+        presence_gdf.drop(columns=["grid_index"], inplace=True)
+        background_gdf.drop(columns=["grid_index"], inplace=True)
+
+    if subset_background:
+        # Subset the background points to the number of presence points
+        n_bg = calculate_background_points(len(presence_gdf))
+        
+        # order the background points from highest to lowest density
+        # then take the top n_bg points
+        background_gdf = background_gdf.loc[
+            background_density.sort_values(ascending=False).index[:n_bg]
+        ]
+        
 
     # Keep only the geometry
     presence_gdf = presence_gdf[input_vars + ["geometry"]] # type: ignore

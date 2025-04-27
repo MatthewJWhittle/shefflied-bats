@@ -9,7 +9,7 @@
 5. Prepare the occurrence data (see Prepare Occurence Data) & save as `data/processed/bats-tidy.geojson`
 6. Generate the background points using:
 ```bash
-python data_prep/generate_background_points.py --occurrence_path data/processed/bats-tidy.geojson --boundary data/processed/boundary.geojson --output data/processed
+uv run -m data_prep.prep_model_data.background_points --occurrence_path data/processed/bats-tidy.geojson --boundary data/processed/boundary.geojson --output data/processed --n-points 4000 
 ```
 Which will create a file called `data/processed/background-points.geojson`. 
 

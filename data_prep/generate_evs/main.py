@@ -55,9 +55,11 @@ def main(boundary_path: str, output_dir: str, debug: bool = False):
         "terrain" : terrain_path,
         "os_cover" : os_cover_path,
         "os-distance" : os_distance_path,
+        "climate_stats" : climate_stats_paths["climate_stats"],
+        "climate_bioclim" : climate_stats_paths["bioclim"],
         "bgs-coast": coastal_distance_path,
         }
-    
+
     # add the climate stats to the dataset mapping
     dataset_paths.update(
         climate_stats_paths

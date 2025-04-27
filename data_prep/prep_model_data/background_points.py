@@ -316,7 +316,7 @@ def generate_background_points(
         size=n_background_points,
         p=density_array.values.flatten(),
     )
-    samples = density_df[["x", "y"]].loc[samples_idx]
+    samples = density_df[["x", "y", "density"]].loc[samples_idx]
 
     # Add random jitter within grid cells
     x_range = (-resolution_x / 2, resolution_x / 2)

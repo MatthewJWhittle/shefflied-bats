@@ -58,6 +58,13 @@ def parse_arguments():
         nargs="*",
         help="Optional: Specific activity types to generate predictions for."
     )
+
+    parser.add_argument(
+        "--n-workers",
+        type=int,
+        default=-1,
+        help="Number of workers for parallel processing. Default is -1 (all available cores)."
+    )
     
     return parser.parse_args()
 
@@ -161,34 +168,57 @@ def make_predictions(
     
     results = []
     futures = []
-    
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        for _, row in tqdm(filtered_index.iterrows(), total=len(filtered_index)):
-            model_path = models_dir / row.model_file
-            latin_name = row.latin_name
-            activity_type = row.activity_type
+    tasks = []
+    for _, row in tqdm(filtered_index.iterrows(), total=len(filtered_index)):
+        model_path = models_dir / row.model_file
+        latin_name = row.latin_name
+        activity_type = row.activity_type
+        
+        # Create unique output path for this prediction
+        output_path = output_dir / f"{latin_name}_{activity_type}.tif"
+        tasks.append((
+            model_path,
+            ev_raster,
+            output_path,
+            latin_name,
+            activity_type
+        ))
             
-            # Create unique output path for this prediction
-            output_path = output_dir / f"{latin_name}_{activity_type}.tif"
 
+    if n_workers > 1:
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            for task in tasks:
+                model_path, ev_raster, output_path, latin_name, activity_type = task
+                futures.append(
+                    executor.submit(
+                        predict_species,
+                        model_path,
+                        ev_raster,
+                        output_path,
+                        latin_name,
+                        activity_type
+                    ))
 
-            futures.append(
-                executor.submit(
-                    predict_species,
-                    model_path,
-                    ev_raster,
-                    output_path,
-                    latin_name,
-                    activity_type
-                ))
-
-        for future in tqdm(futures, total=len(futures)):
-            result = future.result()
+            for future in tqdm(futures, total=len(futures)):
+                result = future.result()
+                results.append(result)
+    else:
+        for task in tqdm(tasks, total=len(tasks)):
+            model_path, ev_raster, output_path, latin_name, activity_type = task
+            result = predict_species(
+                model_path,
+                ev_raster,
+                output_path,
+                latin_name,
+                activity_type
+            )
             results.append(result)
-            if result["success"]:
-                print(f"Prediction successful for {result['latin_name']} - {result['activity_type']}")
-            else:
-                print(f"Prediction failed for {result['latin_name']} - {result['activity_type']}: {result['error']}")
+
+    for result in results:
+        if result["success"]:
+            print(f"Prediction successful for {result['latin_name']} - {result['activity_type']}")
+        else:
+            print(f"Prediction failed for {result['latin_name']} - {result['activity_type']}: {result['error']}")
 
     results_df = pd.DataFrame(results)
     results_df.to_csv(output_dir / "prediction_results.csv", index=False)
@@ -196,7 +226,7 @@ def make_predictions(
     return results_df
 
 
-def main(ev_path, models_dir, output_dir, species=None, activity_types=None):
+def main(ev_path, models_dir, output_dir, species=None, activity_types=None, n_workers=-1):
     """Run the model inference pipeline."""
     
     # Load model index
@@ -218,7 +248,7 @@ def main(ev_path, models_dir, output_dir, species=None, activity_types=None):
     
     # Generate predictions
     print("Generating predictions...")
-    results = make_predictions(filtered_index, models_dir, ev_raster, output_dir)
+    results = make_predictions(filtered_index, models_dir, ev_raster, output_dir, n_workers)
     
     # Summarize results
     successful = results[results.success].shape[0]
@@ -240,5 +270,6 @@ if __name__ == "__main__":
         models_dir=args.models_dir,
         output_dir=args.output_dir,
         species=args.species,
-        activity_types=args.activity_types
+        activity_types=args.activity_types,
+        n_workers=args.n_workers
     )

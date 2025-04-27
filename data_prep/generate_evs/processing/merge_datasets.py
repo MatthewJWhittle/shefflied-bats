@@ -58,7 +58,7 @@ def main(
     logging.info("Merging datasets...\n %s", str(datasets))
 
     # Load the boundary and spatial configuration
-    boundary = load_boundary(boundary_path, buffer_distance=0)
+    boundary = load_boundary(boundary_path, buffer_distance=7_000)
     bounds = tuple(boundary.total_bounds)
     spatial_config = load_spatial_config()
     model_transform, _ = construct_transform_shift_bounds(
@@ -73,8 +73,18 @@ def main(
         logging.info("Processing %s data...", name)
 
         # Load the dataset
-        data: Union[xr.DataArray, xr.Dataset] = rioxarray.open_rasterio(path, band_as_variable=True)  # type: ignore
+        data: Union[xr.DataArray, xr.Dataset] = rioxarray.open_rasterio(
+            path, 
+            band_as_variable=True,
+            masked=True,
+            # Use a float32-compatible nodata value
+            nodata=-9999.0
+        )  # type: ignore
 
+        # Ensure nodata value is float32 compatible for all variables
+        for var in data.data_vars:
+            if data[var].rio.nodata is not None and abs(data[var].rio.nodata) > 3.4e38:
+                data[var].rio.write_nodata(-9999.0)
 
         # assign long_name to the data variable
         name_mapping =  {
