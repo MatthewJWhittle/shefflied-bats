@@ -24,3 +24,9 @@ dependencies = [
 
 [tool.uv.workspace]
 members = ["sdm"]
+
+[dependency-groups]
+dev = [
+    "ipywidgets>=8.1.7",
+    "jupyter>=1.1.1",
+]

@@ -164,12 +164,12 @@ def create_maxent_model(n_jobs=1):
                 MaxentModel(
                     feature_types=["linear", "quadratic", "hinge", "product"],
                     beta_multiplier=2.5,
-                    beta_lqp=-1,
-                    beta_hinge=-1,
-                    beta_threshold=-1,
-                    beta_categorical=-1,
-                    n_hinge_features=15,
-                    n_threshold_features=10,
+                    beta_lqp=1,
+                    beta_hinge=1,
+                    beta_threshold=1,
+                    beta_categorical=1,
+                    n_hinge_features=5,
+                    n_threshold_features=5,
                     transform="cloglog",
                     clamp=True,
                     tau=0.5,
@@ -229,6 +229,7 @@ def generate_training_data(
             grid_points,
             input_vars=ev_columns,
             filter_to_grid=True,
+            order_by_density=True,
         )
         count_1_output = len(occurrence[occurrence["class"] == 1])
         count_0_output = len(occurrence[occurrence["class"] == 0])

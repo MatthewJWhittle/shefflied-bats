@@ -58,6 +58,7 @@ def prepare_occurence_data(
     sample_weight_n_neighbors: int = 5,
     filter_to_grid: bool = True,
     subset_background: bool = True,
+    order_by_density: bool = True,
 ):
     presence_gdf = presence_gdf.copy() # type: ignore
     background_gdf = background_gdf.copy() # type: ignore
@@ -88,11 +89,16 @@ def prepare_occurence_data(
         # Subset the background points to the number of presence points
         n_bg = calculate_background_points(len(presence_gdf))
         
-        # order the background points from highest to lowest density
-        # then take the top n_bg points
-        background_gdf = background_gdf.loc[
-            background_density.sort_values(ascending=False).index[:n_bg]
-        ]
+        if order_by_density:
+            # order the background points from highest to lowest density
+            # then take the top n_bg points
+            background_gdf = background_gdf.loc[
+                background_density.sort_values(ascending=False).index[:n_bg]
+            ]
+        else:
+            # Randomly sample the background points
+            n_bg = min(n_bg, len(background_gdf))
+            background_gdf = background_gdf.sample(n=n_bg, random_state=42)
         
 
     # Keep only the geometry
