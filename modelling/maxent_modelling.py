@@ -8,6 +8,7 @@ Prediction functionality has been moved to model_inference.py.
 
 import os
 from typing import Optional, Union
+from enum import StrEnum
 import json
 import argparse
 import numpy as np
@@ -26,6 +27,7 @@ import logging
 
 from pyhere import here
 from sklearn.preprocessing import StandardScaler
+from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 import mlflow
 from mlflow import log_metric, log_param, log_params, log_artifacts, log_artifact
@@ -36,6 +38,13 @@ from elapid import MaxentModel
 from modelling.maxent_utils import prepare_occurence_data, filter_bats, eval_train_model
 
 logger = logging.getLogger(__name__)
+
+
+class ActivityType(StrEnum):
+    """Enum for activity types."""
+
+    ROOST = "Roost"
+    IN_FLIGHT = "In flight"
 
 
 def parse_arguments():
@@ -154,11 +163,75 @@ def annotate_points(bats, background, ev_raster, ev_columns):
     return bats_ant, background
 
 
-def create_maxent_model(n_jobs=1):
+def get_feature_config() -> dict[str, list[str]]:
+    """
+    Gets the list of names to include in the model.
+    """
+    return {
+        ActivityType.IN_FLIGHT: [
+            "ceh_landcover_improved_grassland",
+            "ceh_landcover_suburban",
+            "bgs_coast_distance_to_coast",
+            "ceh_landcover_arable",
+            "ceh_landcover_suburban_500m",
+            "ceh_landcover_arable_500m",
+            "climate_bioclim_bio_7",
+            "vom_vegetation_height_max",
+            "terrain_stats_slope",
+            "ceh_landcover_broadleaved_woodland",
+            "climate_bioclim_bio_9",
+            "climate_stats_temp_ann_var",
+            "os_cover_water",
+            "climate_bioclim_bio_3",
+            "ceh_landcover_improved_grassland_500m",
+            "ceh_landcover_urban",
+            "climate_stats_prec_ann_avg",
+            "climate_stats_temp_ann_avg",
+            "os_distance_distance_to_major_roads",
+            "terrain_dtm",
+            "os_distance_distance_to_buildings",
+            "ceh_landcover_urban_500m",
+            "climate_stats_wind_ann_avg",
+        ],
+        ActivityType.ROOST: [
+            "ceh_landcover_suburban",
+            "vom_vegetation_height_max",
+            "os_distance_distance_to_buildings",
+            "vom_vegetation_height_mean_500m",
+            "ceh_landcover_suburban_500m",
+            "bgs_coast_distance_to_coast",
+            "ceh_landcover_broadleaved_woodland_500m",
+            "ceh_landcover_improved_grassland",
+            "terrain_stats_roughness",
+            "climate_bioclim_bio_3",
+            "climate_bioclim_bio_9",
+            "ceh_landcover_broadleaved_woodland",
+            "ceh_landcover_arable_500m",
+            "ceh_landcover_improved_grassland_500m",
+            "ceh_landcover_grassland",
+            "climate_stats_temp_ann_avg",
+        ],
+    }
+
+
+def create_maxent_model(
+        feature_names: list[str], 
+        n_jobs=1
+        ):
     """Create a MaxEnt model pipeline with standard scaling."""
     model = Pipeline(
         [
+            # Select the features to use
+            # Note: "passthrough" just  keeps the selected features without any transformation
+            (
+                "feature_selector",
+                ColumnTransformer(
+                    [("selector", "passthrough", feature_names)], remainder="drop"
+                ),
+            ),
+            # Standardize the features to have mean 0 and variance 1
             ("scaler", StandardScaler()),
+            # Create the MaxEnt model
             (
                 "maxent",
                 MaxentModel(
@@ -181,6 +254,12 @@ def create_maxent_model(n_jobs=1):
                 ),
             ),
         ]
+    )
+    # set a pipeline level attribute to store the feature names
+    model.feature_names = feature_names
+
+    logging.info(
+        f"Created MaxEnt model {str(model)}."
     )
     return model
 
@@ -260,6 +339,8 @@ def train_models_parallel(training_data, max_threads_per_model=2, n_jobs=None):
     # Calculate optimal number of jobs if not specified
     if n_jobs is None:
         total_cpus = os.cpu_count()
+        if total_cpus is None:
+            total_cpus = 1.0
         # Use 80% of available CPUs by default
         n_jobs = max(1, int(total_cpus * 0.8) // max_threads_per_model)
 
@@ -267,11 +348,21 @@ def train_models_parallel(training_data, max_threads_per_model=2, n_jobs=None):
         f"Training with {n_jobs} parallel jobs, {max_threads_per_model} threads per model"
     )
 
+    feature_selection = get_feature_config()
+
     # Define the function to train a single model
     def train_single_model(data):
         try:
+            activity_type = data["activity_type"]
+            _latin_name = data["latin_name"]
+
+            model_features = feature_selection[activity_type]
+
             # Create model with appropriate thread count
-            model = create_maxent_model(n_jobs=max_threads_per_model)
+            model = create_maxent_model(
+                feature_names=model_features,
+                n_jobs=max_threads_per_model,
+                )
             result = eval_train_model(data["occurrence"], model)
             return {
                 "success": True,
@@ -462,7 +553,6 @@ def log_models_to_mlflow(results_df, ev_columns, output_dir):
                     occurence_gdf.to_parquet(f.name)
                     log_artifact(f.name, "training_data")
 
-
                 # Log the model
                 mlflow.sklearn.log_model(row["final_model"], "model")
         except Exception as e:
@@ -575,13 +665,14 @@ def main(
     print("Saving models...")
     save_models(results_df, output_dir, ev_columns)
 
+    # Save results
+    print("Saving results...")
+    save_results(results_df, output_dir)
+
     # Log models to MLFlow
     print("Logging models to MLFlow...")
     log_models_to_mlflow(results_df, ev_columns, output_dir)
 
-    # Save results
-    print("Saving results...")
-    save_results(results_df, output_dir)
 
     print("Model training complete!")
     return results_df
