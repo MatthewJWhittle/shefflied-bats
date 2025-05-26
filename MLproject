@@ -1,7 +1,0 @@
-name: My Project
-
-conda_env: environment.yaml
-
-entry_points:
-  main:
-    command: "jupyter nbconvert --execute modelling/maxent-modelling.ipynb --ExecutePreprocessor.timeout=-1 --to notebook --output modelling/maxent-modelling.ipynb"

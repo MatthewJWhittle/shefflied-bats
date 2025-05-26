@@ -1,40 +1,20 @@
-habitat_modelling_project/
-│
-├── src/
-│   ├── ingestion/
-│   │   ├── download_api_data.py
-│   │   ├── parse_spreadsheets.py
-│   │   └── ...
-│   ├── processing/
-│   │   ├── clean_data.py
-│   │   ├── transform_data.py
-│   │   └── ...
-│   ├── modelling/
-│   │   ├── train_models.py
-│   │   ├── generate_predictions.py
-│   │   └── ...
-│   ├── utils/
-│   │   └── helpers.py
-│   └── main.py
-│
-├── data/                # This folder is .gitignored if data is large/confidential
-│   ├── raw/
-│   │   ├── ...
-│   ├── intermediate/
-│   │   ├── ...
-│   └── outputs/
-│       └── ...
-│
-├── configs/
-│   ├── project_config.yaml
-│   └── model_config.yaml
-│
-├── notebooks/           # Optional: for exploratory analysis
-│   └── exploration.ipynb
-│
-├── tests/               # If you add unit tests
+
+<root>/
+├── config/
+│   └── default.yaml
+├── data/                     ← data directory (local files etc.)
 │   └── ...
-│
-├── environment.yml      # or requirements.txt
-├── .gitignore
+├── species_sdm/               ← installable library
+│   ├── data/
+│   ├── raster/
+│   ├── occurrence/
+│   ├── models/
+│   ├── viz/
+│   ├── utils/
+│   └── cli.py
+├── scripts/                   ← thin “glue” scripts
+├── notebooks/                 ← exploration & figures
+├── tests/                     ← pytest suite
+├── docs/                      ← Sphinx or MkDocs site
+├── pyproject.toml
 └── README.md
