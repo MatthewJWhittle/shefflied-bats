@@ -65,7 +65,7 @@ def prepare_occurrence_data(
     drop_na: bool = True,
     sample_weight_n_neighbors: int = 5,
     filter_to_grid: bool = True, # Whether to filter points to the grid and remove overlaps
-    subset_background: bool = True, # Whether to subset background points
+    subset_background: bool = False, # Whether to subset background points
     order_by_density_for_subset: bool = True, # For background subsetting
 ) -> gpd.GeoDataFrame:
     """

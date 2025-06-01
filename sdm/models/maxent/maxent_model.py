@@ -1,5 +1,5 @@
 # Core MaxEnt (Elapid-based) model training, evaluation, and prediction logic.
-
+import warnings
 import logging
 from typing import List, Tuple, Optional, Callable, Any, Union, Dict # Added Union, Dict
 from pathlib import Path
@@ -15,6 +15,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import ColumnTransformer
 
+
+
+
 import elapid as ela
 from elapid.models import MaxentModel as BaseMaxentModel
 from elapid.types import to_iterable # Used by elapid internals, good to be aware of
@@ -24,10 +27,16 @@ from elapid.utils import (
     create_output_raster_profile,
     get_raster_band_indexes,
     # tqdm_opts, # Not directly used here, elapid.utils.get_tqdm handles it
-    # get_tqdm, # Not directly used here, elapid.geo.apply_model_to_array handles its own tqdm
+    get_tqdm, # Not directly used here, elapid.geo.apply_model_to_array handles its own tqdm
+    tqdm_opts, # Used by elapid.geo.apply_model_to_array
 )
 from elapid.geo import apply_model_to_array # Core raster prediction function from elapid
 from elapid.models import MaxentConfig
+from sdm.models.core.feature_subsetter import FeatureSubsetter
+
+
+tqdm = get_tqdm()
+
 
 # Potentially import from .utils if model-specific utils are there
 # from .utils import prepare_occurrence_data # Example, if it were MaxEnt specific
@@ -377,10 +386,10 @@ def create_maxent_pipeline(
     # Add other MaxentModel params as needed
 ) -> Pipeline:
     """Creates a scikit-learn Pipeline for MaxEnt modeling.
-    Includes feature selection (passthrough), scaling, and the Elapid MaxentModel.
+    Includes feature selection (custom FeatureSubsetter), scaling, and the Elapid MaxentModel.
 
     Args:
-        feature_names: List of feature names to be selected by ColumnTransformer.
+        feature_names: List of feature names to be selected by FeatureSubsetter.
         maxent_beta_multiplier: Beta multiplier for the Maxent model.
         maxent_n_jobs: Number of threads for the MaxentModel.
 
@@ -389,19 +398,12 @@ def create_maxent_pipeline(
     """
     logger.info(f"Creating MaxEnt pipeline for features: {feature_names}")
     
-    # Feature selector: uses ColumnTransformer to select only the desired features
-    # and passes them through without transformation at this stage.
-    feature_selector = ColumnTransformer(
-        transformers=[
-            ("selector", "passthrough", feature_names)
-        ],
-        remainder="drop" # Drop any columns not in feature_names
-    )
+    # Feature selector: uses custom FeatureSubsetter to select only the desired features
+    feature_selector = FeatureSubsetter(feature_names=feature_names)
     
     # Scaler: Standardizes features by removing the mean and scaling to unit variance.
     scaler = StandardScaler()
 
-    
     # Maxent Model from Elapid
     maxent_estimator = MaxentModel.from_config(model_config, n_cpus=maxent_n_jobs)
 
@@ -410,8 +412,6 @@ def create_maxent_pipeline(
         ("scaling", scaler),
         ("maxent", maxent_estimator)
     ])
-    
-
     
     logger.info("MaxEnt pipeline created successfully.")
     return pipeline
@@ -470,3 +470,130 @@ def get_feature_config() -> Dict[ActivityType, List[str]]: # Changed to use Acti
             "climate_stats_temp_ann_avg",
         ],
     } 
+
+
+
+def apply_model_to_rasters(
+    model: BaseEstimator,
+    raster_paths: list,
+    output_path: str,
+    feature_names: Optional[List[str]] = None,
+    resampling: rio.enums.Enum = rio.enums.Resampling.average,
+    count: int = 1,
+    dtype: str = "float32",
+    nodata: float = -9999,
+    driver: str = "GTiff",
+    compress: str = "deflate",
+    bigtiff: bool = True,
+    template_idx: int = 0,
+    windowed: bool = True,
+    window_size: int = 1024,  # Increased from default
+    predict_proba: bool = False,
+    ignore_sklearn: bool = True,
+    quiet: bool = False,
+    **kwargs,
+) -> None:
+    """Applies a trained model to a list of raster datasets.
+
+    Args:
+        model: object with a model.predict() function
+        raster_paths: raster paths of covariates to apply the model to
+        output_path: path to the output file to create
+        feature_names: Optional list of feature names that the model expects
+        resampling: resampling algorithm for reprojection
+        count: number of bands in the prediction output
+        dtype: the output raster data type
+        nodata: output nodata value
+        driver: output raster format
+        compress: compression to apply to the output file
+        bigtiff: specify the output file as a bigtiff (for rasters > 2GB)
+        template_idx: index of the raster file to use as a template
+        windowed: apply the model using windowed read/write
+        window_size: size of processing windows (default: 1024)
+        predict_proba: use model.predict_proba() instead of model.predict()
+        ignore_sklearn: silence sklearn warning messages
+        quiet: silence progress bar output
+        **kwargs: additonal keywords to pass to model.predict()
+    """
+    raster_paths = to_iterable(raster_paths)
+    windows, dst_profile = create_output_raster_profile(
+        raster_paths, template_idx, count=count, windowed=windowed,
+        nodata=nodata, compress=compress, driver=driver, bigtiff=bigtiff
+    )
+    
+    # Adjust window size if specified
+    if windowed and window_size > 0:
+        windows = [rio.windows.Window(
+            col_off=w.col_off,
+            row_off=w.row_off,
+            width=min(window_size, w.width),
+            height=min(window_size, w.height)
+        ) for w in windows]
+    
+    nbands, band_idx = get_raster_band_indexes(raster_paths)
+    aligned = check_raster_alignment(raster_paths)
+    nodata = nodata or 0
+
+    if ignore_sklearn:
+        warnings.filterwarnings("ignore", category=UserWarning)
+
+    srcs = [rio.open(raster_path) for raster_path in raster_paths]
+    
+    # Get band names and handle feature selection
+    band_names = []
+    for src in srcs:
+        if (feature_names is not None) and not src.descriptions:
+            raise ValueError(f"Raster {src.name} has no descriptions, but feature_names are provided.")
+        band_names.extend(src.descriptions or [f"band_{i}" for i in range(src.count)])
+    
+    matching_indices = None
+    if feature_names is not None:
+        matching_indices = [i for i, name in enumerate(band_names) if name in feature_names]
+        if not matching_indices:
+            raise ValueError(f"No matching bands found for features: {feature_names}")
+        if len(matching_indices) != len(feature_names):
+            missing = set(feature_names) - set(band_names)
+            raise ValueError(f"Some features not found in raster bands: {missing}")
+        nbands = len(matching_indices)
+        band_idx = [0] + [1] * nbands
+
+    if not aligned:
+        vrt_options = {
+            "resampling": resampling,
+            "transform": dst_profile["transform"],
+            "crs": dst_profile["crs"],
+            "height": dst_profile["height"],
+            "width": dst_profile["width"],
+        }
+        srcs = [rio.vrt.WarpedVRT(src, **vrt_options) for src in srcs]
+
+    with rio.open(output_path, "w", **dst_profile) as dst:
+        for window in tqdm(windows, desc="Window", disable=quiet, **tqdm_opts):
+            covariates = np.zeros((nbands, window.height, window.width), dtype=np.float32)
+            nodata_idx = np.ones_like(covariates, dtype=bool)
+
+            try:
+                if matching_indices is not None:
+                    for i, idx in enumerate(matching_indices):
+                        src_idx = idx // srcs[0].count
+                        band_idx = idx % srcs[0].count
+                        data = srcs[src_idx].read(band_idx + 1, window=window, masked=True)
+                        covariates[i] = data
+                        nodata_idx[i] = data.mask
+                else:
+                    for i, src in enumerate(srcs):
+                        data = src.read(window=window, masked=True)
+                        covariates[band_idx[i] : band_idx[i + 1]] = data
+                        nodata_idx[band_idx[i] : band_idx[i + 1]] = data.mask
+
+                if nodata_idx.any(axis=0).all():
+                    raise NoDataException()
+
+                predictions = apply_model_to_array(
+                    model, covariates, nodata, nodata_idx,
+                    count=count, dtype=dtype, predict_proba=predict_proba, **kwargs
+                )
+                dst.write(predictions, window=window)
+
+            except NoDataException:
+                continue

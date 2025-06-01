@@ -24,6 +24,8 @@ import xarray as xr
 from pydantic import BaseModel, ConfigDict
 from sklearn.base import BaseEstimator
 from elapid.models import MaxentConfig
+from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.data.loaders.vector import (
@@ -115,8 +117,9 @@ def generate_training_data(
     """Generate training data for all valid combinations of species and activity types."""
     training_data = []
     filter_combinations = list(product(latin_names, activity_types))
+    logger.info(f"Generating training data for {len(filter_combinations)} species-activity combinations")
 
-    for latin_name, activity_type in filter_combinations:
+    for latin_name, activity_type in tqdm(filter_combinations, desc="Preparing training data"):
         presence = filter_bats_data(
             bats_ant, latin_name=latin_name, activity_type=activity_type
         )
@@ -151,6 +154,7 @@ def generate_training_data(
             input_vars=ev_columns,
             filter_to_grid=True,
             sample_weight_n_neighbors=5,
+            subset_background=False,
         )
         count_1_output = len(occurrence[occurrence["class"] == 1])
         count_0_output = len(occurrence[occurrence["class"] == 0])
@@ -167,6 +171,7 @@ def generate_training_data(
             )
         )
 
+    logger.info(f"Successfully generated training data for {len(training_data)} species-activity combinations")
     return training_data
 
 
@@ -177,24 +182,14 @@ def train_single_model(
     max_threads_per_model: int,
     model_config: MaxentConfig = DefaultMaxentConfig(),
 ) -> TrainingResults:
-    """
-    Train a single MaxEnt model for a given set of training data.
-
-    Args:
-        data: Dictionary containing training data for a single model
-
-    Returns:
-        Dictionary containing the trained model, cross-validation models, and cross-validation scores
-        along with the latin name and activity type
-
-    Raises:
-        ValueError: If the model training fails - received None values
-    """
+    """Train a single MaxEnt model for a given set of training data."""
     try:
         activity_type = ActivityType(data.activity_type)
         latin_name = data.latin_name
+        logger.info(f"Training model for {latin_name} ({activity_type.value})...")
 
         model_features = feature_selection[activity_type]
+        logger.debug(f"Using features: {model_features}")
 
         # Create model with appropriate thread count
         model = create_maxent_pipeline(
@@ -203,6 +198,7 @@ def train_single_model(
             model_config=model_config,
         )
 
+        logger.info(f"Starting cross-validation for {latin_name} ({activity_type.value})...")
         final_model, cv_models, cv_scores = evaluate_and_train_maxent_model(
             model=model,
             occurrence_gdf=data.occurrence,
@@ -213,6 +209,10 @@ def train_single_model(
 
         if final_model is None or cv_models is None or cv_scores is None:
             raise ValueError("Model training failed - received None values")
+
+        cv_mean = cv_scores.mean()
+        cv_std = cv_scores.std()
+        logger.info(f"Model training complete for {latin_name} ({activity_type.value}): CV AUC = {cv_mean:.3f} ± {cv_std:.3f}")
 
         return TrainingResults(
             latin_name=latin_name,
@@ -225,7 +225,7 @@ def train_single_model(
         )
     except Exception as e:
         logger.error(
-            f"Error processing {data.latin_name} - {data.activity_type}: {e}"
+            f"Error training model for {data.latin_name} - {data.activity_type}: {e}"
         )
         return TrainingResults(
             latin_name=data.latin_name,
@@ -240,6 +240,7 @@ def train_single_model(
 
 def train_models_parallel(
     training_data: List[TrainingData],
+    feature_selection: Dict[str, List[str]],
     max_threads_per_model: int = 2,
     n_jobs: Optional[int] = None,
     model_config: MaxentConfig = DefaultMaxentConfig(),
@@ -257,13 +258,42 @@ def train_models_parallel(
         f"Training with {n_jobs} parallel jobs, {max_threads_per_model} threads per model"
     )
 
-    feature_selection = get_feature_config()
+    
 
-    # Execute training in parallel
+    # Execute training in parallel using ProcessPoolExecutor
     results: List[TrainingResults] = []
-    for data in training_data:
-        result = train_single_model(data, feature_selection, max_threads_per_model, model_config)
-        results.append(result)
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        # Create a list of futures
+        futures = [
+            executor.submit(
+                train_single_model,
+                data,
+                feature_selection,
+                max_threads_per_model,
+                model_config
+            )
+            for data in training_data
+        ]
+        
+        # Collect results as they complete
+        for future in tqdm(futures, total=len(futures), desc="Training models"):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Error in parallel training: {e}")
+                # Create a failed result
+                results.append(
+                    TrainingResults(
+                        latin_name="unknown",
+                        activity_type="unknown",
+                        final_model=None,
+                        cv_models=None,
+                        cv_scores=None,
+                        success=False,
+                        error=str(e)
+                    )
+                )
 
     # Extract successful results
     successful_results = [r for r in results if r.success]
@@ -337,7 +367,7 @@ def save_training_data(
 def save_models(
     models: List[TrainingResults],
     output_dir: Path,
-) -> List[Path]:
+) -> Dict[str, Path]:
     """
     Save trained models to disk.
 
@@ -346,17 +376,15 @@ def save_models(
         output_dir: Path to output directory
 
     Returns:
-        List of paths to saved models
+        Dictionary of model identifier to path to saved model
     """
-    model_paths : List[Path] = []
+    model_paths : Dict[str, Path] = {}
     for model in models:
         model_path = output_dir / f"{model.identifier()}.pkl"
-
+        model_paths[model.identifier()] = model_path    
         # Save final model
         with open(model_path, "wb") as f:
             pickle.dump(model.final_model, f)
-        
-        model_paths.append(model_path)
 
     return model_paths
 
@@ -443,7 +471,6 @@ def log_models_to_mlflow(
                     X = occurrence.drop(columns=["geometry", "class", "sample_weight"])
                     X = X.iloc[0]
                     input_example = pd.DataFrame(X).T
-                    logger.info(f"Input example: {input_example}")
                     log_model(
                         model.final_model, 
                         f"{model.identifier()}_final_model",
@@ -480,7 +507,7 @@ def main(
     n_jobs: Optional[int] = typer.Option(None, help="Number of parallel jobs"),
     max_threads_per_model: int = typer.Option(2, help="Maximum threads per model"),
     species: Optional[List[str]] = typer.Option(
-        ["Myotis daubentonii"],
+        None,
         help="List of species to model. If not provided, all species will be used."
     ),
     activity_types: Optional[List[str]] = typer.Option(
@@ -494,26 +521,38 @@ def main(
 ) -> None:
     """Run the MaxEnt model training pipeline."""
     setup_logging()
+    logger.info("=== Starting SDM Model Training Pipeline ===")
+    
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Configure MLflow to use SQLite backend
+    # Configure MLflow
+    logger.info("Configuring MLflow tracking...")
     mlflow_db_path = output_dir / "mlflow.db"
     mlflow.set_tracking_uri(f"sqlite:///{mlflow_db_path}")
     mlflow.set_experiment("bat_sdm_models")
 
     # Load data
+    logger.info("=== Loading Input Data ===")
+    logger.info("Loading bat occurrence data...")
     bats_ant = load_bat_data(bats_file)
+    
+    logger.info("Loading background points...")
     background, background_density = load_background_points(background_file)
+    
+    logger.info("Loading environmental variables...")
     ev_data, ev_raster_path = load_environmental_variables(ev_file)
     ev_columns = list(ev_data.data_vars.keys())
+    logger.info(f"Found {len(ev_columns)} environmental variables")
 
     # Load grid points
+    logger.info("Loading grid points...")
     if grid_points_file is None:
         grid_points = extract_grid_points(ev_data)
     else:
         grid_points = gpd.read_parquet(grid_points_file)
 
     # Annotate points with environmental variables
+    logger.info("=== Annotating Points with Environmental Variables ===")
     annotated_bats_gdf, annotated_background_gdf = annotate_points(
         bats_ant, background, ev_raster_path, ev_columns
     )
@@ -529,7 +568,10 @@ def main(
 
     latin_names = annotated_bats_gdf.latin_name.unique().tolist()
     activity_types = annotated_bats_gdf.activity_type.unique().tolist()
+    logger.info(f"Found {len(latin_names)} species and {len(activity_types)} activity types")
 
+    # Configure model parameters
+    logger.info("=== Configuring Model Parameters ===")
     model_config = DefaultMaxentConfig(
         feature_types=["linear", "quadratic", "hinge", "product"],
         beta_multiplier=2.5,
@@ -537,8 +579,8 @@ def main(
         beta_hinge=1,
         beta_threshold=1,
         beta_categorical=1,
-        n_hinge_features=5,
-        n_threshold_features=5,
+        n_hinge_features=10,
+        n_threshold_features=10,
         transform="cloglog",
         clamp=True,
         tau=0.5,
@@ -549,6 +591,7 @@ def main(
     )
 
     # Generate training data
+    logger.info("=== Generating Training Data ===")
     training_data = generate_training_data(
         bats_ant=annotated_bats_gdf,
         background_points=annotated_background_gdf,
@@ -562,22 +605,34 @@ def main(
     )
 
     # Train models
+    logger.info("=== Training Models ===")
+    feature_selection = get_feature_config()
+    #feature_selection = {str(activity_type): ev_columns for activity_type in [ActivityType.ROOST, ActivityType.IN_FLIGHT]}
     models = train_models_parallel(
         training_data, 
+        feature_selection,
         max_threads_per_model=max_threads_per_model, 
         n_jobs=n_jobs,
         model_config=model_config,
     )
 
-    # Prepare results
+    # Prepare and save results
+    logger.info("=== Saving Results ===")
     results_df = prepare_results_dataframe(models, training_data)
-
-    # Save models and results
-    save_models(models, output_dir)
+    model_paths = save_models(models, output_dir)
+    
+    # Add model paths to results
+    results_df["model_path"] = [str(path) for path in results_df["identifier"].map(model_paths)]
+    
+    # Save results and training data
     save_results(results_df, output_dir)
     save_training_data(training_data, output_dir)
 
+    # Log to MLflow
+    logger.info("=== Logging to MLflow ===")
     log_models_to_mlflow(models, training_data, results_df)
+
+    logger.info("=== SDM Model Training Pipeline Complete ===")
 
 
 if __name__ == "__main__":
