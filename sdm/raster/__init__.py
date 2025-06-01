@@ -4,4 +4,4 @@
 # You can optionally import key functions or classes here to make them available
 # at the package level, e.g.:
 # from .processing import some_processing_function
-# from .utils import some_raster_utility 
+from .utils import reproject_data, squeeze_dataset 

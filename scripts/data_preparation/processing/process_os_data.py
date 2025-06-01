@@ -9,8 +9,7 @@ import xarray as xr
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary, bbox_filter # Removed load_spatial_config, construct_transform_shift_bounds
-from sdm.data.loaders import load_os_shps, generate_parquets
-from sdm.data.transforms import process_roads
+from sdm.data.os import generate_parquets, process_roads
 from sdm.raster.processing import calculate_feature_cover, calculate_distances 
 # Removed reproject_data, squeeze_dataset from here as they are in raster.utils, not directly called by this script's main.
 # rasterise_gdf is also in raster.utils and called by calculate_feature_cover.

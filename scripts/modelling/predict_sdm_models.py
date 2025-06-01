@@ -7,19 +7,16 @@ predictions across the study area using the new modular structure.
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Any
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import cpu_count
+from typing import Optional, List, Any, Dict
 import pickle
 
 import typer
 import pandas as pd
 import rioxarray as rxr
-from tqdm import tqdm
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.data.loaders.vector import load_environmental_variables
-from sdm.models.maxent.maxent_model import apply_model_to_rasters
+from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.feature_subsetter import FeatureSubsetter
 
 app = typer.Typer()
@@ -58,112 +55,75 @@ def load_model(model_path: Path) -> Any:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise
 
-def predict_species(
-    model_path: Path,
-    ev_raster: Path,
-    output_path: Path,
-    latin_name: str,
-    activity_type: str
-) -> dict:
-    """Apply a model to the environmental variables raster."""
-    metadata = {
-        "latin_name": latin_name,
-        "activity_type": activity_type,
-        "model_file": model_path.name,
-        "prediction_path": str(output_path),
-        "success": False
-    }
-    
-    try:
-        # Load model
-        logger.info(f"Loading model for {latin_name} ({activity_type})...")
-        model = load_model(model_path)
-        
-        # Get feature names from the FeatureSubsetter step in the pipeline
-        feature_names = None
-        if hasattr(model, 'steps'):
-            feature_subsetter = next((step[1] for step in model.steps if isinstance(step[1], FeatureSubsetter)), None)
-            if feature_subsetter:
-                feature_names = feature_subsetter.feature_names
-                logger.debug(f"Using feature subset: {feature_names}")
-        
-        # Apply the model to the raster
-        logger.info(f"Generating prediction raster for {latin_name} ({activity_type})...")
-        apply_model_to_rasters(
-            model=model,
-            raster_paths=[str(ev_raster)],
-            output_path=str(output_path),
-            feature_names=feature_names,
-            window_size=4096
-        )
-        metadata["success"] = True
-        logger.info(f"Successfully generated prediction for {latin_name} ({activity_type})")
-
-    except Exception as e:
-        logger.error(f"Failed to generate prediction for {latin_name} ({activity_type}): {e}")
-        metadata["error"] = str(e)
-        metadata["success"] = False
-
-    return metadata
-
 def make_predictions(
     filtered_index: pd.DataFrame,
     models_dir: Path,
     ev_raster: Path,
     output_dir: Path,
-    n_workers: int = -1
 ) -> pd.DataFrame:
     """Apply trained models to make predictions."""
-    
-    if n_workers == -1:
-        n_workers = cpu_count() - 1
-    logger.info(f"Using {n_workers} workers for parallel processing")
-    
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    results = []
-    futures = []
-    tasks = []
+    # Load all models
+    logger.info("Loading models...")
+    models: Dict[str, Any] = {}
+    feature_names = None
     
-    # Prepare tasks
-    logger.info("Preparing prediction tasks...")
-    for _, row in tqdm(filtered_index.iterrows(), desc="Preparing tasks"):
+    for _, row in filtered_index.iterrows():
         model_path = Path(row.model_path)
         latin_name = row.latin_name
         activity_type = row.activity_type
+        model_id = f"{latin_name}_{activity_type}"
         
-        output_path = output_dir / f"{latin_name}_{activity_type}.tif"
-        tasks.append((
-            model_path,
-            ev_raster,
-            output_path,
-            latin_name,
-            activity_type
-        ))
+        try:
+            # Load model
+            model = load_model(model_path)
+            
+            # Get feature names from the first model's FeatureSubsetter
+            if feature_names is None and hasattr(model, 'steps'):
+                feature_subsetter = next((step[1] for step in model.steps if isinstance(step[1], FeatureSubsetter)), None)
+                if feature_subsetter:
+                    feature_names = feature_subsetter.feature_names
+                    logger.debug(f"Using feature subset: {feature_names}")
+            
+            models[model_id] = model
+            logger.info(f"Loaded model for {model_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load model for {model_id}: {e}")
     
-    # Execute predictions
-    logger.info("Starting parallel prediction processing...")
-    with ProcessPoolExecutor(max_workers=n_workers) as executor:
-        futures = [executor.submit(predict_species, *task) for task in tasks]
+    if not models:
+        raise ValueError("No models were successfully loaded")
+    
+    # Generate predictions
+    logger.info("=== Generating Predictions ===")
+    output_path = output_dir / "all_predictions.tif"
+    
+    try:
+        apply_models_to_raster(
+            models=models,
+            raster_path=ev_raster,
+            output_path=output_path,
+            feature_names=feature_names,
+            window_size=128,
+        )
+        logger.info(f"Successfully generated predictions for {len(models)} models")
         
-        for future in tqdm(futures, desc="Processing predictions"):
-            try:
-                result = future.result()
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Task failed: {e}")
-    
-    # Compile results
-    results_df = pd.DataFrame(results)
-    success_count = results_df["success"].sum()
-    logger.info(f"Completed {len(results)} predictions: {success_count} successful, {len(results) - success_count} failed")
+        # Update results with success status
+        filtered_index["success"] = True
+        filtered_index["prediction_path"] = str(output_path)
+        
+    except Exception as e:
+        logger.error(f"Failed to generate predictions: {e}")
+        filtered_index["success"] = False
+        filtered_index["error"] = str(e)
     
     # Save results summary
     results_path = output_dir / "prediction_results.csv"
-    results_df.to_csv(results_path, index=False)
+    filtered_index.to_csv(results_path, index=False)
     logger.info(f"Prediction results saved to {results_path}")
     
-    return results_df
+    return filtered_index
 
 @app.command()
 def main(
@@ -187,10 +147,6 @@ def main(
     activity_types: Optional[List[str]] = typer.Option(
         None,
         help="Optional: Specific activity types to generate predictions for."
-    ),
-    n_workers: int = typer.Option(
-        -1,
-        help="Number of workers for parallel processing. Default is -1 (all available cores)."
     ),
     verbose: bool = typer.Option(
         False,
@@ -227,8 +183,7 @@ def main(
         filtered_index,
         models_dir,
         ev_raster,
-        output_dir,
-        n_workers
+        output_dir
     )
     
     logger.info("=== SDM Model Inference Pipeline Complete ===")

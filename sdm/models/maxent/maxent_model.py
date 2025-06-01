@@ -597,3 +597,135 @@ def apply_model_to_rasters(
 
             except NoDataException:
                 continue
+
+def apply_models_to_raster(
+    models: Dict[str, BaseEstimator],
+    raster_path: Union[str, Path],
+    output_path: Union[str, Path],
+    dtype: str = "float32",
+    nodata: float = -9999,
+    driver: str = "GTiff",
+    compress: str = "deflate",
+    bigtiff: bool = True,
+    windowed: bool = True,
+    window_size: int = 128,
+    predict_proba: bool = True,
+    ignore_sklearn: bool = True,
+    quiet: bool = False,
+    **kwargs,
+) -> None:
+    """Applies multiple trained models to a single raster dataset.
+
+    This function applies each model to the same raster data and combines their predictions
+    into a single multi-band raster, where each band corresponds to a model's prediction.
+
+    Args:
+        models: Dictionary mapping model identifiers to trained model objects
+        raster_path: Path to the input raster file containing features
+        output_path: Path to save the output prediction raster (GeoTIFF)
+        dtype: Output raster data type
+        nodata: Output nodata value
+        driver: Output raster format
+        compress: Compression to apply to the output file
+        bigtiff: Specify the output file as a bigtiff (for rasters > 2GB)
+        windowed: Apply the models using windowed read/write
+        window_size: Size of processing windows
+        predict_proba: Use model.predict_proba() instead of model.predict()
+        ignore_sklearn: Silence sklearn warning messages
+        quiet: Silence progress bar output
+        **kwargs: Additional keywords to pass to model.predict()
+    """
+    logger.info(f"Applying {len(models)} models to raster: {raster_path}")
+    
+    # Convert paths to strings
+    raster_path = str(raster_path)
+    output_path = str(output_path)
+
+    # Create output profile with number of bands equal to number of models
+    windows, dst_profile = create_output_raster_profile(
+        [raster_path], 0, count=len(models), windowed=windowed,
+        nodata=nodata, compress=compress, driver=driver, bigtiff=bigtiff
+    )
+    
+    # Create larger windows based on window_size
+    if windowed and window_size > 0:
+        with rio.open(raster_path) as src:
+            height = src.height
+            width = src.width
+            
+            # Calculate number of windows needed
+            n_windows_h = (height + window_size - 1) // window_size
+            n_windows_w = (width + window_size - 1) // window_size
+            
+            # Create windows
+            windows = []
+            for i in range(n_windows_h):
+                for j in range(n_windows_w):
+                    row_off = i * window_size
+                    col_off = j * window_size
+                    win_height = min(window_size, height - row_off)
+                    win_width = min(window_size, width - col_off)
+                    windows.append(rio.windows.Window(
+                        col_off=col_off,
+                        row_off=row_off,
+                        width=win_width,
+                        height=win_height
+                    ))
+            
+            logger.info(f"Created {len(windows)} windows of size {window_size}x{window_size}")
+    
+    # Get band names from raster
+    with rio.open(raster_path) as src:
+        band_names = src.descriptions or [f"band_{i}" for i in range(src.count)]
+    
+    if ignore_sklearn:
+        warnings.filterwarnings("ignore", category=UserWarning)
+
+    # Open source raster
+    src = rio.open(raster_path)
+    
+    # Create output raster with model identifiers as band descriptions
+    with rio.open(output_path, "w", **dst_profile) as dst:
+        # Set band descriptions to model identifiers
+        dst.descriptions = list(models.keys())
+        
+        for window in tqdm(windows, desc="Processing windows", disable=quiet, **tqdm_opts):
+            # Read window data
+            data = src.read(window=window, masked=True)
+            
+            # Skip if all data in window is nodata
+            if data.mask.all():
+                continue
+            
+            # Convert to DataFrame
+            n_features, height, width = data.shape
+            X = pd.DataFrame(
+                data.reshape(n_features, -1).T,  # Reshape to (samples, features)
+                columns=band_names
+            )
+            
+            # Apply each model and store predictions
+            predictions = np.zeros((len(models), height, width), dtype=np.float32)
+            
+            for i, (model_id, model) in enumerate(models.items()):
+                try:
+                    # Apply model to window data
+                    if predict_proba:
+                        pred = model.predict_proba(X)[:, 1]  # Probability of class 1
+                    else:
+                        pred = model.predict(X)
+                    
+                    # Reshape prediction back to window dimensions
+                    pred = pred.reshape(height, width)
+                    
+                    # Store prediction in output array
+                    predictions[i] = pred
+                    
+                except Exception as e:
+                    logger.error(f"Error applying model {model_id} to window: {e}")
+                    predictions[i] = nodata
+            
+            # Write predictions to output raster
+            dst.write(predictions, window=window)
+    
+    logger.info(f"Successfully applied {len(models)} models to raster. Output saved to: {output_path}")

@@ -4,7 +4,7 @@ from pathlib import Path
 import typer
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.data.terrain import process_dem_to_terrain_attributes, save_terrain_dataset
+from sdm.raster.terrain import process_dem_to_terrain_attributes, save_terrain_dataset
 
 app = typer.Typer()
 

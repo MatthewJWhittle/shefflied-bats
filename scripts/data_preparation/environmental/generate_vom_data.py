@@ -9,7 +9,7 @@ from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary_and_transform
 from sdm.raster.utils import reproject_data, squeeze_dataset
 from sdm.raster.processing import summarise_raster_metrics
-from sdm.data.terrain import WCSDownloader
+from sdm.data import WCSDownloader
 
 app = typer.Typer()
 

@@ -1,4 +1,7 @@
 from pathlib import Path
+import logging
+from typing import Tuple, Union
+
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import box, Polygon
@@ -68,3 +71,39 @@ def generate_parquets(datasets, dir = "data/processed/os-data", boundary:Union[P
         gdf.to_parquet(path)
 
     return requested_paths
+
+
+def process_roads(
+    roads_gdf: gpd.GeoDataFrame
+) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """Split roads into major and minor categories.
+
+    Major roads include motorways and A roads, while minor roads include all others.
+
+    Args:
+        roads_gdf: GeoDataFrame containing road features with 'CLASSIFICA' column.
+
+    Returns:
+        Tuple containing (major_roads, minor_roads) as GeoDataFrames.
+    """
+    logging.info("Processing roads classification")
+    road_classes = roads_gdf["CLASSIFICA"].value_counts()
+    major_roads = ["Motorway", "A Road"]
+    pattern = "|".join([f"{road_type}*" for road_type in major_roads])
+
+    road_classes = road_classes.to_frame(name="count").reset_index(names=["CLASSIFICA"])
+    road_classes["major_road"] = road_classes.CLASSIFICA.str.contains(
+        pattern, regex=True
+    )
+    road_classes.drop(columns=["count"], inplace=True)
+
+    roads = roads_gdf.merge(road_classes, on="CLASSIFICA", how="left")
+
+    roads.major_road.fillna(False, inplace=True)
+    roads["major_road"] = roads.major_road.astype(bool)
+
+    major_roads = gpd.GeoDataFrame(roads[roads.major_road])
+    minor_roads = gpd.GeoDataFrame(roads[~roads.major_road])
+    logging.info("Classified %d major roads and %d minor roads", 
+                 len(major_roads), len(minor_roads))
+    return major_roads, minor_roads

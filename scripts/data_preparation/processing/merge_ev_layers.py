@@ -7,12 +7,12 @@ import xarray as xr
 import rioxarray as rxr # For direct open_rasterio with band_as_variable
 import numpy as np
 from tqdm import tqdm
+from rasterio.enums import Resampling # For reprojection
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary_and_transform # For boundary and spatial_config
 from sdm.utils.text_utils import tidy_variable_name
 from sdm.raster.utils import reproject_data, squeeze_dataset
-from rasterio.enums import Resampling # For reprojection
 
 app = typer.Typer()
 

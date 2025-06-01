@@ -5,13 +5,149 @@ Core terrain data processing functionality.
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union, Tuple
+import asyncio
+import aiohttp
+import tempfile
 
 import numpy as np
 import rasterio
 from rasterio.warp import transform_geom
 from scipy.ndimage import generic_filter
+import xarray as xr
 
 logger = logging.getLogger(__name__)
+
+class WCSDownloader:
+    """A class to handle WCS data downloads."""
+    
+    def __init__(
+        self,
+        endpoint: str,
+        coverage_id: str,
+        request_tile_pixels: Tuple[int, int] = (1024, 1024),
+        use_temp_storage: bool = True
+    ):
+        self.endpoint = endpoint
+        self.coverage_id = coverage_id
+        self.tile_width, self.tile_height = request_tile_pixels
+        self.use_temp_storage = use_temp_storage
+        self.temp_dir: Optional[Path] = None
+        
+    async def get_coverage(
+        self,
+        bbox: Tuple[float, float, float, float],
+        resolution: float,
+        max_concurrent: int = 5
+    ) -> xr.Dataset:
+        """Get coverage data from WCS service."""
+        if self.use_temp_storage:
+            self.temp_dir = Path(tempfile.mkdtemp())
+            
+        try:
+            # Calculate tile bounds
+            minx, miny, maxx, maxy = bbox
+            width = maxx - minx
+            height = maxy - miny
+            
+            # Calculate number of tiles
+            nx = int(np.ceil(width / (self.tile_width * resolution)))
+            ny = int(np.ceil(height / (self.tile_height * resolution)))
+            
+            # Generate tile URLs
+            tile_urls = []
+            for i in range(nx):
+                for j in range(ny):
+                    tile_minx = minx + i * self.tile_width * resolution
+                    tile_miny = miny + j * self.tile_height * resolution
+                    tile_maxx = min(tile_minx + self.tile_width * resolution, maxx)
+                    tile_maxy = min(tile_miny + self.tile_height * resolution, maxy)
+                    
+                    params = {
+                        "service": "WCS",
+                        "version": "2.0.1",
+                        "request": "GetCoverage",
+                        "coverageId": self.coverage_id,
+                        "bbox": f"{tile_minx},{tile_miny},{tile_maxx},{tile_maxy}",
+                        "width": str(self.tile_width),
+                        "height": str(self.tile_height),
+                        "format": "image/tiff"
+                    }
+                    
+                    url = f"{self.endpoint}?" + "&".join(f"{k}={v}" for k, v in params.items())
+                    tile_urls.append(url)
+            
+            # Download tiles
+            async with aiohttp.ClientSession() as session:
+                tasks = []
+                for url in tile_urls:
+                    task = self._download_tile(session, url)
+                    tasks.append(task)
+                
+                # Process tiles in batches
+                results = []
+                for i in range(0, len(tasks), max_concurrent):
+                    batch = tasks[i:i + max_concurrent]
+                    batch_results = await asyncio.gather(*batch)
+                    results.extend([r for r in batch_results if r is not None])
+            
+            # Merge tiles
+            if results:
+                datasets = []
+                for r in results:
+                    ds = xr.open_dataset(r, engine="rasterio")
+                    datasets.append(ds)
+                merged = xr.concat(datasets, dim=["x", "y"])
+                # Close individual datasets
+                for ds in datasets:
+                    ds.close()
+                return merged
+            else:
+                raise ValueError("No valid tiles were downloaded")
+                
+        finally:
+            if self.use_temp_storage and self.temp_dir:
+                for file in self.temp_dir.iterdir():
+                    file.unlink()
+                self.temp_dir.rmdir()
+    
+    async def _download_tile(self, session: aiohttp.ClientSession, url: str) -> Optional[str]:
+        """Download a single tile."""
+        try:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    if self.use_temp_storage and self.temp_dir:
+                        temp_file = self.temp_dir / f"tile_{hash(url)}.tif"
+                        with open(temp_file, "wb") as f:
+                            f.write(await response.read())
+                        return str(temp_file)
+                    else:
+                        # Handle in-memory storage if needed
+                        pass
+                else:
+                    logger.warning(f"Failed to download tile: {url} (status: {response.status})")
+        except Exception as e:
+            logger.error(f"Error downloading tile {url}: {e}")
+        return None
+
+def create_terrain_wcs_downloaders(
+    tile_pixels: Tuple[int, int] = (1024, 1024),
+    use_temp_storage: bool = True
+) -> Dict[str, WCSDownloader]:
+    """Create WCS downloaders for DTM and DSM data."""
+    return {
+        "dtm": WCSDownloader(
+            endpoint="https://environment.data.gov.uk/spatialdata/terrain-50-dtm/wcs",
+            coverage_id="DTM_50",
+            request_tile_pixels=tile_pixels,
+            use_temp_storage=use_temp_storage
+        ),
+        "dsm": WCSDownloader(
+            endpoint="https://environment.data.gov.uk/spatialdata/terrain-50-dsm/wcs",
+            coverage_id="DSM_50",
+            request_tile_pixels=tile_pixels,
+            use_temp_storage=use_temp_storage
+        )
+    }
 
 def calculate_slope(
     dem_raster: Path,

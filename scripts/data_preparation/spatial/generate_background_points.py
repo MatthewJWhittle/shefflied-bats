@@ -7,7 +7,7 @@ from typing_extensions import Annotated # For newer Typer features if needed, or
 from typing import Literal
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.data.processing import generate_background_points
+from sdm.occurrence.sampling import generate_background_points
 
 app = typer.Typer()
 
