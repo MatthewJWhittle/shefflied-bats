@@ -4,10 +4,12 @@ Vector data loading functionality.
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Union, Optional, Tuple, Any
 
 import pandas as pd
 import geopandas as gpd
+import rioxarray as rxr
+import xarray as xr
 from shapely.geometry import Polygon
 
 logger = logging.getLogger(__name__)
@@ -88,4 +90,28 @@ def load_background_points(
         return gdf, weights
     except Exception as e:
         logger.error(f"Error loading background points: {e}")
+        raise
+
+def load_environmental_variables(
+    ev_path: Union[str, Path]
+) -> Tuple[xr.Dataset, Path]:
+    """Load environmental variables for modelling.
+    
+    Args:
+        ev_path: Path to environmental variables raster
+        
+    Returns:
+        Tuple of (Dataset containing environmental variables, Path to raster file)
+    """
+    ev_raster = Path(ev_path)
+    
+    try:
+        evs = rxr.open_rasterio(ev_raster, masked=True, band_as_variable=True).squeeze()
+        # rename the variables by their long name
+        for var in evs.data_vars:
+            evs = evs.rename({var: evs[var].attrs["long_name"]})
+        logger.info(f"Loaded environmental variables from {ev_raster}")
+        return evs, ev_raster
+    except Exception as e:
+        logger.error(f"Error loading environmental variables: {e}")
         raise 

@@ -16,6 +16,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.compose import ColumnTransformer
 
 import elapid as ela
+from elapid.models import MaxentModel as BaseMaxentModel
 from elapid.types import to_iterable # Used by elapid internals, good to be aware of
 from elapid.utils import (
     NoDataException,
@@ -26,11 +27,88 @@ from elapid.utils import (
     # get_tqdm, # Not directly used here, elapid.geo.apply_model_to_array handles its own tqdm
 )
 from elapid.geo import apply_model_to_array # Core raster prediction function from elapid
+from elapid.models import MaxentConfig
 
 # Potentially import from .utils if model-specific utils are there
 # from .utils import prepare_occurrence_data # Example, if it were MaxEnt specific
 
 logger = logging.getLogger(__name__)
+
+
+class DefaultMaxentConfig(MaxentConfig):
+    """
+    A default MaxentConfig object that can be used to create a MaxentModel.
+    """
+    def __init__(
+            self,
+            feature_types: List[str] = ["linear", "hinge", "product"],
+            beta_multiplier: float = 1.5,
+            beta_lqp: float = 1.0,
+            beta_hinge: float = 1.0,
+            beta_threshold: float = 1.0,
+            beta_categorical: float = 1.0,
+            n_hinge_features: int = 10,
+            n_threshold_features: int = 10,
+            clamp: bool = True,
+            convergence_tolerance: float = 1e-5,
+            use_lambdas: str = "best",
+            n_lambdas: int = 100,
+            class_weights: Union[str, float] = 100,
+            n_cpus: int = 1,
+            use_sklearn: bool = True,
+            tau: float = 0.5,
+            transform: str = "cloglog",
+    ):
+        super().__init__()
+        self.feature_types = feature_types
+        self.beta_multiplier=beta_multiplier
+        self.beta_lqp=beta_lqp # Default
+        self.beta_hinge=beta_hinge # Default
+        self.beta_threshold=beta_threshold # Default
+        self.beta_categorical=beta_categorical # Default
+        self.n_hinge_features=n_hinge_features # Increased from 5 in original script
+        self.n_threshold_features=n_threshold_features # Increased from 5 in original script
+        self.clamp=clamp
+        self.convergence_tolerance=convergence_tolerance # Default in elapid
+        self.use_lambdas=use_lambdas
+        self.n_lambdas=n_lambdas
+        self.class_weights=class_weights
+        self.n_cpus=n_cpus
+        self.use_sklearn=use_sklearn
+        self.tau=tau
+        self.transform=transform
+
+# add a from_config classmethod to MaxentConfig
+class MaxentModel(BaseMaxentModel):
+    """
+    A wrapper around elapid.MaxentModel that allows for configuration via a MaxentConfig object.
+    This is useful for setting the model parameters via a config file.
+    """
+    @classmethod
+    def from_config(cls, config: MaxentConfig, n_cpus: int = 1) -> "MaxentModel":
+        """
+        Create a MaxentModel from a MaxentConfig object.
+        """
+        return cls(
+            feature_types=config.feature_types,
+            tau=config.tau,
+            transform=config.transform, # type: ignore
+            clamp=config.clamp,
+            scorer=config.scorer,
+            beta_multiplier=config.beta_multiplier,
+            beta_lqp=config.beta_lqp,
+            beta_hinge=config.beta_hinge,
+            beta_threshold=config.beta_lqp,
+            beta_categorical=config.beta_categorical,
+            n_hinge_features=config.n_hinge_features,
+            n_threshold_features=config.n_threshold_features,
+            convergence_tolerance=config.tolerance,
+            use_lambdas=config.use_lambdas,
+            n_lambdas=config.n_lambdas,
+            class_weights=config.class_weights,
+            n_cpus=n_cpus,
+            use_sklearn=True,
+        )
 
 def extract_split_data(
     gdf: gpd.GeoDataFrame, 
@@ -186,15 +264,29 @@ def train_final_maxent_model(
 
 
 def evaluate_and_train_maxent_model(
-    model: BaseEstimator, 
-    occurrence_gdf: gpd.GeoDataFrame, 
-    metric_fn: Callable = roc_auc_score, 
+    model: BaseEstimator,
+    occurrence_gdf: gpd.GeoDataFrame,
+    metric_fn: Callable = roc_auc_score,
     n_cv_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
     random_state_kfold: Optional[int] = None
 ) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray]:
     """
     Performs cross-validation and then trains a final model on all data.
+
+    This function performs cross-validation and then trains a final model on all data.
+    It is a wrapper around cross_validate_maxent_model and train_final_maxent_model.
+
+    Args:
+        model: The scikit-learn compatible model instance (e.g., elapid.MaxentModel).
+        occurrence_gdf: GeoDataFrame with occurrence data (features, class, sample_weight, geometry).
+        metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
+        n_cv_folds: Number of folds for geographic cross-validation.
+        feature_columns: List of feature column names. If None, inferred.
+        random_state_kfold: Random state for GeographicKFold for reproducible splits.
+
+    Returns:
+        Tuple of (final_trained_model, cv_models, cv_scores).
     """
     logger.info("Starting model evaluation and final training process...")
     cv_models, cv_scores = cross_validate_maxent_model(
@@ -280,8 +372,8 @@ def predict_rasters_with_elapid_model(
 
 def create_maxent_pipeline(
     feature_names: List[str], 
-    maxent_beta_multiplier: float = 2.5, # example of making params configurable
-    maxent_n_jobs: int = 1 # Threads for MaxentModel itself
+    maxent_n_jobs: int = 1, # Threads for MaxentModel itself
+    model_config: MaxentConfig = DefaultMaxentConfig(),
     # Add other MaxentModel params as needed
 ) -> Pipeline:
     """Creates a scikit-learn Pipeline for MaxEnt modeling.
@@ -308,29 +400,10 @@ def create_maxent_pipeline(
     
     # Scaler: Standardizes features by removing the mean and scaling to unit variance.
     scaler = StandardScaler()
+
     
     # Maxent Model from Elapid
-    maxent_estimator = ela.MaxentModel(
-        feature_types=["linear", "quadratic", "hinge", "product"], # Default Elapid features
-        beta_multiplier=maxent_beta_multiplier,
-        beta_lqp=1.0, # Default
-        beta_hinge=1.0, # Default
-        beta_threshold=1.0, # Default
-        beta_categorical=1.0, # Default
-        n_hinge_features=10, # Increased from 5 in original script
-        n_threshold_features=10, # Increased from 5 in original script
-        # transform="cloglog", # Default in elapid if not specified, or choose one
-        clamp=True,
-        # tau=0.5, # Default in elapid
-        convergence_tolerance=1e-5, # Default in elapid
-        # use_lambdas="best", # Default in elapid
-        # project_log_file=None, # Default in elapid
-        # response_curves=False, # Default in elapid
-        # jackknife=False, # Default in elapid
-        # diagnostics=False, # Default in elapid
-        # compute_auc=False, # Default in elapid, CV handles AUC
-        n_cpus=maxent_n_jobs # Threads for the model itself
-    )
+    maxent_estimator = MaxentModel.from_config(model_config, n_cpus=maxent_n_jobs)
 
     pipeline = Pipeline([
         ("feature_selection", feature_selector),

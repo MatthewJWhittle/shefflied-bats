@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional # Added Optional
 from rio_cogeo.cogeo import cog_translate
 from rio_cogeo.profiles import cog_profiles
 
+
 def translate_to_cog(
     src_path: Path, 
     dst_path: Path, 

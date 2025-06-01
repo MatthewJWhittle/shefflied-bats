@@ -4,13 +4,14 @@ Core data processing functionality.
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 
 import pandas as pd
 import numpy as np
 import geopandas as gpd
 import rasterio
 from rasterio.warp import transform_geom
+import elapid as ela
 
 logger = logging.getLogger(__name__)
 
@@ -220,4 +221,30 @@ def extract_environmental_data(
             
     except Exception as e:
         logger.error(f"Error extracting environmental data: {e}", exc_info=True)
+        raise
+
+def annotate_points(
+    bats: gpd.GeoDataFrame,
+    background: gpd.GeoDataFrame,
+    ev_raster: Union[str, Path],
+    ev_columns: List[str]
+) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """Annotate bat and background points with environmental variables.
+    
+    Args:
+        bats: GeoDataFrame containing bat occurrence points
+        background: GeoDataFrame containing background points
+        ev_raster: Path to environmental variables raster
+        ev_columns: List of environmental variable column names
+        
+    Returns:
+        Tuple of (annotated bat points, annotated background points)
+    """
+    try:
+        bats_ant = ela.annotate(bats, str(ev_raster), labels=ev_columns)
+        background = ela.annotate(background, str(ev_raster), labels=ev_columns)
+        logger.info("Successfully annotated points with environmental variables")
+        return bats_ant, background
+    except Exception as e:
+        logger.error(f"Error annotating points: {e}")
         raise 

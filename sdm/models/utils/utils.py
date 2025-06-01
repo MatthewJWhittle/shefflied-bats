@@ -37,6 +37,25 @@ def calculate_background_points(
     logger.info(f"Recommended background points: {n_bg} (presences: {n_presences})")
     return int(n_bg)
 
+
+# define a function to filter the gdf to keep only one point per grid index
+def filter_gdf_to_grid(gdf, grid, tolerance=50):
+    gdf_grid = gpd.sjoin_nearest(
+        gdf,
+        grid,
+        how="left",
+        distance_col="distance",
+        max_distance=tolerance,
+    )
+    # Drop the duplicate records
+    gdf_grid.drop_duplicates(subset="index_right", inplace=True)
+    # Rename to grid index 
+    gdf_grid.rename(columns={"index_right": "grid_index"}, inplace=True)
+    # Clean up the column names
+    gdf_grid.drop(columns=["distance"], inplace=True)
+    return gdf_grid
+
+
 def prepare_occurrence_data(
     presence_gdf: gpd.GeoDataFrame,
     background_gdf: gpd.GeoDataFrame,
@@ -68,12 +87,16 @@ def prepare_occurrence_data(
         order_by_density_for_subset: If True and subset_background is True, order background points by density for subsetting.
 
     Returns:
-        A GeoDataFrame ready for model training (stacked, with class labels and sample weights).
+        A GeoDataFrame ready for model training with the following columns:
+        - geometry: geometry column
+        - class: class label (1 for presence, 0 for background)
+        - sample_weight: sample weight
+        - all columns from input_vars
     """
     # Make copies to avoid modifying original DataFrames
-    presence_gdf = presence_gdf.copy()
-    background_gdf = background_gdf.copy()
-    background_density = background_density.copy()
+    presence_gdf : gpd.GeoDataFrame = presence_gdf.copy()
+    background_gdf : gpd.GeoDataFrame = background_gdf.copy()
+    background_density : pd.Series = background_density.copy()
 
     if not all(col in presence_gdf.columns for col in input_vars):
         raise ValueError("Not all input_vars found in presence_gdf columns.")
@@ -82,37 +105,23 @@ def prepare_occurrence_data(
 
     if filter_to_grid:
         logger.info("Filtering points to grid and removing overlaps...")
-        # This part relies on filter_gdf_to_grid adding an 'index_right' or 'grid_index' column
-        # and that grid_gdf has a unique index to be used as 'grid_index'.
-        # Let's assume filter_gdf_to_grid is available and works as expected.
-        # from species_sdm.occurrence.processing import filter_gdf_to_grid # Ideal import location
         
-        # Placeholder for filter_gdf_to_grid if not yet available - this is complex logic.
-        # For now, we assume this step correctly assigns a 'grid_id' based on grid_gdf
-        # and filters points outside any grid cell.
-        # Simplified conceptual filtering (actual sjoin and duplicate drop is more involved):
-        # presence_gdf = filter_gdf_to_grid(presence_gdf, grid_gdf, tolerance=...)
-        # background_gdf = filter_gdf_to_grid(background_gdf, grid_gdf, tolerance=...)
-        
-        # This step implies `filter_gdf_to_grid` adds a column like `grid_index` (from `grid_gdf.index` or a specific ID col)
-        # For demonstration, let's assume a simplified direct spatial join if filter_gdf_to_grid is not yet moved/defined.
-        # This is NOT a robust replacement for the original filter_gdf_to_grid logic.
-        if 'grid_index' not in presence_gdf.columns or 'grid_index' not in background_gdf.columns:
-             logger.warning("'grid_index' not found in GDFs. Skipping overlap removal. filter_gdf_to_grid logic needs to be integrated.")
-        else:
-            # Drop background points that share a grid_index with presence points
-            original_bg_len = len(background_gdf)
-            background_gdf = background_gdf[
-                ~background_gdf["grid_index"].isin(presence_gdf["grid_index"])
-            ]
-            logger.info(f"Removed {original_bg_len - len(background_gdf)} background points overlapping with presence grid cells.")
-            
-            # Re-filter density series to match remaining background points
-            background_density = background_density.loc[background_gdf.index]
+        presence_gdf = filter_gdf_to_grid(presence_gdf, grid_gdf)
+        background_gdf = filter_gdf_to_grid(background_gdf, grid_gdf)
 
-            # Drop the grid_index column after use if it was temporarily added
-            # presence_gdf = presence_gdf.drop(columns=["grid_index"], errors='ignore')
-            # background_gdf = background_gdf.drop(columns=["grid_index"], errors='ignore')
+        # Drop background points that have a grid_index in the presence points
+        background_gdf = background_gdf[
+            ~background_gdf["grid_index"].isin(presence_gdf["grid_index"])
+        ]
+        # filter the density to gdf index
+        background_density = background_density.loc[
+            background_gdf.index
+        ]
+
+
+        # Drop the grid index column
+        presence_gdf.drop(columns=["grid_index"], inplace=True)
+        background_gdf.drop(columns=["grid_index"], inplace=True)
 
     if subset_background:
         n_bg_calculated = calculate_background_points(len(presence_gdf))
@@ -121,31 +130,31 @@ def prepare_occurrence_data(
         if order_by_density_for_subset and not background_density.empty:
             logger.info("Subsetting background points by density.")
             # Ensure background_density index aligns with background_gdf for sorting
-            valid_indices = background_density.index.intersection(background_gdf.index)
-            background_gdf = background_gdf.loc[valid_indices]
-            background_density = background_density.loc[valid_indices]
+            valid_indices = background_density.index.intersection(background_gdf.index) # type: ignore
+            background_gdf : gpd.GeoDataFrame = background_gdf.loc[valid_indices]
+            background_density : pd.Series = background_density.loc[valid_indices]
             
             # Sort by density and take top n_bg
-            background_gdf = background_gdf.loc[
+            background_gdf : gpd.GeoDataFrame = background_gdf.loc[
                 background_density.sort_values(ascending=False).index
-            ]
+            ] # type: ignore
             background_gdf = background_gdf.head(n_bg_calculated)
         elif not background_density.empty:
             logger.info("Subsetting background points randomly.")
             n_bg_sample = min(n_bg_calculated, len(background_gdf))
             if n_bg_sample > 0 :
-                background_gdf = background_gdf.sample(n=n_bg_sample, random_state=42) # Add random_state for reproducibility
+                background_gdf : gpd.GeoDataFrame = background_gdf.sample(n=n_bg_sample, random_state=42) # Add random_state for reproducibility
             else:
                 logger.warning("No background points available for random sampling after filtering.")
-                background_gdf = background_gdf.iloc[0:0] # Empty gdf with same columns
+                background_gdf : gpd.GeoDataFrame = background_gdf.iloc[0:0] # Empty gdf with same columns
         else:
             logger.warning("Background density not provided or empty; cannot subset by density. Performing random sampling if points exist.")
             n_bg_sample = min(n_bg_calculated, len(background_gdf))
             if n_bg_sample > 0:
-                 background_gdf = background_gdf.sample(n=n_bg_sample, random_state=42)
+                 background_gdf : gpd.GeoDataFrame = background_gdf.sample(n=n_bg_sample, random_state=42)
             else:
                 logger.warning("No background points available for random sampling.")
-                background_gdf = background_gdf.iloc[0:0]
+                background_gdf : gpd.GeoDataFrame = background_gdf.iloc[0:0]
         logger.info(f"Number of background points after subsetting: {len(background_gdf)}.")
 
     # Select final columns (input_vars + geometry for stacking and weighting)

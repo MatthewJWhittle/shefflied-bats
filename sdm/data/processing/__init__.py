@@ -6,7 +6,8 @@ from .core import (
     merge_environmental_layers,
     process_occurrence_data,
     process_background_data,
-    extract_environmental_data
+    extract_environmental_data,
+    annotate_points
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     'process_occurrence_data',
     'process_background_data',
     'extract_environmental_data',
+    'annotate_points',
 ] 

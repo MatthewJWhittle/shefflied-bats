@@ -9,8 +9,9 @@ from scipy.ndimage import gaussian_filter
 from shapely.geometry import box
 import rioxarray as rxr # Required for .rio accessor, even if not directly called
 
-from sdm.raster.utils import generate_model_grid
 from sdm.utils.io import load_boundary, load_spatial_config
+
+
 
 # Note: setup_logging() would typically be called by the script using this library function.
 
@@ -248,4 +249,4 @@ def generate_background_points(
     bg_points_gdf["presence"] = 0 
 
     logging.info(f"Generated {len(bg_points_gdf)} background points.")
-    return bg_points_gdf 
+    return bg_points_gdf

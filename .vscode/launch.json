@@ -8,6 +8,9 @@
             "module": "${fileBasenameNoExtension}",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
         }
     ]
 }
