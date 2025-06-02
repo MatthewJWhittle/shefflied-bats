@@ -1,0 +1,7 @@
+{
+    "top": 646900,
+    "left": 313000,
+    "crs": "EPSG:27700",
+    "resolution" : 100,
+    "study_area_buffer" : 7000
+}

@@ -1,0 +1,20 @@
+
+<root>/
+├── config/
+│   └── default.yaml
+├── data/                     ← data directory (local files etc.)
+│   └── ...
+├── species_sdm/               ← installable library
+│   ├── data/
+│   ├── raster/
+│   ├── occurrence/
+│   ├── models/
+│   ├── viz/
+│   ├── utils/
+│   └── cli.py
+├── scripts/                   ← thin “glue” scripts
+├── notebooks/                 ← exploration & figures
+├── tests/                     ← pytest suite
+├── docs/                      ← Sphinx or MkDocs site
+├── pyproject.toml
+└── README.md
