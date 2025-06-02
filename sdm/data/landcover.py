@@ -38,15 +38,21 @@ def get_ceh_land_cover_codes_v2023() -> Dict[str, str]:
 def define_broad_habitat_categories() -> Dict[str, List[str]]:
     """Define mapping of CEH land cover categories to broad habitat types."""
     return {
-        "Woodland": ["Broadleaved_Woodland", "Coniferous_Woodland"],
-        "Grassland": ["Improved_Grassland", "Neutral_Grassland", "Calcareous_Grassland", "Acid_Grassland", "Heather_Grassland"],
-        "Heathland": ["Heather"],
-        "Wetland_Bog": ["Fen_Marsh_and_Swamp", "Bog"],
-        "Arable": ["Arable_and_Horticulture"],
-        "Urban": ["Urban", "Suburban"],
-        "Other_Bare": ["Inland_Bare_Ground", "Coastal_Bare_Ground", "Inland_Rock"],
-        "Coastal_Marine": ["Saltwater", "Freshwater", "Supra-littoral_Rock", "Supra-littoral_Sediment", 
-                          "Littoral_Rock", "Littoral_Sediment", "Saltmarsh", "Marine_Littoral"]
+        "Grassland": [
+            "Neutral grassland",
+            "Calcareous grassland",
+            "Acid grassland",
+        ],
+        "Marine, Littoral": [
+            "Saltwater",
+            "Supralittoral rock",
+            "Supralittoral sediment",
+            "Littoral rock",
+            "Littoral sediment",
+            "Saltmarsh",
+        ],
+        "Upland Heathland": ["Heather and shrub", "Heather grassland"],
+        "Wetland": ["Bog", "Fen, Marsh and Swamp"],
     }
 
 def create_binary_raster_from_category(

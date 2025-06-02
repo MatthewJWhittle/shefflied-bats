@@ -9,6 +9,8 @@ from affine import Affine
 import pickle
 import pandas as pd
 
+from sdm.raster.utils import construct_transform_shift_bounds 
+
 def set_project_wd(verbose=True):
     # Navigate to your project directory and create a '.here' file if it doesn't exist
     project_dir = here(".")
@@ -76,7 +78,7 @@ def load_spatial_config() -> Dict:
 def load_boundary_and_transform(
         boundary_path: Union[str, Path],
         buffer_distance: Union[float, int] = 7000,
-) -> tuple:
+) -> Tuple[gpd.GeoDataFrame, Affine, tuple, Dict]:
     """
     Load the boundary and construct the model transform.
     Returns: Tuple[gpd.GeoDataFrame, Affine, tuple, Dict]
@@ -85,7 +87,7 @@ def load_boundary_and_transform(
     boundary = load_boundary(
         boundary_path, buffer_distance=buffer_distance, target_crs=spatial_config["crs"]
     )
-    from sdm.raster.utils import construct_transform_shift_bounds 
+    
     model_transform, bounds = construct_transform_shift_bounds(
         tuple(boundary.total_bounds), spatial_config["resolution"]
     )

@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Union # Not strictly needed if only Path is used in main args
 
 import typer
 import xarray as xr

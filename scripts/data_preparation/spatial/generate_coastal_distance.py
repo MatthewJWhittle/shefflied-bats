@@ -1,14 +1,12 @@
 import logging
 from pathlib import Path
-from typing import Union
 
 import typer
 import geopandas as gpd
-import xarray as xr
-# import rioxarray as rxr # Not directly used in main, but by functions it calls
+import rioxarray as rxr
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.utils.io import load_boundary_and_transform # Gets boundary, transform, bounds, spatial_config
+from sdm.utils.io import load_boundary_and_transform
 from sdm.raster.utils import reproject_data, squeeze_dataset
 from sdm.data.spatial import calculate_coastal_distance
 
@@ -61,8 +59,6 @@ def main(
     # Note: load_boundary_and_transform also provides spatial_config which includes resolution and CRS
     boundary_gdf, model_transform, grid_bounds, spatial_config = load_boundary_and_transform(
         boundary_path
-        # Buffer distance for boundary_gdf is handled by load_boundary_and_transform if its default is used
-        # or if a different buffer for the EV generation itself is needed, it can be passed here.
     )
     model_crs = boundary_gdf.crs # CRS from the loaded (and possibly reprojected) boundary
     model_resolution = spatial_config["resolution"]
@@ -104,22 +100,22 @@ def main(
     distance_calc_resolution = model_resolution * distance_calc_resolution_factor
     coastal_distance_xr = calculate_coastal_distance(
         geom=sea_polygon,
-        boundary_gdf=boundary_gdf, # Pass the GeoDataFrame for CRS and context
-        grid_bounds=grid_bounds,    # Use the bounds from load_boundary_and_transform
+        boundary=boundary_gdf,
+        bounds=grid_bounds,
         resolution=distance_calc_resolution,
-        var_name="distance_to_coast",
+        name="distance_to_coast",
     )
 
     logging.info("Reprojecting coastal distance data to model grid...")
     coastal_distance_xr = reproject_data(
-        coastal_distance_xr, 
+        array=coastal_distance_xr,
         crs=model_crs, 
         transform=model_transform, 
         resolution=model_resolution
     )
 
     logging.info("Squeezing dataset...")
-    coastal_distance_xr = squeeze_dataset(coastal_distance_xr)
+    coastal_distance_xr = squeeze_dataset(ds=coastal_distance_xr)
 
     logging.info("Masking data to boundary...")
     coastal_distance_xr = coastal_distance_xr.rio.clip(

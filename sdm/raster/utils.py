@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Union, Tuple, Optional, Sequence, Any, List
+from typing import Union, Tuple, Optional, List
 import math
 
 import geopandas as gpd
@@ -10,10 +10,10 @@ from affine import Affine
 from rasterio.enums import Resampling
 from rasterio.features import geometry_mask
 from rasterio.transform import from_bounds
-import rioxarray as rxr 
+import rioxarray as rxr # import unused but needed to enable rio attributes of xarray
 import xarray as xr 
 from shapely.geometry import box, Polygon
-from rasterio.coords import BoundingBox
+
 
 
 
@@ -59,8 +59,6 @@ def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=
     return output_file
 
 
-import rasterio as rio
-from rasterio.enums import Resampling
 
 def aggregate_raster(input_file, output_file, scale_factor):
     with rio.open(input_file) as src:
@@ -124,24 +122,6 @@ def generate_point_grid(
     return grid
 
 
-
-def reproject_to_model_raster(raster):
-    # ... existing code ...
-    # This function uses generate_model_raster which is being removed.
-    # It might need to be refactored or removed if no longer needed.
-    # For now, commenting out its body to avoid errors, but keeping signature.
-    logging.warning("reproject_to_model_raster may be deprecated or need refactoring as generate_model_raster is removed.")
-    # model_raster = generate_model_raster() 
-    # raster_projected = raster.rio.reproject_match(model_raster)
-    # if isinstance(raster, xr.DataArray):
-    #     raster_projected = raster_projected.where(raster_projected != raster.rio.nodata, np.nan)
-    #     raster_projected.rio.write_nodata(np.nan, inplace=True)
-    # else:
-    #     for var in raster.data_vars:
-    #         raster_projected[var] = raster_projected[var].where(raster_projected[var] != raster_projected[var].rio.nodata, np.nan)
-    #         raster_projected[var].rio.write_nodata(np.nan, inplace=True)
-    # return raster_projected
-    return raster # Placeholder return
 
 def tile_bounding_box(xmin, ymin, xmax, ymax, tile_shape, resolution):
     width = int(tile_shape[0] * resolution)

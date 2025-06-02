@@ -10,58 +10,61 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 import rasterio
-from rasterio.warp import transform_geom
-from shapely.geometry import Point, LineString, MultiLineString
-from shapely.ops import nearest_points
+
+from shapely.geometry.base import BaseGeometry
+
 from scipy.ndimage import generic_filter
+import xarray as xr
+
+from sdm.raster.utils import generate_point_grid
 
 logger = logging.getLogger(__name__)
 
 def calculate_coastal_distance(
-    points_gdf: gpd.GeoDataFrame,
-    coastline_gdf: gpd.GeoDataFrame,
-    output_path: Path
-) -> gpd.GeoDataFrame:
-    """Calculate distance to coastline for points.
-    
-    Args:
-        points_gdf: GeoDataFrame containing points
-        coastline_gdf: GeoDataFrame containing coastline
-        output_path: Path to save results
-        
-    Returns:
-        GeoDataFrame with coastal distances
+    geom: BaseGeometry,
+    boundary: gpd.GeoDataFrame,
+    bounds: tuple,
+    resolution: float,
+    name: str = "distance",
+) -> xr.Dataset:
     """
-    try:
-        # Ensure same CRS
-        if points_gdf.crs != coastline_gdf.crs:
-            coastline_gdf = coastline_gdf.to_crs(points_gdf.crs)
-        
-        # Calculate distances
-        distances = []
-        for idx, row in points_gdf.iterrows():
-            point = row.geometry
-            min_dist = float('inf')
-            
-            for _, coast_row in coastline_gdf.iterrows():
-                coast = coast_row.geometry
-                dist = point.distance(coast)
-                min_dist = min(min_dist, dist)
-            
-            distances.append(min_dist)
-        
-        # Add distances to GeoDataFrame
-        points_gdf['coastal_distance'] = distances
-        
-        # Save results
-        points_gdf.to_file(output_path)
-        logger.info(f"Saved coastal distances to: {output_path}")
-        
-        return points_gdf
-        
-    except Exception as e:
-        logger.error(f"Error calculating coastal distances: {e}", exc_info=True)
-        raise
+    Create a grid of points within the boundary and calculate the distance to the geometry.
+
+    Args:
+        gdf (gpd.GeoDataFrame): The GeoDataFrame containing the points to calculate the distance to.
+        boundary (gpd.GeoDataFrame): The boundary to calculate the distance within.
+        bounds (tuple): The bounds of the boundary.
+        resolution (float): The resolution of the output data.
+        name (str): The name of the distance variable.
+
+    Returns:
+        xr.DataArray: An xarray DataArray containing the distances.
+    """
+    if not isinstance(geom, (BaseGeometry)):
+        raise ValueError("geom must be a Polygon or MultiPolygon")
+    
+    points_gdf = generate_point_grid(
+        bbox=bounds, resolution=resolution, crs=boundary.crs
+    )
+    points_gdf.reset_index(drop=True, inplace=True)
+
+    # Calculate the distance to the geometry
+    distances = points_gdf.geometry.distance(geom)
+    distances.reset_index(drop=True, inplace=True)
+    points_gdf[name] = distances
+    logging.debug(f"Missing values: {round(points_gdf[name].isna().mean(), 2) * 100}%")
+
+    # Reshape the distances to a grid
+    logging.info("Converting distance grid to xarray")
+    distance_array = (
+        points_gdf.sort_values(["y", "x"])
+        .set_index(["y", "x"])
+        .to_xarray()
+        .rio.write_crs(boundary.crs)
+        .drop_vars(["geometry"])
+    )
+
+    return distance_array
 
 def create_study_boundary(
     points_gdf: gpd.GeoDataFrame,
