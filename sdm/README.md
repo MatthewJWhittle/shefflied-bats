@@ -1,6 +1,6 @@
-# Sheffield Bats CLI
+# Species Distribution Modelling CLI
 
-A command-line interface for processing and modeling bat species distribution data in Sheffield.
+A command-line interface for processing and modeling species distribution data. This tool provides a comprehensive set of commands for environmental variable processing, model training, and visualization.
 
 ## Installation
 

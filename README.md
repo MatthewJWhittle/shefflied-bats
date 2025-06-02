@@ -1,4 +1,246 @@
+# Sheffield Bats Species Distribution Modelling
 
+This project implements Species Distribution Modelling (SDM) for bat species in Sheffield, UK. It processes environmental variables, occurrence data, and generates predictive models to understand bat species distribution patterns.
+
+## Quick Start
+
+1. **Prerequisites**
+   - Python 3.11 or higher
+   - Git
+   - Sufficient disk space (~20GB for data and models)
+   - Access to external data sources (OS, CEH, BGS)
+
+2. **Installation**
+   ```bash
+   # Install uv
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   
+   # Clone and setup
+   git clone [repository-url]
+   cd sheffield-bats
+   uv venv
+   source .venv/bin/activate
+   uv pip install -e .
+   ```
+
+3. **Download Required Data**
+   - OS Vector Map District tiles
+   - CEH Land Cover data
+   - BGS GeoCoast data
+   See [Required Data Sources](#required-data-sources) for details.
+
+4. **Basic Workflow**
+   ```bash
+   # 1. Define study area
+   sdm boundary
+   
+   # 2. Process environmental variables
+   sdm terrain
+   sdm landcover
+   sdm coastal
+   sdm os
+   
+   # 3. Merge variables
+   sdm merge --dataset-inputs "terrain=data/evs/terrain/terrain.tif" --dataset-inputs "landcover=data/evs/landcover/landcover.tif"
+   
+   # 4. Generate background points
+   sdm background --occurrence-data-path data/processed/bats-tidy.geojson --boundary-path data/processed/boundary.geojson
+   
+   # 5. Train models
+   sdm train --bats-file data/processed/bats-tidy.geojson --background-file data/processed/background-points.geojson --ev-file data/evs/evs-to-model.tif
+   
+   # 6. Generate predictions
+   sdm predict --ev-path data/evs/evs-to-model.tif --models-dir data/sdm_models
+   ```
+
+## Key Features
+
+- **Environmental Variables**: Processing of terrain, land cover, coastal distance, and OS data
+- **Model Training**: Species distribution modeling with configurable parameters
+- **Visualization**: Generation of model outputs and partial dependence plots
+- **CLI Interface**: Easy-to-use command-line tools for all operations
+- **Reproducibility**: Configuration-driven processing with MLflow experiment tracking
+
+## Configuration
+
+The project uses YAML configuration files in the `config/` directory:
+- `default.yaml`: Main configuration file
+- `spatial.json`: Spatial reference settings
+- `input_variables.json`: Environmental variable definitions
+
+Key configuration settings:
+- Coordinate Reference System: OSGB36 (EPSG:27700)
+- MLflow tracking for experiment management
+- Model hyperparameters
+
+## Dependencies
+
+Key Python packages:
+- `geopandas`: Spatial data processing
+- `rasterio`: Raster data handling
+- `scikit-learn`: Machine learning models
+- `mlflow`: Experiment tracking
+- `elapid`: Species distribution modeling
+
+See `pyproject.toml` for complete dependency list.
+
+## Overview
+
+The project uses machine learning to model bat species distributions based on environmental variables and occurrence data. It includes data preparation pipelines, model training, and visualization tools.
+
+## Project Structure
+
+```
+<root>/
+├── config/                   # Configuration files
+├── data/                     # Data directory
+│   ├── raw/                 # Raw input data
+│   └── processed/           # Processed data files
+├── sdm/                     # Core library
+│   ├── commands/           # CLI command implementations
+│   ├── data/               # Data processing modules
+│   ├── models/             # Model implementations
+│   ├── raster/             # Raster processing utilities
+│   ├── utils/              # Utility functions
+│   └── viz/                # Visualization tools
+├── notebooks/               # Jupyter notebooks
+├── tests/                   # Test suite
+└── outputs/                 # Model outputs and results
+```
+
+## Data Directory Structure
+
+The project uses a structured data directory to manage different stages of data processing:
+
+```
+data/
+├── raw/                     # Raw input data
+│   ├── bats/               # Original bat observation data
+│   └── big-files/          # Large external datasets
+│       ├── BGS GeoCoast/   # Coastal data from BGS
+│       ├── CEH/            # Land cover data
+│       └── os-vector-map/  # OS Vector Map District tiles
+│
+├── processed/              # Processed and intermediate data
+│   ├── bats-tidy.geojson  # Cleaned and standardized bat observations
+│   ├── boundary.geojson   # Study area boundary
+│   ├── background-points.geojson  # Generated background points
+│   └── bat_density.tif    # Bat occurrence density raster
+│
+├── evs/                    # Environmental variables
+│   ├── evs-to-model.tif   # Final combined environmental variables
+│   ├── terrain_stats.tif  # Terrain-derived variables
+│   ├── coastal_distance.tif  # Distance to coast
+│   ├── ceh-land-cover-100m.tif  # Land cover data
+│   ├── climate_stats.tif  # Climate variables
+│   └── grid-points.parquet  # Sampling grid points
+│
+├── sdm_models/            # Trained species distribution models
+├── sdm_predictions/       # Model prediction outputs
+└── temp/                  # Temporary processing files
+```
+
+### Key Data Files
+
+1. **Raw Data** (`data/raw/`)
+   - Original bat observation data
+   - External datasets (OS, CEH, BGS) that need to be downloaded
+
+2. **Processed Data** (`data/processed/`)
+   - `bats-tidy.geojson`: Standardized bat observations with required fields
+   - `boundary.geojson`: Study area boundary
+   - `background-points.geojson`: Generated background points for modeling
+   - `bat_density.tif`: Raster of bat occurrence density
+
+3. **Environmental Variables** (`data/evs/`)
+   - `evs-to-model.tif`: Combined environmental variables for modeling
+   - `terrain_stats.tif`: Terrain-derived variables (slope, aspect, etc.)
+   - `coastal_distance.tif`: Distance to coast
+   - `ceh-land-cover-100m.tif`: Land cover classification
+   - `climate_stats.tif`: Climate variables (temperature, precipitation)
+   - `grid-points.parquet`: Sampling grid for model training
+
+4. **Model Outputs**
+   - `sdm_models/`: Trained species distribution models
+   - `sdm_predictions/`: Model prediction rasters
+   - `outputs/`: Additional model outputs and visualizations
+
+## Usage
+
+The project provides a comprehensive command-line interface (CLI) for all operations. For detailed documentation of all available commands and their options, please refer to the [CLI Documentation](sdm/README.md).
+
+### Basic Workflow
+
+1. **Define Study Area**
+   ```bash
+   sdm boundary
+   ```
+
+2. **Process Environmental Variables**
+   ```bash
+   # Generate terrain data
+   sdm terrain
+   
+   # Process land cover data
+   sdm landcover
+   
+   # Generate coastal distance
+   sdm coastal
+   
+   # Process OS data
+   sdm os
+   
+   # Merge all environmental variables
+   sdm merge --dataset-inputs "terrain=data/evs/terrain/terrain.tif" --dataset-inputs "landcover=data/evs/landcover/landcover.tif"
+   ```
+
+3. **Generate Background Points**
+   ```bash
+   sdm background --occurrence-data-path data/processed/bats-tidy.geojson --boundary-path data/processed/boundary.geojson
+   ```
+
+4. **Train Models**
+   ```bash
+   sdm train --bats-file data/processed/bats-tidy.geojson --background-file data/processed/background-points.geojson --ev-file data/evs/evs-to-model.tif
+   ```
+
+5. **Generate Predictions**
+   ```bash
+   sdm predict --ev-path data/evs/evs-to-model.tif --models-dir data/sdm_models
+   ```
+
+6. **Create Visualizations**
+   ```bash
+   sdm visualize --run-summary-path outputs/sdm_runs/sdm_run_summary.csv --ev-raster-path data/evs/evs-to-model.tif
+   ```
+
+For more detailed information about each command, including all available options and configuration settings, please refer to the [CLI Documentation](sdm/README.md).
+
+## Required Data Sources
+
+### OS Data
+Download Vector Map District tiles from [OS Data Products](https://www.ordnancesurvey.co.uk/products/os-vectormap-district)
+- Save to: `data/raw/big-files/os-vector-map`
+
+### Land Cover Data
+Download from [Land Cover Map](https://www.ceh.ac.uk/data/ukceh-land-cover-maps)
+- Save to: `data/raw/big-files/CEH`
+
+### BGS GeoCoast
+Download from [BGS website](https://www.bgs.ac.uk/download/bgs-geocoast-open/)
+- Save to: `data/raw/big-files/BGS GeoCoast`
+
+## Contributing
+
+[Add contribution guidelines]
+
+## License
+
+[Add license information]
+
+## Contact
+
+[Add contact information]
 
 # Modelling steps
 
@@ -12,9 +254,6 @@
 uv run -m data_prep.prep_model_data.background_points --occurrence_path data/processed/bats-tidy.geojson --boundary data/processed/boundary.geojson --output data/processed --n-points 4000 
 ```
 Which will create a file called `data/processed/background-points.geojson`. 
-
-
-
 
 ## Define the Study Area
 Update the logic in `data_prep/generate_evs/ingestion/load_study_area.py` to create a study area for the model. The study area should be a geodataframe.

@@ -4,8 +4,8 @@ from typing_extensions import Annotated
 from typing import Optional, List, Literal
 
 app = typer.Typer(
-    name="sheffield-bats",
-    help="CLI tools for Sheffield Bats data processing and modelling",
+    name="sdm",
+    help="CLI tools for Species Distribution Modelling",
     add_completion=False,
 )
 
