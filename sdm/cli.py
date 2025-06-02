@@ -10,7 +10,6 @@ app = typer.Typer(
 )
 
 # Import core functions from their respective modules
-from sdm.commands.modelling.extract_model_features import extract_features
 from sdm.commands.visualization.visualise_model_outputs import generate_model_visualisations
 from sdm.commands.data_preparation.spatial.generate_background_points import generate_background_points_wrapper
 from sdm.commands.data_preparation.processing.merge_ev_layers import merge_ev_layers
@@ -24,45 +23,6 @@ from sdm.commands.data_preparation.environmental.generate_climate_data import ge
 from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import generate_ceh_lc_data
 from sdm.commands.data_preparation.environmental.generate_vom_data import generate_vom_data
 from sdm.commands.data_preparation.environmental.generate_terrain_stats import generate_terrain_stats
-
-@app.command()
-def extract(
-    input_points_path: Annotated[
-        Path, 
-        typer.Option(
-            ..., # Required
-            help="Path to combined occurrence and background points data (e.g., Parquet from generate_background_points.py).",
-            exists=True, readable=True, resolve_path=True
-        )
-    ],
-    ev_raster_stack_path: Annotated[
-        Path, 
-        typer.Option(
-            ..., # Required
-            help="Path to the multi-band environmental variable raster stack (e.g., GeoTIFF from merge_ev_layers.py).",
-            exists=True, readable=True, resolve_path=True
-        )
-    ],
-    output_path: Annotated[
-        Path, 
-        typer.Option(
-            help="Path to save the final model-ready feature data (e.g., Parquet).",
-            writable=True, resolve_path=True
-        )
-    ] = Path("data/processed/model_input_features.parquet"),
-    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging.")] = False
-) -> None:
-    """
-    Extracts environmental variable (EV) data for occurrence/background points,
-    applies any necessary preprocessing (e.g., scaling), and saves the 
-    model-ready feature dataset.
-    """
-    extract_features(
-        input_points_path=input_points_path,
-        ev_raster_stack_path=ev_raster_stack_path,
-        output_path=output_path,
-        verbose=verbose
-    )
 
 @app.command()
 def visualize(
