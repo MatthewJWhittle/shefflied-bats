@@ -3035,6 +3035,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "seaborn" },
+    { name = "topojson" },
     { name = "tqdm" },
     { name = "typer" },
     { name = "xarray" },
@@ -3063,6 +3064,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.5.2" },
     { name = "scipy", specifier = ">=1.15.2" },
     { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "topojson", specifier = ">=1.9" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = ">=0.15.4" },
     { name = "xarray", specifier = ">=2025.3.1" },
@@ -3224,6 +3226,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7a/fd/7a5ee21fd08ff70d3d33a5781c255cbe779659bd03278feb98b19ee550f4/tinycss2-1.4.0.tar.gz", hash = "sha256:10c0972f6fc0fbee87c3edb76549357415e94548c1ae10ebccdea16fb404a9b7", size = 87085 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e6/34/ebdc18bae6aa14fbee1a08b63c015c72b64868ff7dae68808ab500c492e2/tinycss2-1.4.0-py3-none-any.whl", hash = "sha256:3a49cf47b7675da0b15d0c6e1df8df4ebd96e9394bb905a5775adb0d884c5289", size = 26610 },
+]
+
+[[package]]
+name = "topojson"
+version = "1.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "shapely" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e9/c5/41006f71491f29428f1c72713ad26225434a2dd7225bbeb8e3e9a82bceb3/topojson-1.9.tar.gz", hash = "sha256:5a8389ff576d5540660d4430dab56fcadef7c1f90b9f1aa486b1cb140033ff3b", size = 25451372 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/67/bf9a1786862565b12798fd6d9b7aa72ec2b4d6a10e82fb9936ac01f39d97/topojson-1.9-py3-none-any.whl", hash = "sha256:122e6e91fb422549644504580eee86f8a37703dc5ccb1a8e6d8928b750706fe7", size = 82680 },
 ]
 
 [[package]]

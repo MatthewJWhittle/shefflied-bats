@@ -1,46 +1,25 @@
 import logging
 from pathlib import Path
-import typer
-from typing_extensions import Annotated
 
 from sdm.utils.logging_utils import setup_logging
 # from species_sdm.data.extraction import extract_ev_data_at_points # To be uncommented
 # from species_sdm.models.preprocessor import scale_features # To be uncommented
 
-app = typer.Typer()
-
-@app.command()
-def main(
-    input_points_path: Annotated[
-        Path, 
-        typer.Option(
-            ..., # Required
-            help="Path to combined occurrence and background points data (e.g., Parquet from generate_background_points.py).",
-            exists=True, readable=True, resolve_path=True
-        )
-    ],
-    ev_raster_stack_path: Annotated[
-        Path, 
-        typer.Option(
-            ..., # Required
-            help="Path to the multi-band environmental variable raster stack (e.g., GeoTIFF from merge_ev_layers.py).",
-            exists=True, readable=True, resolve_path=True
-        )
-    ],
-    output_path: Annotated[
-        Path, 
-        typer.Option(
-            help="Path to save the final model-ready feature data (e.g., Parquet).",
-            writable=True, resolve_path=True
-        )
-    ] = Path("data/processed/model_input_features.parquet"),
-    # columns_to_scale: Annotated[Optional[List[str]], typer.Option(help="List of columns to scale (if preprocessing needed).")] = None,
-    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging.")] = False
+def extract_features(
+    input_points_path: Path,
+    ev_raster_stack_path: Path,
+    output_path: Path = Path("data/processed/model_input_features.parquet"),
+    verbose: bool = False
 ) -> None:
     """
-    Extracts environmental variable (EV) data for occurrence/background points,
-    applies any necessary preprocessing (e.g., scaling), and saves the 
-    model-ready feature dataset.
+    Core function to extract environmental variable data for points.
+    Can be called from other scripts or notebooks.
+
+    Args:
+        input_points_path: Path to combined occurrence and background points data
+        ev_raster_stack_path: Path to the multi-band environmental variable raster stack
+        output_path: Path to save the final model-ready feature data
+        verbose: Enable verbose logging
     """
     setup_logging(verbose=verbose)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +47,4 @@ def main(
 
     # Optionally, clean up temporary files like temp_extracted_path
     # if temp_extracted_path.exists():
-    #    temp_extracted_path.unlink()
-
-if __name__ == "__main__":
-    app() 
+    #    temp_extracted_path.unlink() 

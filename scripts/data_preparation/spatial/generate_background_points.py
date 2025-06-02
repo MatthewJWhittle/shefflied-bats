@@ -1,66 +1,42 @@
 import logging
 from pathlib import Path
-from typing import Optional
-
-import typer
-from typing_extensions import Annotated # For newer Typer features if needed, or use typing.Literal
-from typing import Literal
+from typing import Optional, Literal
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.occurrence.sampling import generate_background_points
 
-app = typer.Typer()
-
-@app.command()
-def main(
-    occurrence_data_path: Annotated[
-        Path, 
-        typer.Option(
-            ..., # Required
-            help="Path to occurrence data (GeoJSON, GPKG or Parquet).", 
-            exists=True, 
-            readable=True, 
-            resolve_path=True
-        )
-    ],
-    boundary_path: Annotated[
-        Path, 
-        typer.Option(
-            help="Path to boundary data (e.g., GeoJSON).", 
-            exists=True, 
-            readable=True, 
-            resolve_path=True
-        )
-    ] = Path("data/processed/boundary.geojson"), # Default from original
-    output_dir: Annotated[
-        Path, 
-        typer.Option(
-            help="Base directory to save outputs (density raster and background points).", 
-            writable=True, 
-            resolve_path=True, 
-            file_okay=False, 
-            dir_okay=True
-        )
-    ] = Path("data/processed/background_generation"),
-    n_background_points: Annotated[int, typer.Option(help="Number of background points to generate.")] = 10000,
-    background_method: Annotated[
-        Literal["contrast", "percentile", "scale", "fixed", "binary"],
-        typer.Option(case_sensitive=False, help="Method for setting minimum background probability.")
-    ] = "contrast",
-    background_value: Annotated[float, typer.Option(help="Value for background_method (e.g., contrast ratio, percentile).")] = 0.3,
-    grid_resolution: Annotated[Optional[int], typer.Option(help="Resolution of the model grid in CRS units (e.g., meters). Defaults to project setting.")] = None,
-    transform_method: Annotated[
-        Literal["log", "sqrt", "presence", "cap", "rank"],
-        typer.Option(case_sensitive=False, help="Method to transform occurrence counts for density estimation.")
-    ] = "log",
-    cap_percentile: Annotated[float, typer.Option(help="Percentile for 'cap' transform_method (0-100).")] = 90.0,
-    sigma: Annotated[float, typer.Option(help="Sigma value for Gaussian smoothing of occurrence density.")] = 1.5,
-    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging.")] = False
-) -> None:
+def generate_background_points_wrapper(
+    occurrence_data_path: Path,
+    boundary_path: Path = Path("data/processed/boundary.geojson"),
+    output_dir: Path = Path("data/processed/background_generation"),
+    n_background_points: int = 10000,
+    background_method: Literal["contrast", "percentile", "scale", "fixed", "binary"] = "contrast",
+    background_value: float = 0.3,
+    grid_resolution: Optional[int] = None,
+    transform_method: Literal["log", "sqrt", "presence", "cap", "rank"] = "log",
+    cap_percentile: float = 90.0,
+    sigma: float = 1.5,
+    verbose: bool = False
+) -> Optional[Path]:
     """
-    Generates background points for species distribution modeling based on 
-    density-smoothed occurrence data.
-    Saves an intermediate occurrence density raster and the final background points (Parquet).
+    Core function to generate background points for species distribution modeling.
+    Can be called from other scripts or notebooks.
+
+    Args:
+        occurrence_data_path: Path to occurrence data (GeoJSON, GPKG or Parquet)
+        boundary_path: Path to boundary data (e.g., GeoJSON)
+        output_dir: Base directory to save outputs (density raster and background points)
+        n_background_points: Number of background points to generate
+        background_method: Method for setting minimum background probability
+        background_value: Value for background_method (e.g., contrast ratio, percentile)
+        grid_resolution: Resolution of the model grid in CRS units (e.g., meters)
+        transform_method: Method to transform occurrence counts for density estimation
+        cap_percentile: Percentile for 'cap' transform_method (0-100)
+        sigma: Sigma value for Gaussian smoothing of occurrence density
+        verbose: Enable verbose logging
+
+    Returns:
+        Path to the saved background points file, or None if no points were generated
     """
     setup_logging(verbose=verbose)
     
@@ -91,8 +67,7 @@ def main(
         
         bg_points_gdf.to_parquet(output_path)
         logging.info(f"Saved {len(bg_points_gdf)} background points to: {output_path}")
+        return output_path
     else:
-        logging.warning("No background points were generated. Skipping save.")
-
-if __name__ == "__main__":
-    app() 
+        logging.warning("No background points were generated.")
+        return None 

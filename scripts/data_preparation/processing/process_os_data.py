@@ -2,10 +2,10 @@ import logging
 from pathlib import Path
 from typing import Union, Tuple, List, Dict, Optional
 
-import typer
 import geopandas as gpd
 import pandas as pd
 import xarray as xr
+from shapely.geometry import box
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary, load_spatial_config
@@ -13,22 +13,12 @@ from sdm.data.os import generate_parquets, process_roads
 from sdm.raster.processing import calculate_feature_cover, calculate_distances
 from sdm.raster.utils import construct_transform_shift_bounds, reproject_data, squeeze_dataset
 
-# rasterise_gdf is also in raster.utils and called by calculate_feature_cover.
-
-# Get the project configuration
-# from species_sdm.utils import load_config # Not used directly in this main function
-# config = load_config()
-# SPATIAL_CONFIG = config["spatial"] # Example
-
-app = typer.Typer()
-
-@app.command()
-def main(
-    output_dir: Path = typer.Option("data/evs", help="Directory to save output EV files."),
-    boundary_path: Path = typer.Option("data/processed/boundary.geojson", help="Path to the boundary file."),
-    buffer_distance: float = typer.Option(7000, help="Buffer distance for the boundary."),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging."),
-    load_from_shp: bool = typer.Option(False, help="Load OS data directly from SHP instead of expecting Parquet files (slower).")
+def process_os_data(
+    output_dir: Path,
+    boundary_path: Path,
+    buffer_distance: float = 7000,
+    load_from_shp: bool = False,
+    verbose: bool = False
 ) -> Tuple[Path, Path]:
     """Process Ordnance Survey data to generate environmental variables.
 
@@ -40,8 +30,8 @@ def main(
         output_dir: Directory where output rasters will be saved.
         boundary_path: Path to GeoJSON file defining the area of interest.
         buffer_distance: Distance in meters to buffer the boundary.
-        debug: Enable debug logging.
         load_from_shp: Whether to load OS data from shapefiles instead of cached parquet files.
+        verbose: Enable verbose logging.
 
     Returns:
         Tuple containing:
@@ -52,7 +42,6 @@ def main(
         FileNotFoundError: If input files are not found.
         ValueError: If boundary or buffer distance are invalid.
     """
-
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
     logging.info("Starting OS data processing pipeline")
     
@@ -124,7 +113,4 @@ def main(
 
     logging.info("OS data processing complete")
     logging.info("Output files saved to: %s", output_dir)
-    return cover_path, distance_path
-
-if __name__ == "__main__":
-    app() 
+    return cover_path, distance_path 

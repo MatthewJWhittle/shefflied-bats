@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Optional, List, Any, Dict
 import pickle
 
-import typer
 import pandas as pd
 import rioxarray as rxr
 
@@ -19,7 +18,6 @@ from sdm.data.loaders.vector import load_environmental_variables
 from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.feature_subsetter import FeatureSubsetter
 
-app = typer.Typer()
 logger = logging.getLogger(__name__)
 
 def load_model_index(models_dir: Path) -> pd.DataFrame:
@@ -125,37 +123,31 @@ def make_predictions(
     
     return filtered_index
 
-@app.command()
-def main(
-    ev_path: Path = typer.Option(
-        "data/evs/evs-to-model.tif",
-        help="Path to environmental variables raster."
-    ),
-    models_dir: Path = typer.Option(
-        "data/sdm_models",
-        help="Directory containing trained models."
-    ),
-    output_dir: Path = typer.Option(
-        "data/sdm_predictions",
-        help="Directory for output prediction files.",
-        writable=True
-    ),
-    species: Optional[List[str]] = typer.Option(
-        None,
-        help="Optional: Specific species to generate predictions for (Latin names)."
-    ),
-    activity_types: Optional[List[str]] = typer.Option(
-        None,
-        help="Optional: Specific activity types to generate predictions for."
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Enable verbose logging."
-    )
-):
-    """Run the model inference pipeline."""
+def predict_sdm_models(
+    ev_path: Path = Path("data/evs/evs-to-model.tif"),
+    models_dir: Path = Path("data/sdm_models"),
+    output_dir: Path = Path("data/sdm_predictions"),
+    species: Optional[List[str]] = None,
+    activity_types: Optional[List[str]] = None,
+    verbose: bool = False
+) -> pd.DataFrame:
+    """Run the model inference pipeline.
+
+    Args:
+        ev_path: Path to environmental variables raster.
+        models_dir: Directory containing trained models.
+        output_dir: Directory for output prediction files.
+        species: Optional: Specific species to generate predictions for (Latin names).
+        activity_types: Optional: Specific activity types to generate predictions for.
+        verbose: Enable verbose logging.
+
+    Returns:
+        DataFrame containing prediction results.
+
+    Raises:
+        FileNotFoundError: If model index or input files are not found.
+        ValueError: If no models match the specified criteria or if no models are successfully loaded.
+    """
     setup_logging(level=logging.INFO, verbose=verbose)
     
     logger.info("=== Starting SDM Model Inference Pipeline ===")
@@ -171,7 +163,7 @@ def main(
     
     if len(filtered_index) == 0:
         logger.warning("No models match the specified criteria")
-        return
+        raise ValueError("No models match the specified criteria")
     
     # Load environmental variables
     logger.info("Loading environmental variables...")
@@ -187,6 +179,4 @@ def main(
     )
     
     logger.info("=== SDM Model Inference Pipeline Complete ===")
-
-if __name__ == "__main__":
-    app() 
+    return results_df 

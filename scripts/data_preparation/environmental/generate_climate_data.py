@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 from typing import Dict, Union, List
 
-import typer
 import geopandas as gpd # For type hinting boundary_gdf
 
 from sdm.utils.logging_utils import setup_logging
@@ -15,32 +14,14 @@ from sdm.data.climate import (
     calculate_climate_statistics
 )
 
-app = typer.Typer()
-
-@app.command()
-def main(
-    output_dir: Path = typer.Option(
-        "data/evs/climate", 
-        help="Directory to save output climate TIFF files.",
-        writable=True, resolve_path=True
-    ),
-    boundary_path: Path = typer.Option(
-        "data/processed/boundary.geojson", 
-        help="Path to the boundary file for clipping and context.",
-        exists=True, readable=True, resolve_path=True
-    ),
-    worldclim_cache_dir: Path = typer.Option(
-        "data/raw/big-files/climate_cache",
-        help="Directory to cache downloaded WorldClim files.",
-        writable=True, resolve_path=True
-    ),
-    variables: List[str] = typer.Option(
-        ["bio", "tavg", "prec", "wind"], # Default variables from original script
-        help="List of WorldClim variables to download (e.g., bio, tavg, prec, srad, wind, tmin, tmax)."
-    ),
-    run_stats: bool = typer.Option(False, help="Calculate and log basic statistics for downloaded variables."),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging.")
-) -> None:
+def generate_climate_data(
+    output_dir: Path,
+    boundary_path: Path,
+    worldclim_cache_dir: Path,
+    variables: List[str] = ["bio", "tavg", "prec", "wind"], # Default variables from original script
+    run_stats: bool = False,
+    verbose: bool = False
+) -> Dict[str, Path]:
     """
     Downloads, processes, and saves WorldClim climate data layers.
     
@@ -51,6 +32,17 @@ def main(
     4. (Optionally) Assigning descriptive names to bands/variables within datasets.
     5. Writing processed climate layers to GeoTIFF files.
     6. (Optionally) Calculating and logging basic statistics.
+
+    Args:
+        output_dir: Directory to save output climate TIFF files.
+        boundary_path: Path to the boundary file for clipping and context.
+        worldclim_cache_dir: Directory to cache downloaded WorldClim files.
+        variables: List of WorldClim variables to download (e.g., bio, tavg, prec, srad, wind, tmin, tmax).
+        run_stats: Calculate and log basic statistics for downloaded variables.
+        verbose: Enable verbose logging.
+
+    Returns:
+        Dictionary mapping variable names to their output file paths.
     """
     setup_logging(verbose=verbose)
     logging.info(f"Starting climate data generation. Output directory: {output_dir}")
@@ -62,10 +54,10 @@ def main(
         boundary_gdf, model_transform, _, spatial_config = load_boundary_and_transform(boundary_path)
     except FileNotFoundError:
         logging.error(f"Boundary file not found at: {boundary_path}. Cannot proceed.")
-        raise typer.Exit(code=1)
+        raise
     except Exception as e:
         logging.error(f"Error loading boundary or spatial config: {e}")
-        raise typer.Exit(code=1)
+        raise
 
     model_crs = boundary_gdf.crs
     model_resolution = spatial_config["resolution"]
@@ -79,7 +71,7 @@ def main(
 
     if not raw_climate_datasets:
         logging.error("No climate datasets were fetched. Exiting.")
-        raise typer.Exit(code=1)
+        raise ValueError("No climate datasets were fetched")
 
     logging.info("Reprojecting climate datasets to model grid...")
     reprojected_climate_datasets = reproject_climate_datasets(
@@ -108,6 +100,4 @@ def main(
 
     logging.info("Climate data generation finished.")
     logging.info(f"Output files: {list(output_file_paths.values())}")
-
-if __name__ == "__main__":
-    app() 
+    return output_file_paths 

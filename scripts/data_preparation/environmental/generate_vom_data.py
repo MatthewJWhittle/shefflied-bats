@@ -2,7 +2,6 @@ import asyncio
 import logging
 from pathlib import Path
 
-import typer
 import xarray as xr
 
 from sdm.utils.logging_utils import setup_logging
@@ -10,8 +9,6 @@ from sdm.utils.io import load_boundary_and_transform
 from sdm.raster.utils import reproject_data, squeeze_dataset
 from sdm.raster.processing import summarise_raster_metrics
 from sdm.data import WCSDownloader
-
-app = typer.Typer()
 
 async def fetch_and_process_vom_data(
     output_dir: Path,
@@ -88,35 +85,41 @@ async def fetch_and_process_vom_data(
     logging.info("VOM data processing complete.")
     return output_path
 
-@app.command()
-def main(
-    output_dir: Path = typer.Option(
-        "data/evs/terrain", # VOM is often with terrain, adjust if different EV category
-        help="Directory to save the output VOM summary TIFF file.",
-        writable=True, resolve_path=True
-    ),
-    boundary_path: Path = typer.Option(
-        "data/processed/boundary.geojson", 
-        help="Path to the boundary file for defining processing extent.",
-        exists=True, readable=True, resolve_path=True
-    ),
-    buffer_distance_m: float = typer.Option(7000, help="Buffer distance in meters for the boundary."),
-    wcs_tile_width_px: int = typer.Option(1024, help="Width of WCS request tiles in pixels."),
-    wcs_tile_height_px: int = typer.Option(1024, help="Height of WCS request tiles in pixels."),
-    wcs_temp_storage: bool = typer.Option(True, help="Use temporary disk storage for WCS tiles."),
-    wcs_download_resolution_m: int = typer.Option(10, help="Target resolution (meters) for initial VOM WCS GetCoverage download."),
-    max_concurrent_downloads: int = typer.Option(5, help="Maximum concurrent WCS download requests."),
-    summary_target_resolution_m: int = typer.Option(100, help="Target resolution (meters) for VOM summary metrics (e.g., mean, min, max, std)."),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging.")
-) -> None:
+def generate_vom_data(
+    output_dir: Path,
+    boundary_path: Path,
+    buffer_distance_m: float = 7000,
+    wcs_tile_width_px: int = 1024,
+    wcs_tile_height_px: int = 1024,
+    wcs_temp_storage: bool = True,
+    wcs_download_resolution_m: int = 10,
+    max_concurrent_downloads: int = 5,
+    summary_target_resolution_m: int = 100,
+    verbose: bool = False
+) -> Path:
     """
     Downloads Vegetation Object Model (VOM) data, summarises it to various metrics
     (mean, min, max, std) at a specified resolution, and saves as a multi-band GeoTIFF.
+
+    Args:
+        output_dir: Directory to save the output VOM summary TIFF file.
+        boundary_path: Path to the boundary file for defining processing extent.
+        buffer_distance_m: Buffer distance in meters for the boundary.
+        wcs_tile_width_px: Width of WCS request tiles in pixels.
+        wcs_tile_height_px: Height of WCS request tiles in pixels.
+        wcs_temp_storage: Use temporary disk storage for WCS tiles.
+        wcs_download_resolution_m: Target resolution (meters) for initial VOM WCS GetCoverage download.
+        max_concurrent_downloads: Maximum concurrent WCS download requests.
+        summary_target_resolution_m: Target resolution (meters) for VOM summary metrics.
+        verbose: Enable verbose logging.
+
+    Returns:
+        Path to the generated VOM data file.
     """
     setup_logging(verbose=verbose)
     logging.info("Starting VOM data generation workflow...")
 
-    asyncio.run(fetch_and_process_vom_data(
+    result = asyncio.run(fetch_and_process_vom_data(
         output_dir=output_dir,
         boundary_path=boundary_path,
         buffer_distance=buffer_distance_m,
@@ -127,6 +130,4 @@ def main(
         summary_target_resolution_m=summary_target_resolution_m
     ))
     logging.info("VOM data generation workflow finished.")
-
-if __name__ == "__main__":
-    app() 
+    return result 

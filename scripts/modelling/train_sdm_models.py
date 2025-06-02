@@ -7,13 +7,12 @@ in the Sheffield area, including data preparation, model training, and evaluatio
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union, cast, TypeVar
 import os
 from itertools import product
 import pickle
 from dataclasses import dataclass
 
-import typer
 import pandas as pd
 import geopandas as gpd
 import numpy as np
@@ -44,8 +43,9 @@ from sdm.models.maxent.maxent_model import (
 from sdm.models.utils import prepare_occurrence_data
 from sdm.occurrence import filter_bats_data
 
-app = typer.Typer()
 logger = logging.getLogger(__name__)
+
+T = TypeVar('T', bound=pd.DataFrame)
 
 class SDMModel(BaseModel):
     latin_name: str
@@ -105,8 +105,8 @@ def extract_grid_points(
 
 def generate_training_data(
     bats_ant: gpd.GeoDataFrame,
-    background_points: gpd.GeoDataFrame,
-    background_density: pd.Series,
+    background_points_gdf: gpd.GeoDataFrame,
+    background_density_series: pd.Series,
     grid_points: gpd.GeoDataFrame,
     latin_names: List[str],
     activity_types: List[str],
@@ -124,7 +124,7 @@ def generate_training_data(
             bats_ant, latin_name=latin_name, activity_type=activity_type
         )
         count_1_input = len(presence)
-        count_0_input = len(background_points)
+        count_0_input = len(background_points_gdf)
 
         if len(presence) < min_presence:
             logger.warning(
@@ -134,22 +134,22 @@ def generate_training_data(
 
         if subset is not None:
             n_presence = len(presence)
-            presence: gpd.GeoDataFrame = presence.sample(
+            presence = cast(gpd.GeoDataFrame, presence.sample(
                 n=min(subset, n_presence), random_state=42
-            )  # type: ignore
+            ))
 
-            n_background = len(background_points)
-            background_points: gpd.GeoDataFrame = background_points.sample(
+            n_background = len(background_points_gdf)
+            background_points_gdf = cast(gpd.GeoDataFrame, background_points_gdf.sample(
                 n=min(subset, n_background), random_state=42
-            )  # type: ignore
-            background_density: pd.Series = background_density.loc[
-                background_points.index
-            ]  # type: ignore
+            ))
+            background_density_series = background_density_series.loc[
+                background_points_gdf.index
+            ]
 
         occurrence = prepare_occurrence_data(
-            presence_gdf=presence,
-            background_gdf=background_points,
-            background_density=background_density,
+            presence_gdf=cast(gpd.GeoDataFrame, presence),
+            background_gdf=background_points_gdf,
+            background_density=background_density_series,
             grid_gdf=grid_points,
             input_vars=ev_columns,
             filter_to_grid=True,
@@ -480,47 +480,44 @@ def log_models_to_mlflow(
                     logger.error(f"Model is None for {model.identifier()}")
 
 
-@app.command()
-def main(
-    bats_file: Path = typer.Argument(
-        default="data/processed/bats-tidy.geojson",
-        help="Path to bat data file"
-    ),
-    background_file: Path = typer.Argument(
-        default="data/processed/background-points.geojson",
-        help="Path to background points file"
-    ),
-    ev_file: Path = typer.Argument(
-        default="data/evs/evs-to-model.tif", 
-        help="Path to environmental variables file"),
-    grid_points_file: Optional[Path] = typer.Option(
-        "data/evs/grid-points.parquet",
-        help="Path to grid points file (for training data generation). If not provided, grid points will be extracted from the environmental variables file.",
-    ),
-    output_dir: Path = typer.Argument(
-        default="data/sdm_models",
-        help="Output directory for models and results"
-    ),
-    min_presence: int = typer.Option(
-        15, help="Minimum number of presence records required"
-    ),
-    n_jobs: Optional[int] = typer.Option(None, help="Number of parallel jobs"),
-    max_threads_per_model: int = typer.Option(2, help="Maximum threads per model"),
-    species: Optional[List[str]] = typer.Option(
-        None,
-        help="List of species to model. If not provided, all species will be used."
-    ),
-    activity_types: Optional[List[str]] = typer.Option(
-        None,
-        help="List of activity types to model. If not provided, all activity types will be used."
-    ),
-    subset_occurrence: Optional[int] = typer.Option(
-        None,
-        help="If provided, randomly sample this many presence records for each species-activity type combination."
-    ),
-) -> None:
-    """Run the MaxEnt model training pipeline."""
-    setup_logging()
+def train_sdm_models(
+    bats_file: Path = Path("data/processed/bats-tidy.geojson"),
+    background_file: Path = Path("data/processed/background-points.geojson"),
+    ev_file: Path = Path("data/evs/evs-to-model.tif"),
+    grid_points_file: Optional[Path] = Path("data/evs/grid-points.parquet"),
+    output_dir: Path = Path("data/sdm_models"),
+    min_presence: int = 15,
+    n_jobs: Optional[int] = None,
+    max_threads_per_model: int = 2,
+    species: Optional[List[str]] = None,
+    activity_types: Optional[List[str]] = None,
+    subset_occurrence: Optional[int] = None,
+    verbose: bool = False
+) -> pd.DataFrame:
+    """Run the MaxEnt model training pipeline.
+
+    Args:
+        bats_file: Path to bat data file
+        background_file: Path to background points file
+        ev_file: Path to environmental variables file
+        grid_points_file: Path to grid points file (for training data generation)
+        output_dir: Output directory for models and results
+        min_presence: Minimum number of presence records required
+        n_jobs: Number of parallel jobs
+        max_threads_per_model: Maximum threads per model
+        species: List of species to model
+        activity_types: List of activity types to model
+        subset_occurrence: If provided, randomly sample this many presence records
+        verbose: Enable verbose logging
+
+    Returns:
+        DataFrame containing model results
+
+    Raises:
+        FileNotFoundError: If input files are not found
+        ValueError: If no valid models can be trained
+    """
+    setup_logging(level=logging.DEBUG if verbose else logging.INFO)
     logger.info("=== Starting SDM Model Training Pipeline ===")
     
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -566,8 +563,8 @@ def main(
         logger.info(f"Filtering to activity types: {', '.join(activity_types)}")
         annotated_bats_gdf = annotated_bats_gdf[annotated_bats_gdf.activity_type.isin(activity_types)]
 
-    latin_names = annotated_bats_gdf.latin_name.unique().tolist()
-    activity_types = annotated_bats_gdf.activity_type.unique().tolist()
+    latin_names = cast(List[str], annotated_bats_gdf.latin_name.unique().tolist())
+    activity_types = cast(List[str], annotated_bats_gdf.activity_type.unique().tolist())
     logger.info(f"Found {len(latin_names)} species and {len(activity_types)} activity types")
 
     # Configure model parameters
@@ -593,9 +590,9 @@ def main(
     # Generate training data
     logger.info("=== Generating Training Data ===")
     training_data = generate_training_data(
-        bats_ant=annotated_bats_gdf,
-        background_points=annotated_background_gdf,
-        background_density=background_density,
+        bats_ant=cast(gpd.GeoDataFrame, annotated_bats_gdf),
+        background_points_gdf=cast(gpd.GeoDataFrame, annotated_background_gdf),
+        background_density_series=background_density,
         grid_points=grid_points,
         latin_names=latin_names,
         activity_types=activity_types,
@@ -606,8 +603,7 @@ def main(
 
     # Train models
     logger.info("=== Training Models ===")
-    feature_selection = get_feature_config()
-    #feature_selection = {str(activity_type): ev_columns for activity_type in [ActivityType.ROOST, ActivityType.IN_FLIGHT]}
+    feature_selection = {str(k): v for k, v in get_feature_config().items()}
     models = train_models_parallel(
         training_data, 
         feature_selection,
@@ -622,7 +618,7 @@ def main(
     model_paths = save_models(models, output_dir)
     
     # Add model paths to results
-    results_df["model_path"] = [str(path) for path in results_df["identifier"].map(model_paths)]
+    results_df["model_path"] = [str(model_paths[identifier]) for identifier in results_df["identifier"]]
     
     # Save results and training data
     save_results(results_df, output_dir)
@@ -633,7 +629,4 @@ def main(
     log_models_to_mlflow(models, training_data, results_df)
 
     logger.info("=== SDM Model Training Pipeline Complete ===")
-
-
-if __name__ == "__main__":
-    app()
+    return results_df
