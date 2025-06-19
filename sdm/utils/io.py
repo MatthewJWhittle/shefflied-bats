@@ -8,8 +8,35 @@ import geopandas as gpd
 from affine import Affine
 import pickle
 import pandas as pd
+import numpy as np
 
-from sdm.raster.utils import construct_transform_shift_bounds 
+def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[Affine, tuple]:
+    """
+    Construct a transform that aligns with the resolution.
+    
+    Args:
+        bounds: Tuple of (minx, miny, maxx, maxy)
+        resolution: Resolution in units of the CRS
+        
+    Returns:
+        Tuple of (transform, bounds)
+    """
+    minx, miny, maxx, maxy = bounds
+    
+    # Shift bounds to align with resolution
+    minx = np.floor(minx / resolution) * resolution
+    miny = np.floor(miny / resolution) * resolution
+    maxx = np.ceil(maxx / resolution) * resolution
+    maxy = np.ceil(maxy / resolution) * resolution
+    
+    # Calculate dimensions
+    width = int((maxx - minx) / resolution)
+    height = int((maxy - miny) / resolution)
+    
+    # Create transform
+    transform = Affine.translation(minx, maxy) * Affine.scale(resolution, -resolution)
+    
+    return transform, (minx, miny, maxx, maxy)
 
 def set_project_wd(verbose=True):
     # Navigate to your project directory and create a '.here' file if it doesn't exist

@@ -11,7 +11,7 @@ app = typer.Typer(
 
 # Import core functions from their respective modules
 from sdm.commands.visualization.visualise_model_outputs import generate_model_visualisations
-from sdm.commands.data_preparation.spatial.generate_background_points import generate_background_points_wrapper
+from sdm.commands.data_preparation.spatial.generate_background_points import generate_background_points_wrapper, TransformMethod
 from sdm.commands.data_preparation.processing.merge_ev_layers import merge_ev_layers
 from sdm.commands.data_preparation.processing.process_os_data import process_os_data
 from sdm.commands.data_preparation.spatial.generate_coastal_distance import generate_coastal_distance
@@ -149,9 +149,9 @@ def background(
         typer.Option(help="Resolution of the model grid in CRS units (e.g., meters). Defaults to project setting.")
     ] = None,
     transform_method: Annotated[
-        Literal["log", "sqrt", "presence", "cap", "rank"],
+        TransformMethod,
         typer.Option(case_sensitive=False, help="Method to transform occurrence counts for density estimation.")
-    ] = "log",
+    ] = TransformMethod.LOG,
     cap_percentile: Annotated[
         float, 
         typer.Option(help="Percentile for 'cap' transform_method (0-100).")

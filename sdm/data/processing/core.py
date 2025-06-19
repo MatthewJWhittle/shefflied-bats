@@ -242,9 +242,9 @@ def annotate_points(
     """
     try:
         bats_ant = ela.annotate(bats, str(ev_raster), labels=ev_columns)
-        background = ela.annotate(background, str(ev_raster), labels=ev_columns)
+        background_ant = ela.annotate(background, str(ev_raster), labels=ev_columns)
         logger.info("Successfully annotated points with environmental variables")
-        return bats_ant, background
+        return bats_ant, background_ant
     except Exception as e:
         logger.error(f"Error annotating points: {e}")
         raise 

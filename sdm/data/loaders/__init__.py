@@ -8,7 +8,6 @@ from .vector import (
     load_os_shps,
     load_bat_data,
     load_background_points,
-    load_environmental_variables
 )
 
 __all__ = [
@@ -17,5 +16,4 @@ __all__ = [
     'load_os_shps',
     'load_bat_data',
     'load_background_points',
-    'load_environmental_variables',
 ] 

@@ -38,6 +38,13 @@ members = ["sdm"]
 
 [dependency-groups]
 dev = [
+    "folium>=0.19.7",
+    "ipykernel>=6.29.5",
     "ipywidgets>=8.1.7",
     "jupyter>=1.1.1",
+    "leafmap>=0.48.3",
+    "localtileserver>=0.10.6",
+    "lonboard>=0.10.4",
+    "mapclassify>=2.9.0",
+    "matplotlib>=3.10.1",
 ]

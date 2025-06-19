@@ -30,8 +30,8 @@ from sdm.utils.logging_utils import setup_logging
 from sdm.data.loaders.vector import (
     load_bat_data,
     load_background_points,
-    load_environmental_variables,
 )
+from sdm.raster.io import load_environmental_variables
 from sdm.data.processing import annotate_points
 from sdm.models.maxent.maxent_model import (
     create_maxent_pipeline,
@@ -42,10 +42,13 @@ from sdm.models.maxent.maxent_model import (
 )
 from sdm.models.utils import prepare_occurrence_data
 from sdm.occurrence import filter_bats_data
+from sdm.utils.io import load_config
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T', bound=pd.DataFrame)
+
+project_config = load_config()
 
 class SDMModel(BaseModel):
     latin_name: str
@@ -481,11 +484,11 @@ def log_models_to_mlflow(
 
 
 def train_sdm_models(
-    bats_file: Path = Path("data/processed/bats-tidy.geojson"),
-    background_file: Path = Path("data/processed/background-points.geojson"),
-    ev_file: Path = Path("data/evs/evs-to-model.tif"),
-    grid_points_file: Optional[Path] = Path("data/evs/grid-points.parquet"),
-    output_dir: Path = Path("data/sdm_models"),
+    bats_file: Path = Path(project_config["paths"]["occurence_data"]),
+    background_file: Path = Path(project_config["paths"]["background_points"]),
+    ev_file: Path = Path(project_config["paths"]["ev_tiff"]),
+    grid_points_file: Optional[Path] = Path(project_config["paths"]["grid_points"]),
+    output_dir: Path = Path(project_config["paths"]["models"]),
     min_presence: int = 15,
     n_jobs: Optional[int] = None,
     max_threads_per_model: int = 2,
@@ -524,9 +527,8 @@ def train_sdm_models(
 
     # Configure MLflow
     logger.info("Configuring MLflow tracking...")
-    mlflow_db_path = output_dir / "mlflow.db"
-    mlflow.set_tracking_uri(f"sqlite:///{mlflow_db_path}")
-    mlflow.set_experiment("bat_sdm_models")
+    mlflow.set_tracking_uri(project_config["mlflow"]["tracking_uri"])
+    mlflow.set_experiment(project_config["mlflow"]["experiment_name"])
 
     # Load data
     logger.info("=== Loading Input Data ===")

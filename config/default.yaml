@@ -3,12 +3,19 @@
 paths:
   raw_data: "data/raw"
   processed_data: "data/processed"
-  results: "results/"
+  models: "data/sdm_models"
+  predictions: "data/sdm_predictions"
+  occurence_data: "data/processed/bats-tidy.geojson"
+  background_points: "data/processed/background-points.geojson"
+  boundary: "data/processed/boundary.geojson"
+  grid_points: "data/evs/grid-points.parquet"
+  evs: "data/processed/evs"
+  ev_tiff: "data/evs/evs-to-model.tif"
 
 crs: "EPSG:27700" # OSGB1936 / British National Grid
 
 mlflow:
-  tracking_uri: "mlruns"
+  tracking_uri: "sqlite:///data/sdm_models/mlflow.db"
   experiment_name: "species_sdm_experiment"
 
 hyperparameters:
