@@ -8,13 +8,13 @@ import numpy as np
 from rasterio.enums import Resampling # For specifying resampling method
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.utils.io import load_boundary_and_transform
+from sdm.utils.io import load_boundary_and_transform, load_spatial_config
 from sdm.data.landcover import get_ceh_land_cover_codes_v2023, define_broad_habitat_categories
 from sdm.raster.processing import create_binary_raster_from_category, aggregate_categorical_rasters
 # The reproject_data utility can be used if its parameterization fits.
 # Original script used lc_processed.rio.reproject directly with resampling=0 (NearestNeighbor).
 # Our reproject_data uses Resampling.bilinear by default, but accepts a resampling arg.
-from sdm.raster.utils import reproject_data, squeeze_dataset, load_spatial_config, construct_transform_shift_bounds
+from sdm.raster.utils import reproject_data, squeeze_dataset, construct_transform_shift_bounds
 
 def generate_ceh_lc_data(
     output_dir: Path,
