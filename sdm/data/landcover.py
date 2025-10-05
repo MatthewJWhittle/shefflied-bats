@@ -2,37 +2,34 @@
 Land cover data processing functionality.
 """
 
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Optional
 import xarray as xr
 import numpy as np
 
 def get_ceh_land_cover_codes_v2023() -> Dict[str, str]:
     """Get CEH Land Cover Map 2023 category codes and labels."""
     return {
-        "1": "Broadleaved Woodland",
-        "2": "Coniferous Woodland",
-        "3": "Arable and Horticulture",
-        "4": "Improved Grassland",
-        "5": "Neutral Grassland",
-        "6": "Calcareous Grassland",
-        "7": "Acid Grassland",
+        "1": "Broadleaved woodland",
+        "2": "Coniferous woodland",
+        "3": "Arable",
+        "4": "Improved grassland",
+        "5": "Neutral grassland",
+        "6": "Calcareous grassland",
+        "7": "Acid grassland",
         "8": "Fen, Marsh and Swamp",
-        "9": "Heather",
-        "10": "Heather Grassland",
+        "9": "Heather and shrub",
+        "10": "Heather grassland",
         "11": "Bog",
-        "12": "Inland Rock",
+        "12": "Inland rock",
         "13": "Saltwater",
         "14": "Freshwater",
-        "15": "Supra-littoral Rock",
-        "16": "Supra-littoral Sediment",
-        "17": "Littoral Rock",
-        "18": "Littoral Sediment",
+        "15": "Supralittoral rock",
+        "16": "Supralittoral sediment",
+        "17": "Littoral rock",
+        "18": "Littoral sediment",
         "19": "Saltmarsh",
         "20": "Urban",
         "21": "Suburban",
-        "22": "Inland Bare Ground",
-        "23": "Coastal Bare Ground",
-        "24": "Marine, Littoral",
     }
 
 def define_broad_habitat_categories() -> Dict[str, List[str]]:

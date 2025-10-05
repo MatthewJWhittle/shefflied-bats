@@ -232,7 +232,7 @@ def calculate_feature_cover(
     # Ensure feature_cover has spatial dims and CRS set for clipping
     if feature_cover.rio.crs is None and boundary.crs is not None:
          feature_cover = feature_cover.rio.write_crs(boundary.crs)
-    if not feature_cover.rio.dims: # Check if spatial dims are set
+    if not feature_cover.rio.x_dim or not feature_cover.rio.y_dim: # Check if spatial dims are set
         # Attempt to infer common spatial dims if possible, or raise error
         # This is a fallback, ideally rasters should have spatial dims set earlier
         if 'x' in feature_cover.coords and 'y' in feature_cover.coords:

@@ -1,8 +1,7 @@
 import logging
 from pathlib import Path
-from typing import Dict, Union, List
+from typing import Dict, List
 
-import geopandas as gpd # For type hinting boundary_gdf
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary_and_transform
@@ -18,7 +17,7 @@ def generate_climate_data(
     output_dir: Path,
     boundary_path: Path,
     worldclim_cache_dir: Path,
-    variables: List[str] = ["bio", "tavg", "prec", "wind"], # Default variables from original script
+    variables: List[str] = None, # Default variables from original script
     run_stats: bool = False,
     verbose: bool = False
 ) -> Dict[str, Path]:
@@ -44,8 +43,11 @@ def generate_climate_data(
     Returns:
         Dictionary mapping variable names to their output file paths.
     """
+    if variables is None:
+        variables = ["bio", "tavg", "prec", "wind"]  # Default variables from original script
+    
     setup_logging(verbose=verbose)
-    logging.info(f"Starting climate data generation. Output directory: {output_dir}")
+    logging.info("Starting climate data generation. Output directory: %s", output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     worldclim_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -53,16 +55,16 @@ def generate_climate_data(
     try:
         boundary_gdf, model_transform, _, spatial_config = load_boundary_and_transform(boundary_path)
     except FileNotFoundError:
-        logging.error(f"Boundary file not found at: {boundary_path}. Cannot proceed.")
+        logging.error("Boundary file not found at: %s. Cannot proceed.", boundary_path)
         raise
     except Exception as e:
-        logging.error(f"Error loading boundary or spatial config: {e}")
+        logging.error("Error loading boundary or spatial config: %s", e)
         raise
 
     model_crs = boundary_gdf.crs
     model_resolution = spatial_config["resolution"]
 
-    logging.info(f"Fetching WorldClim variables: {variables}")
+    logging.info("Fetching WorldClim variables: %s", variables)
     raw_climate_datasets = fetch_worldclim_datasets(
         variables=variables,
         boundary_gdf=boundary_gdf, # Pass boundary for potential clipping in loader
@@ -96,8 +98,16 @@ def generate_climate_data(
 
     if run_stats:
         logging.info("Calculating climate statistics...")
-        calculate_climate_statistics(named_climate_datasets, output_dir)
+        # Extract individual datasets for statistics calculation
+        temp_data = named_climate_datasets.get("tavg")
+        prec_data = named_climate_datasets.get("prec") 
+        wind_data = named_climate_datasets.get("wind")
+        
+        if temp_data is not None and prec_data is not None and wind_data is not None:
+            calculate_climate_statistics(temp_data, prec_data, wind_data, output_dir)
+        else:
+            logging.warning("Cannot calculate climate statistics: missing temperature, precipitation, or wind data")
 
     logging.info("Climate data generation finished.")
-    logging.info(f"Output files: {list(output_file_paths.values())}")
+    logging.info("Output files: %s", list(output_file_paths.values()))
     return output_file_paths 

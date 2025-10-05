@@ -36,7 +36,7 @@ def generate_terrain_stats(
         Exception: If there is an error processing the DEM or saving the terrain statistics.
     """
     setup_logging(verbose=verbose)
-    logging.info(f"Starting terrain statistics generation for DEM: {input_dem_path}")
+    logging.info("Starting terrain statistics generation for DEM: %s", input_dem_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     terrain_attributes_ds = process_dem_to_terrain_attributes(
@@ -52,7 +52,7 @@ def generate_terrain_stats(
         output_path=output_path,
         drop_dem_variable=drop_dem_from_output
     )
-    logging.info(f"Terrain statistics successfully saved to: {saved_path}")
+    logging.info("Terrain statistics successfully saved to: %s", saved_path)
     logging.info("Terrain statistics generation finished.")
     
     return saved_path 

@@ -1,14 +1,12 @@
 import pytest
 import xarray as xr
-import rioxarray as rxr
 import numpy as np
-from pathlib import Path
 
-from data_prep.generate_evs.ingestion.ogc import WCSDownloader
+from sdm.data.terrain.core import WCSDownloader
 
 
 @pytest.fixture
-def wcs_params() -> dict:
+def wcs_test_params() -> dict:
     """Return standard WCS parameters for testing."""
     return {
         "endpoint": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs",
@@ -18,7 +16,7 @@ def wcs_params() -> dict:
 
 
 @pytest.fixture
-def small_bbox() -> tuple:
+def test_bbox() -> tuple:
     """Return a small bounding box in British National Grid."""
     xmin, ymin = 422558, 391118
     size = 100  # 100m square area
@@ -26,46 +24,50 @@ def small_bbox() -> tuple:
 
 
 @pytest.fixture
-def dtm_downloader(wcs_params):
+def test_downloader(wcs_test_params):
     """Return a WCSDownloader instance for testing."""
-    return WCSDownloader(**wcs_params)
+    return WCSDownloader(**wcs_test_params)
 
 
-def test_downloader_initialization(wcs_params):
+def test_downloader_initialization(wcs_test_params):
     """Test basic downloader initialization."""
-    downloader = WCSDownloader(**wcs_params)
-    assert downloader.endpoint == wcs_params["endpoint"]
-    assert downloader.coverage_id == wcs_params["coverage_id"]
-    assert isinstance(downloader.axis_labels, list)
-    assert isinstance(downloader.native_crs, str)
+    downloader = WCSDownloader(**wcs_test_params)
+    assert downloader.endpoint == wcs_test_params["endpoint"]
+    assert downloader.coverage_id == wcs_test_params["coverage_id"]
+    # Check that the downloader was initialized with correct attributes
+    assert hasattr(downloader, 'endpoint')
+    assert hasattr(downloader, 'coverage_id')
+    # Check tile dimensions
+    assert hasattr(downloader, 'tile_width')
+    assert hasattr(downloader, 'tile_height')
 
 
 @pytest.mark.asyncio
-async def test_memory_download(dtm_downloader, small_bbox):
+async def test_memory_download(test_downloader, test_bbox):
     """Test basic download functionality using memory storage."""
-    result = await dtm_downloader.get_coverage(
-        bbox=small_bbox,
+    result = await test_downloader.get_coverage(
+        bbox=test_bbox,
         resolution=10.0,
     )
 
     assert isinstance(result, xr.Dataset)
-    assert result.dims["x"] > 0 and result.dims["y"] > 0
-    assert not np.all(np.isnan(result[dtm_downloader.coverage_id].values))
+    assert result.sizes["x"] > 0 and result.sizes["y"] > 0
+    assert not np.all(np.isnan(result[test_downloader.coverage_id].values))
 
-    result_box = result[dtm_downloader.coverage_id].rio.bounds()
-    assert result_box[0] <= small_bbox[0]
-    assert result_box[1] <= small_bbox[1]
-    assert result_box[2] >= small_bbox[2]
-    assert result_box[3] >= small_bbox[3]
+    result_box = result[test_downloader.coverage_id].rio.bounds()
+    assert result_box[0] <= test_bbox[0]
+    assert result_box[1] <= test_bbox[1]
+    assert result_box[2] >= test_bbox[2]
+    assert result_box[3] >= test_bbox[3]
 
 
 @pytest.mark.asyncio
-async def test_download_resolution(dtm_downloader, small_bbox):
+async def test_download_resolution(test_downloader, test_bbox):
     """Test download functionality with a specified resolution."""
     resolution = 10.0
-    result = await dtm_downloader.get_coverage(
-        bbox=small_bbox,
-        resolution=10.0,
+    result = await test_downloader.get_coverage(
+        bbox=test_bbox,
+        resolution=resolution,
     )
 
     result_res = result.rio.resolution()
@@ -74,21 +76,19 @@ async def test_download_resolution(dtm_downloader, small_bbox):
 
 
 @pytest.mark.asyncio
-async def test_download_to_temp_storage(
-    small_bbox,
-    wcs_params,
-):
-    
-    dtm_downloader = WCSDownloader(
-        endpoint=wcs_params["endpoint"],
-        coverage_id=wcs_params["coverage_id"],
-        request_tile_pixels=(10,10),
-        use_temp_storage=True)
+async def test_download_to_temp_storage(test_bbox, wcs_test_params):
+    """Test download functionality using temporary storage."""
+    temp_downloader = WCSDownloader(
+        endpoint=wcs_test_params["endpoint"],
+        coverage_id=wcs_test_params["coverage_id"],
+        request_tile_pixels=(10, 10),
+        use_temp_storage=True
+    )
     
     resolution = 10.0
-    result = await dtm_downloader.get_coverage(
-        bbox=small_bbox,
-        resolution=10.0,
+    result = await temp_downloader.get_coverage(
+        bbox=test_bbox,
+        resolution=resolution,
     )
 
     assert isinstance(result, xr.Dataset)
@@ -101,11 +101,11 @@ async def test_download_to_temp_storage(
     assert result_res[1] == -resolution
 
     # check the bounding box
-    result_box = result[dtm_downloader.coverage_id].rio.bounds()
-    assert result_box[0] <= small_bbox[0]
-    assert result_box[1] <= small_bbox[1]
-    assert result_box[2] >= small_bbox[2]
-    assert result_box[3] >= small_bbox[3]
+    result_box = result[temp_downloader.coverage_id].rio.bounds()
+    assert result_box[0] <= test_bbox[0]
+    assert result_box[1] <= test_bbox[1]
+    assert result_box[2] >= test_bbox[2]
+    assert result_box[3] >= test_bbox[3]
     
 
 

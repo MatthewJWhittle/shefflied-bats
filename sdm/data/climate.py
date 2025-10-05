@@ -2,13 +2,11 @@
 Climate data processing functionality.
 """
 
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union
 from pathlib import Path
 
 import xarray as xr
-import rioxarray as rxr
 import geopandas as gpd
-import numpy as np
 
 from .loaders import ClimateData
 
@@ -34,7 +32,7 @@ def fetch_worldclim_datasets(
 def reproject_climate_datasets(
     datasets: Dict[str, xr.DataArray],
     target_crs: str,
-    target_transform: tuple,
+    target_transform,  # Can be Affine or tuple
     target_resolution: float
 ) -> Dict[str, xr.DataArray]:
     """Reproject climate datasets to target CRS and resolution."""
@@ -103,24 +101,30 @@ def write_climate_data(
     return output_paths
 
 def calculate_climate_statistics(
-    climate_datasets: Dict[str, xr.DataArray],
+    temp_average: xr.DataArray,
+    precipitation: xr.DataArray,
+    wind: xr.DataArray,
     output_dir: Union[str, Path]
-) -> None:
-    """Calculate and log basic statistics for climate datasets."""
+) -> Path:
+    """Calculate annual climate statistics and save as multi-band GeoTIFF."""
     output_dir = Path(output_dir)
-    stats_file = output_dir / "climate_statistics.txt"
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    with open(stats_file, "w") as f:
-        f.write("Climate Data Statistics\n")
-        f.write("======================\n\n")
-        
-        for var, data in climate_datasets.items():
-            try:
-                f.write(f"\n{var.upper()}:\n")
-                f.write(f"  Mean: {float(data.mean()):.2f}\n")
-                f.write(f"  Std: {float(data.std()):.2f}\n")
-                f.write(f"  Min: {float(data.min()):.2f}\n")
-                f.write(f"  Max: {float(data.max()):.2f}\n")
-            except Exception as e:
-                f.write(f"  Error calculating statistics: {e}\n")
-                continue 
+    # Create a dataset with named variables (like the original)
+    climate_stats = xr.zeros_like(temp_average[0])
+    climate_stats = climate_stats.to_dataset(name="zeros")
+
+    climate_stats["temp_ann_var"] = temp_average.std(axis=0)
+    climate_stats["temp_ann_avg"] = temp_average.mean(axis=0)
+    climate_stats["temp_mat_avg"] = temp_average[3:6].mean(axis=0)  # Summer months (April-June)
+
+    climate_stats["prec_ann_var"] = precipitation.std(axis=0)
+    climate_stats["prec_ann_avg"] = precipitation.mean(axis=0)
+
+    climate_stats["wind_ann_var"] = wind.std(axis=0)
+    climate_stats["wind_ann_avg"] = wind.mean(axis=0)
+
+    climate_stats = climate_stats.drop_vars("zeros")
+    path = output_dir / "climate_stats.tif"
+    climate_stats.rio.to_raster(path)
+    return path 
