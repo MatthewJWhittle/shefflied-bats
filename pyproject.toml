@@ -42,6 +42,12 @@ packages = ["sdm"]
 [tool.uv.workspace]
 members = ["sdm"]
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests that require external services",
+]
+
 [dependency-groups]
 dev = [
     "folium>=0.19.7",
