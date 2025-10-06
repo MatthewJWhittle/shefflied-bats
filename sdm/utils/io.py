@@ -1,6 +1,8 @@
 import os
 from pyhere import here
 import yaml
+import logging
+
 from pathlib import Path
 import json
 from typing import Union, Tuple, Dict, Any, List
@@ -45,7 +47,7 @@ def set_project_wd(verbose=True):
 
     # Verify that the working directory has been changed
     if verbose:
-        print("Current Working Directory:", os.getcwd())
+        logging.info("Current Working Directory:", os.getcwd())
     
     return None
 
@@ -176,3 +178,94 @@ def csv_to_parquet(input_file: Union[str, Path], output_file: Union[str, Path]):
     except Exception as e:
         # logger.error(f"Failed to convert CSV to Parquet: {e}", exc_info=True)
         raise
+def update_config(config_path: Path, updates: Dict) -> None:
+    """Update the config file with new values."""
+    import yaml
+    import logging
+    
+    # Load existing config
+    config = load_config(config_path)
+    
+    # Update with new values
+    for key, value in updates.items():
+        if isinstance(key, str) and '.' in key:
+            # Handle nested keys like "paths.boundary"
+            keys = key.split('.')
+            current = config
+            for k in keys[:-1]:
+                if k not in current:
+                    current[k] = {}
+                current = current[k]
+            current[keys[-1]] = str(value)
+        else:
+            config[key] = str(value)
+    
+    # Save updated config
+    with open(config_path, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+def validate_boundary_file(filepath: Path) -> None:
+    """Validate that a boundary file exists and has the expected structure."""
+    if not filepath.exists():
+        raise FileNotFoundError(f"Boundary file not found: {filepath}")
+    
+    # Try to load the file
+    try:
+        gdf = gpd.read_file(filepath)
+    except Exception as e:
+        raise ValueError(f"Could not read boundary file {filepath}: {e}")
+    
+    # Check for geometry column
+    if 'geometry' not in gdf.columns:
+        raise ValueError(f"Boundary file {filepath} must contain a 'geometry' column")
+    
+    # Check that geometries are valid
+    if not gdf.geometry.is_valid.all():
+        raise ValueError(f"Boundary file {filepath} contains invalid geometries")
+    
+    # Check that we have at least one feature
+    if len(gdf) == 0:
+        raise ValueError(f"Boundary file {filepath} is empty")
+    
+    logging.info(f"Boundary file validated: {filepath} ({len(gdf)} features)")
+
+def validate_occurrence_file(filepath: Path) -> None:
+    """Validate that an occurrence file exists and has the expected structure."""
+    if not filepath.exists():
+        raise FileNotFoundError(f"Occurrence file not found: {filepath}")
+    
+    # Try to load the file
+    try:
+        gdf = gpd.read_file(filepath)
+    except Exception as e:
+        raise ValueError(f"Could not read occurrence file {filepath}: {e}")
+    
+    # Expected columns for bat occurrence data
+    expected_columns = ['geometry', 'latin_name', 'activity_type']
+    missing_columns = [col for col in expected_columns if col not in gdf.columns]
+    
+    if missing_columns:
+        raise ValueError(f"Occurrence file {filepath} missing required columns: {missing_columns}")
+    
+    # Check for geometry column
+    if 'geometry' not in gdf.columns:
+        raise ValueError(f"Occurrence file {filepath} must contain a 'geometry' column")
+    
+    # Check that geometries are valid
+    if not gdf.geometry.is_valid.all():
+        raise ValueError(f"Occurrence file {filepath} contains invalid geometries")
+    
+    # Check that we have at least one occurrence
+    if len(gdf) == 0:
+        raise ValueError(f"Occurrence file {filepath} is empty")
+    
+    # Check that we have the expected data
+    if gdf['latin_name'].isna().all():
+        raise ValueError(f"Occurrence file {filepath} has no valid species names")
+    
+    if gdf['activity_type'].isna().all():
+        raise ValueError(f"Occurrence file {filepath} has no valid activity types")
+    
+    # Log some statistics
+    n_species = gdf['latin_name'].nunique()
+    n_activities = gdf['activity_type'].nunique()
+    logging.info(f"Occurrence file validated: {filepath} ({len(gdf)} records, {n_species} species, {n_activities} activity types)")
