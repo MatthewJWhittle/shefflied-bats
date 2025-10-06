@@ -15,7 +15,7 @@ from sdm.commands.data_preparation.spatial.generate_coastal_distance import (
     create_sea_zone_polygon,
     generate_coastal_distance
 )
-from sdm.data.spatial import calculate_coastal_distance
+from sdm.raster.processing import calculate_distance_to_geom as calculate_coastal_distance
 
 
 @pytest.fixture
@@ -148,10 +148,10 @@ class TestCalculateCoastalDistance:
         
         result = calculate_coastal_distance(
             geom=sea_polygon,
-            boundary=sample_boundary,
-            bounds=(-10, -10, 110, 60),
+            boundary_gdf=sample_boundary,
+            grid_bounds=(-10, -10, 110, 60),
             resolution=10.0,
-            name="test_distance"
+            var_name="test_distance"
         )
         
         assert isinstance(result, xr.Dataset)
@@ -161,11 +161,11 @@ class TestCalculateCoastalDistance:
     
     def test_calculate_coastal_distance_invalid_geometry(self, sample_boundary):
         """Test error handling for invalid geometry."""
-        with pytest.raises(ValueError, match="geom must be a Polygon or MultiPolygon"):
+        with pytest.raises(ValueError, match="Input geom must be a Shapely BaseGeometry"):
             calculate_coastal_distance(
                 geom="invalid",  # Invalid geometry type (string)
-                boundary=sample_boundary,
-                bounds=(-10, -10, 110, 60),
+                boundary_gdf=sample_boundary,
+                grid_bounds=(-10, -10, 110, 60),
                 resolution=10.0
             )
 

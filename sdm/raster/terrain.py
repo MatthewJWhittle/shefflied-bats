@@ -1,9 +1,10 @@
-import numpy as np
-import xarray as xr
-import rioxarray as rxr
 from pathlib import Path
 from typing import Tuple, Union
 import logging
+
+import numpy as np
+import xarray as xr
+import rioxarray as rxr
 
 from .utils import squeeze_dataset
 from ..data.terrain.stats import twi_from_array  # your fast D8+flats TWI
@@ -18,7 +19,7 @@ def _ensure_float32_nan(arr: np.ndarray, nodata: float | None = None) -> np.ndar
     return a
 
 
-def calculate_slope_simple(dem_data: np.ndarray, cell_size: float) -> np.ndarray:
+def calculate_slope(dem_data: np.ndarray, cell_size: float) -> np.ndarray:
     """Slope angle β in radians using central differences; tanβ = √(dzdx²+dzdy²)."""
     gy_img, gx = np.gradient(dem_data, cell_size)  # gy increases south
     gy = -gy_img  # flip so +y points north
@@ -28,7 +29,7 @@ def calculate_slope_simple(dem_data: np.ndarray, cell_size: float) -> np.ndarray
     return slope
 
 
-def calculate_aspect_simple(dem_data: np.ndarray, cell_size: float, flat_eps: float = 1e-6) -> np.ndarray:
+def calculate_aspect(dem_data: np.ndarray, cell_size: float, flat_eps: float = 1e-6) -> np.ndarray:
     """
     Aspect in radians, 0 = East, increasing CCW (East→North→West→South).
     Undefined (NaN) where slope < flat_eps.
@@ -43,7 +44,7 @@ def calculate_aspect_simple(dem_data: np.ndarray, cell_size: float, flat_eps: fl
     return aspect.astype(np.float32)
 
 
-def calculate_aspect_components_simple(aspect: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def calculate_aspect_components(aspect: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Eastness = cos(aspect), Northness = sin(aspect); aspect measured from East CCW."""
     eastness = np.cos(aspect).astype(np.float32)
     northness = np.sin(aspect).astype(np.float32)
@@ -52,7 +53,7 @@ def calculate_aspect_components_simple(aspect: np.ndarray) -> Tuple[np.ndarray, 
     return eastness, northness
 
 
-def calculate_twi_simple(dem_data: np.ndarray, slope: np.ndarray, cell_size: float) -> np.ndarray:
+def calculate_twi(dem_data: np.ndarray, slope: np.ndarray, cell_size: float) -> np.ndarray:
     """TWI via fast D8 pipeline (slope arg kept for API compatibility; not used)."""
     _ = slope
     dem_f32 = dem_data.astype(np.float32, copy=False)
@@ -60,7 +61,7 @@ def calculate_twi_simple(dem_data: np.ndarray, slope: np.ndarray, cell_size: flo
     return twi
 
 
-def calculate_curvature_simple(dem_data: np.ndarray, cell_size: float) -> np.ndarray:
+def calculate_curvature(dem_data: np.ndarray, cell_size: float) -> np.ndarray:
     """
     Laplacian curvature (κ ≈ d²z/dx² + d²z/dy²).
     If you want profile curvature, use the commented formula below.
@@ -80,18 +81,18 @@ def calculate_curvature_simple(dem_data: np.ndarray, cell_size: float) -> np.nda
     return curvature
 
 
-def calculate_roughness_simple(slope_data: xr.DataArray, window_size: int = 3) -> xr.DataArray:
+def calculate_roughness(slope_data: xr.DataArray, window_size: int = 3) -> xr.DataArray:
     """Roughness = rolling std of slope (in chosen units)."""
     return slope_data.rolling(x=window_size, y=window_size, center=True, min_periods=1).std()
 
 
-def calculate_tpi_simple(dem_data: xr.DataArray, window_size: int = 3) -> xr.DataArray:
+def calculate_tpi(dem_data: xr.DataArray, window_size: int = 3) -> xr.DataArray:
     """Topographic Position Index: elevation minus neighbourhood mean."""
     mean_elev = dem_data.rolling(x=window_size, y=window_size, center=True, min_periods=1).mean()
     return dem_data - mean_elev
 
 
-def calculate_weighted_aspect_simple(
+def calculate_weighted_aspect(
     slope_da: xr.DataArray,
     aspect_eastness_da: xr.DataArray,
     aspect_northness_da: xr.DataArray,
@@ -110,7 +111,7 @@ def calculate_weighted_aspect_simple(
     return w * aspect_eastness_da, w * aspect_northness_da
 
 
-def process_dem_to_terrain_attributes_simple(
+def process_dem_to_terrain_attributes(
     dem_path: Union[str, Path],
     dem_band_index: int = 0,
     slope_window_size: int = 3,
@@ -134,11 +135,11 @@ def process_dem_to_terrain_attributes_simple(
     cell_size = abs(transform[0])  # assumes square pixels
 
     # Compute in radians
-    slope_rad = calculate_slope_simple(dem_np, cell_size)
-    aspect = calculate_aspect_simple(dem_np, cell_size)
-    eastness, northness = calculate_aspect_components_simple(aspect)
-    twi = calculate_twi_simple(dem_np, slope_rad, cell_size)
-    curvature = calculate_curvature_simple(dem_np, cell_size)
+    slope_rad = calculate_slope(dem_np, cell_size)
+    aspect = calculate_aspect(dem_np, cell_size)
+    eastness, northness = calculate_aspect_components(aspect)
+    twi = calculate_twi(dem_np, slope_rad, cell_size)
+    curvature = calculate_curvature(dem_np, cell_size)
 
     # Prepare dataset (inherits CRS/transform from dem_rxr)
     ds = dem_rxr.to_dataset(name="dem")
@@ -150,11 +151,11 @@ def process_dem_to_terrain_attributes_simple(
     ds["curvature_laplacian"] = (("y", "x"), curvature)
 
     # Neighbourhood stats
-    ds["roughness"] = calculate_roughness_simple(ds.slope, slope_window_size)
-    ds["tpi"] = calculate_tpi_simple(ds.dem, tpi_window_size)
+    ds["roughness"] = calculate_roughness(ds.slope, slope_window_size)
+    ds["tpi"] = calculate_tpi(ds.dem, tpi_window_size)
 
     # Weighted aspect uses slope in radians regardless of output unit
-    we, wn = calculate_weighted_aspect_simple(ds.slope, ds.aspect_eastness, ds.aspect_northness, "radians")
+    we, wn = calculate_weighted_aspect(ds.slope, ds.aspect_eastness, ds.aspect_northness, "radians")
     ds["aspect_eastness_slope"] = we
     ds["aspect_northness_slope"] = wn
 
@@ -168,7 +169,7 @@ def process_dem_to_terrain_attributes_simple(
     return ds
 
 
-def save_terrain_dataset_simple(
+def save_terrain_dataset(
     terrain_ds: xr.Dataset,
     output_path: Union[str, Path],
     drop_dem_variable: bool = True,
@@ -188,26 +189,3 @@ def save_terrain_dataset_simple(
     #     out[v].encoding.update({"dtype": "float32", "zlevel": 6})
     out.rio.to_raster(output_path)
     return output_path
-
-
-# Legacy function names for backward compatibility
-def process_dem_to_terrain_attributes(
-    dem_path: Union[str, Path],
-    dem_band_index: int = 0,
-    slope_window_size: int = 3,
-    tpi_window_size: int = 3,
-    output_slope_units: str = "radians"
-) -> xr.Dataset:
-    """Legacy function name for backward compatibility."""
-    return process_dem_to_terrain_attributes_simple(
-        dem_path, dem_band_index, slope_window_size, tpi_window_size, output_slope_units
-    )
-
-
-def save_terrain_dataset(
-    terrain_ds: xr.Dataset, 
-    output_path: Union[str, Path],
-    drop_dem_variable: bool = True
-) -> Path:
-    """Legacy function name for backward compatibility."""
-    return save_terrain_dataset_simple(terrain_ds, output_path, drop_dem_variable)

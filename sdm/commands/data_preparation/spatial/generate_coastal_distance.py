@@ -6,7 +6,7 @@ import geopandas as gpd
 from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary_and_transform
 from sdm.raster.utils import reproject_data, squeeze_dataset
-from sdm.data.spatial import calculate_coastal_distance
+from sdm.raster.processing import calculate_distance_to_geom as calculate_coastal_distance
 
 
 def load_and_process_coast_data(

@@ -1,7 +1,7 @@
 # twi_fast_valid.py
 # Fast, valid TWI implementation (D8) with proper sink fill, flat routing, and topo accumulation.
 import numpy as np
-from numba import njit, prange
+from numba import njit
 
 # ---------------------------
 # D8 neighbourhood (N, NE, E, SE, S, SW, W, NW)

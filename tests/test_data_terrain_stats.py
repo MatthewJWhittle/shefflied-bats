@@ -29,7 +29,7 @@ def plane_dem(h, w, ax, ay, base=0.0):
 
 # ---------- tests ----------
 
-def test_priority_flood_fills_simple_pit():
+def test_priority_flood_fills_pit():
     dem = np.array([[10,10,10],
                     [10, 0,10],
                     [10,10,10]], dtype=np.float32)
