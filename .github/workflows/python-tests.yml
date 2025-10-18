@@ -28,10 +28,10 @@ jobs:
       uses: andgineer/uv-venv@v3
 
     - name: Install dependencies
-      run: uv sync
+      run: uv sync --all-groups
 
-    - name: Install linting deps
-      run: uv add flake8
+          
+          
           
     - name: Test with pytest
       run: |
