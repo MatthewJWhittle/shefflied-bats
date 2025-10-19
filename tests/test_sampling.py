@@ -104,8 +104,8 @@ def sample_density_array(
     # create a dataarray
     density_array = xr.DataArray(
         data=density_array,
-        coords={"x": x, "y": y},
-        dims=["x", "y"],
+        coords={"y": y, "x": x},
+        dims=["y", "x"],
     )
     density_array.rio.write_crs(sample_boundary.crs, inplace=True)
 
