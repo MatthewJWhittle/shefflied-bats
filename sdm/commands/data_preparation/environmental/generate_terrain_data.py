@@ -100,7 +100,7 @@ def generate_terrain_data(
     wcs_tile_height_px: int = 1024,
     wcs_temp_storage: bool = True,
     wcs_download_resolution_m: int = 10,
-    max_concurrent_downloads: int = 100,
+    max_concurrent_downloads: int = 10,
     verbose: bool = False
 ) -> Path:
     """
