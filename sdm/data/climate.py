@@ -103,36 +103,47 @@ def write_climate_data(
 def calculate_climate_statistics(
     temp_average: xr.DataArray,
     precipitation: xr.DataArray,
-    wind: xr.DataArray,
-    output_dir: Union[str, Path]
-) -> Path:
-    """Calculate annual climate statistics and save as multi-band GeoTIFF."""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    wind: xr.DataArray = None
+) -> xr.Dataset:
+    """Calculate annual climate statistics and return as xarray Dataset.
+    
+    Args:
+        temp_average: Temperature data array (must have 12 bands for monthly data)
+        precipitation: Precipitation data array (must have 12 bands for monthly data)
+        wind: Wind data array (optional, must have 12 bands if provided)
+        
+    Returns:
+        xarray Dataset containing climate statistics
+    """
     # Check array shapes have three dimensions and that temperature array has 12 bands
     if temp_average.ndim != 3 or temp_average.shape[0] != 12:
         raise ValueError("Temperature array must have 12 bands")
     if precipitation.ndim != 3 or precipitation.shape[0] != 12:
         raise ValueError("Precipitation array must have 12 bands")
-    if wind.ndim != 3 or wind.shape[0] != 12:
-        raise ValueError("Wind array must have 12 bands")
+    if wind is not None and (wind.ndim != 3 or wind.shape[0] != 12):
+        raise ValueError("Wind array must have 12 bands if provided")
     
     # Create a dataset with named variables (like the original)
     climate_stats = xr.zeros_like(temp_average[0])
     climate_stats = climate_stats.to_dataset(name="zeros")
 
+    # Calculate temperature statistics
     climate_stats["temp_ann_var"] = temp_average.std(axis=0)
     climate_stats["temp_ann_avg"] = temp_average.mean(axis=0)
     climate_stats["temp_mat_avg"] = temp_average[3:6].mean(axis=0)  # Summer months (April-June)
 
+    # Calculate precipitation statistics
     climate_stats["prec_ann_var"] = precipitation.std(axis=0)
     climate_stats["prec_ann_avg"] = precipitation.mean(axis=0)
 
-    climate_stats["wind_ann_var"] = wind.std(axis=0)
-    climate_stats["wind_ann_avg"] = wind.mean(axis=0)
+    # Calculate wind statistics only if wind data is provided
+    if wind is not None:
+        climate_stats["wind_ann_var"] = wind.std(axis=0)
+        climate_stats["wind_ann_avg"] = wind.mean(axis=0)
+    else:
+        # Create zero-filled wind statistics if wind data is not available
+        climate_stats["wind_ann_var"] = xr.zeros_like(temp_average[0])
+        climate_stats["wind_ann_avg"] = xr.zeros_like(temp_average[0])
 
     climate_stats = climate_stats.drop_vars("zeros")
-    path = output_dir / "climate_stats.tif"
-    climate_stats.rio.to_raster(path)
-    return path 
+    return climate_stats 

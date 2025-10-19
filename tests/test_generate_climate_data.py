@@ -28,8 +28,7 @@ def test_generate_climate_data_with_missing_boundary(tmp_path):
         generate_climate_data(
             output_dir=output_dir,
             boundary_path=boundary_path,
-            worldclim_cache_dir=cache_dir,
-            variables=["bio"]
+            worldclim_cache_dir=cache_dir
         )
 
 
@@ -61,18 +60,27 @@ def test_calculate_climate_statistics(tmp_path):
     wind_data = wind_data.rio.write_crs('EPSG:27700')
     
     # Test the function
-    result_path = calculate_climate_statistics(temp_data, prec_data, wind_data, tmp_path)
+    climate_stats = calculate_climate_statistics(temp_data, prec_data, wind_data)
     
-    # Verify output
-    assert result_path == tmp_path / "climate_stats.tif"
+    # Verify output is an xarray Dataset
+    assert isinstance(climate_stats, xr.Dataset)
+    
+    # Check the dataset structure
+    expected_vars = [
+        'temp_ann_var', 'temp_ann_avg', 'temp_mat_avg',
+        'prec_ann_var', 'prec_ann_avg', 'wind_ann_var', 'wind_ann_avg'
+    ]
+    for var in expected_vars:
+        assert var in climate_stats.data_vars
+    
+    # Test serialization separately
+    result_path = tmp_path / "climate_stats.tif"
+    climate_stats.rio.to_raster(result_path)
     assert result_path.exists()
     
     # Check the output structure
     stats = rxr.open_rasterio(result_path)
-    assert stats.shape[0] == 7  # 7 bands: temp_ann_var, temp_ann_avg, temp_mat_avg, prec_ann_var, prec_ann_avg, wind_ann_var, wind_ann_avg
-    assert 'temp_ann_var' in stats.attrs.get('long_name', [])
-    assert 'prec_ann_avg' in stats.attrs.get('long_name', [])
-    assert 'wind_ann_avg' in stats.attrs.get('long_name', [])
+    assert stats.shape[0] == 7  # 7 bands
 
 
 def test_climate_data_processing_functions(tmp_path):
@@ -97,15 +105,12 @@ def test_climate_data_processing_functions(tmp_path):
     assert Path(output_paths['test_var']).exists()
 
 
-def test_generate_climate_data_default_variables():
-    """Test that default variables are set correctly."""
-    # Test that the function handles None variables by setting defaults
-    # This tests the internal logic without mocking
+def test_generate_climate_data_hardcoded_variables():
+    """Test that variables are hardcoded correctly."""
+    # Test that the function uses hardcoded variables
     sig = inspect.signature(generate_climate_data)
     
-    # Check that variables parameter has default None
-    variables_param = sig.parameters['variables']
-    assert variables_param.default is None
+    # Check that variables parameter no longer exists
+    assert 'variables' not in sig.parameters
     
-    # The actual default handling is tested in the function implementation
-    # which sets variables = ["bio", "tavg", "prec", "wind"] when None
+    # The function now hardcodes variables = ["bio", "tavg", "prec", "wind"]
