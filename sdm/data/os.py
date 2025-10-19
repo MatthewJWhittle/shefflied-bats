@@ -32,8 +32,6 @@ def load_os_shps(
         logging.debug("Loading %d files for dataset %s", len(files), dataset)
         gdfs = [gpd.read_file(file) for file in files]
         gdf = gpd.GeoDataFrame(pd.concat(gdfs))
-        # Add bounding box columns to use for filtering in parquet loading
-        gdf = pd.concat([gdf, gdf.geometry.bounds], axis=1)
         gdf["dataset"] = dataset
         logging.info("Loaded %d features for dataset %s", len(gdf), dataset)
         os_data.append(gdf)
