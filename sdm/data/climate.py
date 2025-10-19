@@ -109,6 +109,14 @@ def calculate_climate_statistics(
     """Calculate annual climate statistics and save as multi-band GeoTIFF."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check array shapes have three dimensions and that temperature array has 12 bands
+    if temp_average.ndim != 3 or temp_average.shape[0] != 12:
+        raise ValueError("Temperature array must have 12 bands")
+    if precipitation.ndim != 3 or precipitation.shape[0] != 12:
+        raise ValueError("Precipitation array must have 12 bands")
+    if wind.ndim != 3 or wind.shape[0] != 12:
+        raise ValueError("Wind array must have 12 bands")
     
     # Create a dataset with named variables (like the original)
     climate_stats = xr.zeros_like(temp_average[0])
