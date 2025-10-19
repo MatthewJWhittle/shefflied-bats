@@ -54,10 +54,11 @@ def calculate_aspect_components(aspect: np.ndarray) -> Tuple[np.ndarray, np.ndar
 
 
 def calculate_twi(dem_data: np.ndarray, slope: np.ndarray, cell_size: float) -> np.ndarray:
-    """TWI via fast D8 pipeline (slope arg kept for API compatibility; not used)."""
-    _ = slope
+    """TWI via fast D8 pipeline using provided slope parameter."""
     dem_f32 = dem_data.astype(np.float32, copy=False)
-    twi = twi_from_array(dem_f32, cellsize=cell_size, slope_eps=1e-6, do_fill=True, flats_tol=0.0)
+    # Convert slope (in radians) to tan(slope) for TWI calculation
+    tan_slope = np.tan(slope).astype(np.float32)
+    twi = twi_from_array(dem_f32, cellsize=cell_size, slope_eps=1e-6, do_fill=True, flats_tol=0.0, tan_slope=tan_slope)
     return twi
 
 

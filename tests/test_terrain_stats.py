@@ -94,6 +94,36 @@ def test_calculate_twi(sample_dem_array):
     assert isinstance(twi, np.ndarray) and twi.shape == sample_dem_array.shape
     assert np.isfinite(twi).any()
 
+
+def test_calculate_twi_uses_slope_parameter():
+    """Test that calculate_twi actually uses the provided slope parameter."""
+    # Create a simple DEM with known slope
+    dem = np.array([
+        [10, 10, 10],
+        [10, 12, 10], 
+        [10, 10, 10],
+    ], dtype=np.float32)
+    
+    # Calculate slope normally
+    normal_slope = calculate_slope(dem, cell_size=1.0)
+    
+    # Create a modified slope with different values - modify a non-zero slope value
+    modified_slope = normal_slope.copy()
+    # Modify the slope at position (0,1) which should have a non-zero slope
+    modified_slope[0, 1] = normal_slope[0, 1] * 2.0  # Double the slope at this position
+    
+    # Calculate TWI with both slopes
+    twi_normal = calculate_twi(dem, normal_slope, cell_size=1.0)
+    twi_modified = calculate_twi(dem, modified_slope, cell_size=1.0)
+    
+    # The TWI values should be different, proving the slope parameter is used
+    assert not np.allclose(twi_normal, twi_modified, equal_nan=True), \
+        "TWI should be different when using different slope values"
+    
+    # Specifically, the modified cell should have different TWI values
+    assert not np.isclose(twi_normal[0, 1], twi_modified[0, 1], equal_nan=True), \
+        "Modified cell TWI should be different with modified slope"
+
 def test_twi_monotonic_with_acc_on_uniform_slope():
     dem = plane_dem(49, 49, ax=-1.0, ay=0.0)
     twi = calculate_twi(dem, slope=np.zeros_like(dem), cell_size=1.0)

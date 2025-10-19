@@ -301,17 +301,27 @@ def twi_from_array(
     cellsize: float,
     slope_eps: float = 1e-6,
     do_fill: bool = True,
-    flats_tol: float = 0.0
+    flats_tol: float = 0.0,
+    tan_slope: np.ndarray = None
 ) -> np.ndarray:
     """
     Compute TWI = ln(a / tanβ) with D8 routing.
     - dem: float32 array, NaN = nodata
     - a = accumulation_cells * cellsize  (specific catchment area, m² per m)
+    - tan_slope: optional pre-computed tan(slope) array. If None, will be calculated internally.
     """
     dem = np.ascontiguousarray(dem.astype(np.float32))
     filled = priority_flood_fill_numba(dem) if do_fill else dem
 
-    tanb = horn_tan_slope(filled, float(cellsize))
+    if tan_slope is not None:
+        # Use provided slope, but ensure it matches the filled DEM's NaN pattern
+        tanb = tan_slope.copy().astype(np.float32)
+        # Preserve NaN pattern from the filled DEM
+        tanb[~np.isfinite(filled)] = np.nan
+    else:
+        # Calculate slope internally (original behavior)
+        tanb = horn_tan_slope(filled, float(cellsize))
+    
     dirs = d8_flow_dirs(filled, float(cellsize))
     dirs = resolve_flats_bfs(filled, dirs, tol=float(flats_tol))
     acc_cells = flow_accumulation_d8(dirs).astype(np.float32)
