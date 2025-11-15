@@ -27,6 +27,7 @@ dependencies = [
     "xarray>=2025.3.1",
     "numba>=0.62.1",
     "dask>=2025.9.1",
+    "pydantic>=2.0.0",
 ]
 
 [project.scripts]

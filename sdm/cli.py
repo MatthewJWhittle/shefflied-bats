@@ -268,7 +268,7 @@ def set_boundary(
     validate_boundary_file(filepath)
     
     # Update config
-    config_path = Path("config/default.yaml")
+    config_path = Path("config.yml")
     update_config(config_path, {"paths.boundary": str(filepath.resolve())})
     
     logging.info(f"Boundary file set to: {filepath.resolve()}")
@@ -288,7 +288,7 @@ def set_occurrence(
     validate_occurrence_file(filepath)
     
     # Update config
-    config_path = Path("config/default.yaml")
+    config_path = Path("config.yml")
     update_config(config_path, {"paths.occurence_data": str(filepath.resolve())})
     
     logging.info(f"Occurrence data file set to: {filepath.resolve()}")

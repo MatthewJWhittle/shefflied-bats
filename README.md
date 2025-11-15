@@ -63,10 +63,8 @@ This project implements Species Distribution Modelling (SDM) for bat species in 
 
 ## Configuration
 
-The project uses YAML configuration files in the `config/` directory:
-- `default.yaml`: Main configuration file
-- `spatial.json`: Spatial reference settings
-- `input_variables.json`: Environmental variable definitions
+The project uses a single consolidated configuration file:
+- `config.yml`: Main configuration file containing all settings including paths, spatial configuration, model settings, and input variables
 
 Key configuration settings:
 - Coordinate Reference System: OSGB36 (EPSG:27700)

@@ -24,10 +24,16 @@ def set_project_wd(verbose=True):
     
     return None
 
-CONFIG_PATH = Path(here(".")) / "config" / "default.yaml"
+CONFIG_PATH = Path(here(".")) / "config.yml"
 
-def load_config(config_path: Path = CONFIG_PATH) -> Dict:
+def load_config(config_path: Union[str, Path] = CONFIG_PATH) -> Dict:
     """Loads the YAML configuration file."""
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError((
+            f"Config file not found at {config_path}. \n "
+            "Create a config.yml file in the root of the project."
+            ))
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     return config
@@ -57,25 +63,32 @@ def load_boundary(
     return boundary
 
 def load_spatial_config() -> Dict:
-    # TODO: Refactor to use the main config file (default.yaml)
-    # For now, keeps loading from config/spatial.json if it exists
-    # or falls back to a section in the main config.
-    spatial_json_path = Path(here(".")) / "config" / "spatial.json"
-    if spatial_json_path.exists():
-        with open(spatial_json_path) as f:
-            spatial_config = json.load(f)
-    else:
-        main_config = load_config()
-        if "spatial" not in main_config:
-            raise FileNotFoundError(
-                f"spatial.json not found and no 'spatial' section in {CONFIG_PATH}"
-            )
-        spatial_config = main_config["spatial"]
+    """Load spatial configuration from the main config.yml file."""
+    main_config = load_config()
+    if "spatial" not in main_config:
+        raise KeyError(f"No 'spatial' section found in {CONFIG_PATH}")
     
+    spatial_config = main_config["spatial"]
     assert isinstance(spatial_config.get("resolution"), int), "Resolution must be an integer."
     assert "crs" in spatial_config, "CRS missing from spatial config."
 
     return spatial_config
+
+def load_input_variables() -> list:
+    """Load input variables from the main config.yml file."""
+    main_config = load_config()
+    if "input_variables" not in main_config:
+        raise KeyError(f"No 'input_variables' section found in {CONFIG_PATH}")
+    
+    return main_config["input_variables"]
+
+def load_model_config() -> Dict:
+    """Load model configuration from the main config.yml file."""
+    main_config = load_config()
+    if "model" not in main_config:
+        raise KeyError(f"No 'model' section found in {CONFIG_PATH}")
+    
+    return main_config["model"]
 
 def load_boundary_and_transform(
         boundary_path: Union[str, Path],
