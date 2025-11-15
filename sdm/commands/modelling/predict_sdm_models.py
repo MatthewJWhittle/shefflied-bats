@@ -14,7 +14,7 @@ import pandas as pd
 import rioxarray as rxr
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.data.loaders.vector import load_environmental_variables
+from sdm.raster.io import load_environmental_variables
 from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.feature_subsetter import FeatureSubsetter
 

@@ -8,13 +8,10 @@ import xarray as xr
 import rioxarray as rxr
 from rasterio.transform import from_bounds
 
-from data_prep.generate_evs.ingestion.process_os_data import (
-    generate_point_grid,
-    process_roads,
-    calculate_distances,
-    calculate_feature_cover,
-    rasterise_gdf
-)
+from sdm.raster.utils import generate_point_grid, rasterise_gdf
+from sdm.data.os import process_roads
+from sdm.raster.processing import calculate_distances, calculate_feature_cover
+from sdm.commands.data_preparation.processing.process_os_data import process_os_data as main
 
 @pytest.fixture
 def sample_boundary() -> gpd.GeoDataFrame:
@@ -47,13 +44,13 @@ def sample_features() -> dict:
     features = {
         'buildings': gpd.GeoDataFrame({
             'geometry': [
-                Polygon([(10, 10), (20, 10), (20, 20), (10, 20)]),
-                Polygon([(60, 60), (70, 60), (70, 70), (60, 70)])
+                Point(15, 15),  # Center of first building
+                Point(65, 65)   # Center of second building
             ]
         }, crs="EPSG:27700"),
         'water': gpd.GeoDataFrame({
             'geometry': [
-                Polygon([(30, 30), (40, 30), (40, 40), (30, 40)])
+                Point(35, 35)   # Center of water body
             ]
         }, crs="EPSG:27700")
     }
@@ -123,11 +120,14 @@ def test_point_grid_alignment():
     resolution = 5
     grid = generate_point_grid(bbox, resolution, "EPSG:27700")
     
-    # Check coordinates are multiples of resolution
+    # Check coordinates are at resolution/2 offset (center of cells)
     x_coords = grid.geometry.x
     y_coords = grid.geometry.y
-    assert all(x % resolution == 0 for x in x_coords)
-    assert all(y % resolution == 0 for y in y_coords)
+    expected_x = np.array([2.5, 2.5, 7.5, 7.5])  # 2x2 grid
+    expected_y = np.array([2.5, 7.5, 2.5, 7.5])
+    
+    assert np.allclose(sorted(x_coords), sorted(expected_x))
+    assert np.allclose(sorted(y_coords), sorted(expected_y))
 
 def test_distance_calculation_boundary_conditions(sample_boundary):
     """Test distance calculation at boundary conditions."""

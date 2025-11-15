@@ -14,16 +14,6 @@ import rioxarray as rxr # import unused but needed to enable rio attributes of x
 import xarray as xr 
 from shapely.geometry import box, Polygon
 
-
-
-
-from sdm.utils.io import load_boundary, load_spatial_config
-
-from sdm.utils.io import (
-    load_boundary, 
-    load_spatial_config 
-)
-
 def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=None):
     # Define the raster size and transform
     # Here, I'm assuming a 1x1 meter resolution and using the bounds of the GeoDataFrame
@@ -310,37 +300,32 @@ def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[
     return transform, (xmin, ymin, xmax, ymax)
 
 def generate_model_grid(
-    boundary_path: Union[str, Path], resolution: Optional[int] = None
+    boundary: gpd.GeoDataFrame,
+    resolution: int,
+    project_crs: Union[str, int, dict]
 ) -> Tuple[xr.DataArray, Tuple]:
     """Generate a model grid based on the study area boundary.
 
     Args:
-        boundary_path: Path to the boundary file
-        resolution: Resolution for the grid, uses spatial config if None
+        boundary: GeoDataFrame containing the boundary
+        resolution: Resolution for the grid
+        project_crs: Target CRS for the grid
 
     Returns:
         Tuple of (grid, bounds) where grid is an xarray DataArray
         and bounds is a tuple of (minx, miny, maxx, maxy)
     """
-    # Load boundary
-    boundary = load_boundary(boundary_path)
-    # Load spatial config
-    spatial_config = load_spatial_config()
-
-    if resolution is None:
-        grid_resolution: int = spatial_config["resolution"]
-    else:
-        grid_resolution = resolution
+    # Ensure boundary is in the correct CRS
+    if boundary.crs != project_crs:
+        boundary = boundary.to_crs(project_crs)
 
     # Get model transform and bounds
-    _, bounds = construct_transform_shift_bounds(
-        tuple(boundary.total_bounds), grid_resolution
-    )
+    bounds = tuple(boundary.total_bounds)
+    minx, miny, maxx, maxy = bounds
 
     # Create coordinate arrays
-    minx, miny, maxx, maxy = bounds
-    x_coords = np.arange(minx + grid_resolution / 2, maxx, grid_resolution)
-    y_coords = np.arange(maxy - grid_resolution / 2, miny, -grid_resolution)
+    x_coords = np.arange(minx + resolution / 2, maxx, resolution)
+    y_coords = np.arange(maxy - resolution / 2, miny, -resolution)
 
     # Create empty grid with coordinates
     grid = xr.DataArray(
@@ -348,6 +333,6 @@ def generate_model_grid(
         coords={"y": y_coords, "x": x_coords},
         dims=["y", "x"],
     )
-    grid = grid.rio.write_crs(spatial_config["crs"])
+    grid = grid.rio.write_crs(project_crs)
 
     return grid, bounds

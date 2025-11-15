@@ -92,26 +92,3 @@ def load_background_points(
         logger.error(f"Error loading background points: {e}")
         raise
 
-def load_environmental_variables(
-    ev_path: Union[str, Path]
-) -> Tuple[xr.Dataset, Path]:
-    """Load environmental variables for modelling.
-    
-    Args:
-        ev_path: Path to environmental variables raster
-        
-    Returns:
-        Tuple of (Dataset containing environmental variables, Path to raster file)
-    """
-    ev_raster = Path(ev_path)
-    
-    try:
-        evs = rxr.open_rasterio(ev_raster, masked=True, band_as_variable=True).squeeze()
-        # rename the variables by their long name
-        for var in evs.data_vars:
-            evs = evs.rename({var: evs[var].attrs["long_name"]})
-        logger.info(f"Loaded environmental variables from {ev_raster}")
-        return evs, ev_raster
-    except Exception as e:
-        logger.error(f"Error loading environmental variables: {e}")
-        raise 

@@ -1,0 +1,79 @@
+# Species Distribution Modelling Configuration
+
+# Data paths
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  models: "data/sdm_models"
+  predictions: "data/sdm_predictions"
+  occurence_data: "data/processed/bats-tidy.geojson"
+  background_points: "data/processed/background-points.geojson"
+  boundary: "data/processed/boundary.geojson"
+  grid_points: "data/evs/grid-points.parquet"
+  evs: "data/processed/evs"
+  ev_tiff: "data/evs/evs-to-model.tif"
+
+# Spatial configuration
+spatial:
+  top: 646900
+  left: 313000
+  crs: "EPSG:27700"
+  resolution: 100
+  study_area_buffer: 7000
+
+# Model configuration
+model:
+  record_age_years: 20
+
+# Environmental variables for modeling
+input_variables:
+  - "climate_stats_wind_ann_avg"
+  - "dtm-100m_LIDAR_Composite_2m_DTM_2022_Elevation"
+  - "climate_stats_temp_ann_avg"
+  - "climate_stats_prec_ann_avg"
+  - "bioclim_bioclim_15"
+  - "os-distance-to-feature_distance_to_buildings"
+  - "terrain-stats_slope"
+  - "terrain-stats_twi"
+  - "bioclim_bioclim_9"
+  - "ceh-land-cover-100m_Arable"
+  - "ceh-land-cover-100m_Improved grassland"
+  - "veg-height-100m_veg_height_max"
+  - "os-feature-cover-100m_water"
+  - "terrain-stats_aspect_northness_slope"
+  - "terrain-stats_aspect_eastness_slope"
+  - "terrain-stats_tpi"
+  - "ceh-land-cover-100m_Wetland"
+  - "os-feature-cover-100m_major_roads"
+  - "ceh-land-cover-100m_Upland Heathland"
+  - "ceh-land-cover-100m_Suburban"
+  - "ceh-land-cover-100m_Grassland"
+  - "os-distance-to-feature_distance_to_major_roads"
+  - "ceh-land-cover-100m_Urban"
+  - "os-distance-to-feature_distance_to_water"
+  - "ceh-land-cover-100m_Coniferous woodland"
+  - "ceh-land-cover-100m_Arable_500m"
+  - "veg-height-100m_veg_height_max_500m"
+  - "os-feature-cover-100m_water_500m"
+  - "ceh-land-cover-100m_Grassland_500m"
+  - "ceh-land-cover-100m_Wetland_500m"
+  - "ceh-land-cover-100m_Suburban_500m"
+  - "ceh-land-cover-100m_Urban_500m"
+  - "ceh-land-cover-100m_Improved grassland_500m"
+  - "ceh-land-cover-100m_Coniferous woodland_500m"
+
+# Coordinate reference system
+crs: "EPSG:27700" # OSGB1936 / British National Grid
+
+# MLflow configuration
+mlflow:
+  tracking_uri: "sqlite:///data/sdm_models/mlflow.db"
+  experiment_name: "species_sdm_experiment"
+
+# Model hyperparameters
+hyperparameters:
+  maxent:
+    # Add MaxEnt specific hyperparameters here
+    regularization_multiplier: 1.0
+
+  # Add model specific hyperparameters here

@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.26.4",
     "pandas>=2.2.3",
     "pyhere>=1.0.3",
+    "pytest-asyncio>=1.2.0",
     "pytest>=8.3.5",
     "rasterio>=1.4.3",
     "rio-cogeo>=5.4.1",
@@ -24,7 +25,13 @@ dependencies = [
     "tqdm>=4.67.1",
     "typer>=0.15.4",
     "xarray>=2025.3.1",
+    "numba>=0.62.1",
+    "dask>=2025.9.1",
+    "pydantic>=2.0.0",
 ]
+
+[project.scripts]
+sdm = "sdm.cli:app"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -36,8 +43,21 @@ packages = ["sdm"]
 [tool.uv.workspace]
 members = ["sdm"]
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests that require external services",
+]
+
 [dependency-groups]
 dev = [
+    "folium>=0.19.7",
+    "ipykernel>=6.29.5",
     "ipywidgets>=8.1.7",
     "jupyter>=1.1.1",
+    "leafmap>=0.48.3",
+    "localtileserver>=0.10.6",
+    "lonboard>=0.10.4",
+    "mapclassify>=2.9.0",
+    "matplotlib>=3.10.1",
 ]

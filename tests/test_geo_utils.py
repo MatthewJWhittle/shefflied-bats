@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 
-from data_prep.generate_evs.ingestion.geo_utils import BoxTiler
+from sdm.raster.utils import BoxTiler
 
 
 @pytest.fixture

@@ -39,7 +39,7 @@ async def fetch_and_process_terrain_data(
     layer_names_in_order = [] # To ensure consistent renaming later
 
     for layer_name, downloader in wcs_downloaders.items():
-        logging.info(f"Downloading {layer_name.upper()} data at {target_resolution_m}m resolution initially...")
+        logging.info("Downloading %s data at %sm resolution initially...", layer_name.upper(), target_resolution_m)
         # GetCoverage is called with `target_resolution_m` for the initial download.
         # This might be different from `model_resolution` if downsampling is desired during WCS call.
         raw_layer_data = await downloader.get_coverage(
@@ -48,7 +48,7 @@ async def fetch_and_process_terrain_data(
             max_concurrent=max_concurrent_downloads
         )
         
-        logging.info(f"Reprojecting {layer_name.upper()} data to model grid (CRS: {model_crs}, Resolution: {model_resolution}m)...")
+        logging.info("Reprojecting %s data to model grid (CRS: %s, Resolution: %sm)...", layer_name.upper(), model_crs, model_resolution)
         # Reproject to the consistent model CRS and resolution
         reprojected_layer_data = reproject_data(
             raw_layer_data, 
@@ -84,10 +84,10 @@ async def fetch_and_process_terrain_data(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     # Filename includes the *model* resolution, as that's the final state of the EV.
-    output_filename = f"terrain_dtm_dsm_{int(model_resolution)}m.tif"
+    output_filename = f"dtm_dsm_{int(model_resolution)}m.tif"
     output_path = output_dir / output_filename
     
-    logging.info(f"Saving merged terrain data to {output_path}...")
+    logging.info("Saving merged terrain data to %s...", output_path)
     merged_terrain_data.rio.to_raster(output_path)
     logging.info("Terrain data processing complete.")
     return output_path
@@ -100,7 +100,7 @@ def generate_terrain_data(
     wcs_tile_height_px: int = 1024,
     wcs_temp_storage: bool = True,
     wcs_download_resolution_m: int = 10,
-    max_concurrent_downloads: int = 5,
+    max_concurrent_downloads: int = 10,
     verbose: bool = False
 ) -> Path:
     """

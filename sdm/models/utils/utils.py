@@ -188,6 +188,14 @@ def prepare_occurrence_data(
     # common_cols = list(set(presence_gdf.columns) & set(background_gdf.columns))
     # presence_gdf = presence_gdf[common_cols]
     # background_gdf = background_gdf[common_cols]
+    logger.info(f"Calculating sample weights (n_neighbors={sample_weight_n_neighbors}).")
+    # distance_weights requires all points (presence and background) to be in the same GDF
+    presence_gdf["sample_weight"] = ela.distance_weights(
+        presence_gdf, n_neighbors=sample_weight_n_neighbors
+    )
+    background_gdf["sample_weight"] = ela.distance_weights(
+        background_gdf, n_neighbors=sample_weight_n_neighbors
+    )
     
     occurrence_stacked = ela.stack_geodataframes(
         presence_gdf, 
@@ -195,11 +203,6 @@ def prepare_occurrence_data(
         add_class_label=True # Adds 'class' column (1 for presence, 0 for background)
     )
     
-    logger.info(f"Calculating sample weights (n_neighbors={sample_weight_n_neighbors}).")
-    # distance_weights requires all points (presence and background) to be in the same GDF
-    occurrence_stacked["sample_weight"] = ela.distance_weights(
-        occurrence_stacked, n_neighbors=sample_weight_n_neighbors
-    )
-
     logger.info(f"Prepared occurrence data: {len(occurrence_stacked)} total points.")
+
     return occurrence_stacked 

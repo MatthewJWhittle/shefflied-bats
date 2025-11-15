@@ -1,8 +1,14 @@
 from pathlib import Path
-from typing import Dict, Any, Optional # Added Optional
+from typing import Dict, Any, Optional, Tuple, Union
+import logging
 
 from rio_cogeo.cogeo import cog_translate
 from rio_cogeo.profiles import cog_profiles
+
+import xarray as xr
+import rioxarray as rxr
+
+logger = logging.getLogger(__name__)
 
 
 def translate_to_cog(
@@ -54,3 +60,28 @@ def translate_to_cog(
         **options,
     )
     # print(f"Successfully translated {src_path} to COG: {dst_path}") # Optional: add logging 
+
+def load_environmental_variables(
+    ev_path: Union[str, Path]
+) -> Tuple[xr.Dataset, Path]:
+    """Load environmental variables for modelling.
+    
+    Args:
+        ev_path: Path to environmental variables raster
+        
+    Returns:
+        Tuple of (Dataset containing environmental variables, Path to raster file)
+    """
+    ev_raster = Path(ev_path)
+    
+    try:
+        evs : xr.Dataset = rxr.open_rasterio(ev_raster, masked=True, band_as_variable=True).squeeze() # type: ignore
+        
+        # rename the variables by their long name
+        for var in evs.data_vars:
+            evs = evs.rename({var: evs[var].attrs["long_name"]})
+        logger.info("Loaded environmental variables from %s", ev_raster)
+        return evs, ev_raster
+    except Exception as e:
+        logger.error("Error loading environmental variables: %s", e)
+        raise 

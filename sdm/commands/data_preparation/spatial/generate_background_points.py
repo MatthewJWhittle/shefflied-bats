@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional, Literal, Tuple
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.occurrence.sampling import generate_background_points
+from sdm.occurrence.sampling import generate_background_points, TransformMethod
 
 def generate_background_points_wrapper(
     occurrence_data_path: Path,
@@ -13,11 +13,11 @@ def generate_background_points_wrapper(
     background_method: Literal["contrast", "percentile", "scale", "fixed", "binary"] = "contrast",
     background_value: float = 0.3,
     grid_resolution: Optional[int] = None,
-    transform_method: Literal["log", "sqrt", "presence", "cap", "rank"] = "log",
+    transform_method: TransformMethod = TransformMethod.LOG,
     cap_percentile: float = 90.0,
     sigma: float = 1.5,
     verbose: bool = False
-) -> Optional[Path]:
+) -> Tuple[Path, Path]:
     """
     Core function to generate background points for species distribution modeling.
     Can be called from other scripts or notebooks.
@@ -46,7 +46,7 @@ def generate_background_points_wrapper(
 
     logging.info(f"Starting background point generation. Outputs will be in: {output_dir}")
 
-    bg_points_gdf = generate_background_points(
+    bg_points_path, density_raster_path = generate_background_points(
         occurrence_data_path=occurrence_data_path,
         boundary_path=boundary_path,
         output_dir_for_density_raster=density_raster_output_dir, 
@@ -59,15 +59,4 @@ def generate_background_points_wrapper(
         cap_percentile=cap_percentile,
     )
 
-    if not bg_points_gdf.empty:
-        # Construct a descriptive output filename for the points
-        bg_value_str = str(background_value).replace('.', 'p')
-        output_filename = f"background_points_{n_background_points}_{background_method}_{bg_value_str}_sigma{str(sigma).replace('.', 'p')}.parquet"
-        output_path = output_dir / output_filename
-        
-        bg_points_gdf.to_parquet(output_path)
-        logging.info(f"Saved {len(bg_points_gdf)} background points to: {output_path}")
-        return output_path
-    else:
-        logging.warning("No background points were generated.")
-        return None 
+    return bg_points_path, density_raster_path
