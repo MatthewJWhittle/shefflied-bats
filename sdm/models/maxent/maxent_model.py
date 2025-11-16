@@ -173,8 +173,8 @@ def cross_validate_maxent_model(
     metric_fn: Callable = roc_auc_score, 
     n_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
-    random_state_kfold: Optional[int] = None # For reproducibility of GeographicKFold
 ) -> Tuple[List[BaseEstimator], np.ndarray]:
+    # Note: Returns only valid models (None values filtered out)
     """
     Performs geographic cross-validation for a MaxEnt-like (scikit-learn compatible) model.
 
@@ -184,19 +184,16 @@ def cross_validate_maxent_model(
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
         n_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
-        random_state_kfold: Random state for GeographicKFold for reproducible splits.
 
     Returns:
         Tuple of (trained_models_per_fold, metric_scores_per_fold).
+        Note: trained_models_per_fold may contain None values for failed folds.
     """
     # elapid.GeographicKFold is a good default choice here
     # It can take a random_state if provided in elapid versions that support it.
     # Check elapid documentation for exact signature if random_state is critical.
-    try:
-        gfolds = ela.GeographicKFold(n_splits=n_folds, random_state=random_state_kfold)
-    except TypeError: # Older elapid might not have random_state
-        logger.warning("GeographicKFold does not support random_state in this elapid version. Using default.")
-        gfolds = ela.GeographicKFold(n_splits=n_folds)
+
+    gfolds = ela.GeographicKFold(n_splits=n_folds)
         
     fold_metrics = []
     trained_models = []
@@ -209,10 +206,17 @@ def cross_validate_maxent_model(
         X_train, y_train, w_train = extract_split_data(occurrence_gdf, train_idx, feature_columns=feature_columns)
         X_test, y_test, _ = extract_split_data(occurrence_gdf, test_idx, feature_columns=feature_columns) # Weights not used for test metric here
 
+        # Check both training and test sets have both classes
+        if len(y_train.unique()) < 2:
+            logger.warning(f"Skipping fold {i+1} due to only one class in the training set.")
+            fold_metrics.append(np.nan)
+            trained_models.append(None)
+            continue
+            
         if len(y_test.unique()) < 2:
             logger.warning(f"Skipping fold {i+1} due to only one class in the test set.")
-            fold_metrics.append(np.nan) # Or some other indicator for a skipped fold
-            trained_models.append(None) # No model for this fold
+            fold_metrics.append(np.nan)
+            trained_models.append(None)
             continue
         
         try:
@@ -225,6 +229,9 @@ def cross_validate_maxent_model(
             # This is a common point of confusion. For now, assume direct elapid.MaxentModel style.
             fit_params = {}
             if w_train is not None:
+                # Fill NaN values in sample weights
+                w_train = w_train.fillna(1.0)
+                
                 # Check if model is a pipeline to construct prefixed param name
                 if hasattr(current_model, 'steps'): # It's a pipeline
                     # Assuming maxent is the last step, or find its name
@@ -245,7 +252,16 @@ def cross_validate_maxent_model(
             fold_metrics.append(np.nan)
             trained_models.append(None)
 
-    return trained_models, np.array(fold_metrics)
+    # Filter out None models and corresponding NaN metrics
+    valid_models = [m for m in trained_models if m is not None]
+    valid_metrics = np.array([m for m, mod in zip(fold_metrics, trained_models) if mod is not None])
+    
+    # If we have valid models, return them; otherwise return empty lists
+    if len(valid_models) > 0:
+        return valid_models, valid_metrics
+    else:
+        logger.warning("No valid models were trained in cross-validation")
+        return [], np.array([])
 
 
 def train_final_maxent_model(
@@ -253,7 +269,7 @@ def train_final_maxent_model(
     occurrence_gdf: gpd.GeoDataFrame, 
     feature_columns: Optional[List[str]] = None
 ) -> BaseEstimator:
-    """Trains a MaxEnt-like model on the entire dataset."""
+    """Train final model on all data, handling sample weights with NaN values."""
     logger.info("Training final model on all data...")
     final_model = clone(model)
     train_idx = np.arange(len(occurrence_gdf))
@@ -261,6 +277,9 @@ def train_final_maxent_model(
     
     fit_params = {}
     if w_train is not None:
+        # Fill NaN values in sample weights
+        w_train = w_train.fillna(1.0)
+        
         if hasattr(final_model, 'steps'):
             maxent_step_name = final_model.steps[-1][0]
             fit_params[f'{maxent_step_name}__sample_weight'] = w_train
@@ -278,7 +297,6 @@ def evaluate_and_train_maxent_model(
     metric_fn: Callable = roc_auc_score,
     n_cv_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
-    random_state_kfold: Optional[int] = None
 ) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray]:
     """
     Performs cross-validation and then trains a final model on all data.
@@ -292,7 +310,6 @@ def evaluate_and_train_maxent_model(
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
         n_cv_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
-        random_state_kfold: Random state for GeographicKFold for reproducible splits.
 
     Returns:
         Tuple of (final_trained_model, cv_models, cv_scores).
@@ -304,10 +321,17 @@ def evaluate_and_train_maxent_model(
         metric_fn=metric_fn,
         n_folds=n_cv_folds,
         feature_columns=feature_columns,
-        random_state_kfold=random_state_kfold
     )
     
-    logger.info(f"CV Mean {metric_fn.__name__}: {np.nanmean(cv_scores):.4f} (+/- {np.nanstd(cv_scores):.4f})")
+    # Log CV results only if we have valid scores
+    if len(cv_scores) > 0 and not np.all(np.isnan(cv_scores)):
+        valid_scores = cv_scores[~np.isnan(cv_scores)]
+        if len(valid_scores) > 0:
+            logger.info(f"CV Mean {metric_fn.__name__}: {np.mean(valid_scores):.4f} (+/- {np.std(valid_scores):.4f})")
+        else:
+            logger.warning(f"No valid CV scores available")
+    else:
+        logger.warning(f"No valid CV scores available")
     
     final_trained_model = train_final_maxent_model(
         model=model, # Pass the original model for cloning

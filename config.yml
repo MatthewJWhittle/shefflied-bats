@@ -67,13 +67,5 @@ crs: "EPSG:27700" # OSGB1936 / British National Grid
 
 # MLflow configuration
 mlflow:
-  tracking_uri: "sqlite:///data/sdm_models/mlflow.db"
+  tracking_uri: "sqlite:///mlflow.db"
   experiment_name: "species_sdm_experiment"
-
-# Model hyperparameters
-hyperparameters:
-  maxent:
-    # Add MaxEnt specific hyperparameters here
-    regularization_multiplier: 1.0
-
-  # Add model specific hyperparameters here

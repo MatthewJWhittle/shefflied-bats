@@ -178,3 +178,4 @@ deploy-dash.sh
 
 **/.DS_Store
 data/temp/*
+mlflow.db

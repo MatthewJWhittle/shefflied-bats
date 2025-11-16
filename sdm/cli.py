@@ -154,10 +154,12 @@ def background(
     
     setup_logging(verbose=verbose)
     
-    generate_background_points_wrapper(
+    # Generate background points and write directly to expected location
+    bg_points_path, density_raster_path = generate_background_points_wrapper(
         occurrence_data_path=Path(CONFIG["paths"]["occurence_data"]),
         boundary_path=Path(CONFIG["paths"]["boundary"]),
         output_dir=Path(CONFIG["paths"]["processed_data"]) / "background_generation",
+        background_points_output_path=Path(CONFIG["paths"]["background_points"]),
         verbose=verbose
     )
     

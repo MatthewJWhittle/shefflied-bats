@@ -113,10 +113,17 @@ def prepare_occurrence_data(
         background_gdf = background_gdf[
             ~background_gdf["grid_index"].isin(presence_gdf["grid_index"])
         ]
+
+        # drop duplicate background points in a grid cell
+        background_gdf = background_gdf.drop_duplicates(subset=["grid_index"])
+        # drop duplicate presence points in a grid cell
+        presence_gdf = presence_gdf.drop_duplicates(subset=["grid_index"])
+
         # filter the density to gdf index
         background_density = background_density.loc[
             background_gdf.index
         ]
+
 
 
         # Drop the grid index column
@@ -196,6 +203,10 @@ def prepare_occurrence_data(
     background_gdf["sample_weight"] = ela.distance_weights(
         background_gdf, n_neighbors=sample_weight_n_neighbors
     )
+    
+    # Fill NaN values in sample weights (can occur when all distances are the same)
+    presence_gdf["sample_weight"] = presence_gdf["sample_weight"].fillna(1.0)
+    background_gdf["sample_weight"] = background_gdf["sample_weight"].fillna(1.0)
     
     occurrence_stacked = ela.stack_geodataframes(
         presence_gdf, 

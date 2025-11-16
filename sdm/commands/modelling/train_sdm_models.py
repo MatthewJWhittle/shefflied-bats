@@ -6,43 +6,38 @@ in the Sheffield area, including data preparation, model training, and evaluatio
 """
 
 import logging
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Union, cast, TypeVar
 import os
-from itertools import product
 import pickle
-from dataclasses import dataclass
+from datetime import datetime
+from itertools import product
+from pathlib import Path
+from typing import Dict, List, Optional, TypeVar, cast
 
-import pandas as pd
 import geopandas as gpd
-import numpy as np
 import mlflow
-from mlflow.sklearn import log_model
-from joblib import Parallel, delayed
+import numpy as np
+import pandas as pd
 import xarray as xr
+from elapid.models import MaxentConfig
+from mlflow.sklearn import log_model
 from pydantic import BaseModel, ConfigDict
 from sklearn.base import BaseEstimator
-from elapid.models import MaxentConfig
-from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 
-from sdm.utils.logging_utils import setup_logging
-from sdm.data.loaders.vector import (
-    load_bat_data,
-    load_background_points,
-)
-from sdm.raster.io import load_environmental_variables
+from sdm.data.loaders.vector import load_background_points, load_bat_data
 from sdm.data.processing import annotate_points
 from sdm.models.maxent.maxent_model import (
-    create_maxent_pipeline,
-    get_feature_config,
     ActivityType,
-    evaluate_and_train_maxent_model,
     DefaultMaxentConfig,
+    create_maxent_pipeline,
+    evaluate_and_train_maxent_model,
+    get_feature_config,
 )
 from sdm.models.utils import prepare_occurrence_data
 from sdm.occurrence import filter_bats_data
+from sdm.raster.io import load_environmental_variables
 from sdm.utils.io import load_config
+from sdm.utils.logging_utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +62,43 @@ class TrainingData(SDMModel):
 class TrainingResults(SDMModel):
     """Results from training a single model."""
     final_model: Optional[BaseEstimator] = None
-    cv_models: Optional[List[BaseEstimator]] = None
+    cv_models: Optional[List[BaseEstimator]] = None  # List of valid models (None values filtered out)
     cv_scores: Optional[np.ndarray] = None
     success: bool = False
     error: Optional[str] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+def _summarize_cv_scores(
+    cv_scores: Optional[np.ndarray],
+) -> tuple[float, float, int, int]:
+    """Return (mean, std, n_valid, n_total) for a CV score array, safely handling NaNs."""
+
+    if cv_scores is None or len(cv_scores) == 0:
+        return np.nan, np.nan, 0, 0
+
+    valid_scores = cv_scores[~np.isnan(cv_scores)]
+    n_total = len(cv_scores)
+    n_valid = len(valid_scores)
+
+    if n_valid == 0:
+        return np.nan, np.nan, 0, n_total
+
+    return float(valid_scores.mean()), float(valid_scores.std()), n_valid, n_total
+
+
+def _configure_mlflow_from_config() -> None:
+    """Configure MLflow tracking URI and experiment from project configuration."""
+
+    tracking_uri = project_config["mlflow"]["tracking_uri"]
+    experiment_name = project_config["mlflow"]["experiment_name"]
+
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(experiment_name)
+
+    logger.info("MLflow tracking URI: %s", tracking_uri)
+    logger.info("MLflow experiment: %s", experiment_name)
 
 
 def extract_grid_points(
@@ -157,7 +183,8 @@ def generate_training_data(
             input_vars=ev_columns,
             filter_to_grid=True,
             sample_weight_n_neighbors=5,
-            subset_background=False,
+            subset_background=True,  # Subset background points proportionally to presence count
+            order_by_density_for_subset=True,  # Prioritize high-density background points
         )
         count_1_output = len(occurrence[occurrence["class"] == 1])
         count_0_output = len(occurrence[occurrence["class"] == 0])
@@ -207,21 +234,32 @@ def train_single_model(
             occurrence_gdf=data.occurrence,
             n_cv_folds=3,
             feature_columns=model_features,
-            random_state_kfold=42,
         )
 
-        if final_model is None or cv_models is None or cv_scores is None:
-            raise ValueError("Model training failed - received None values")
+        if final_model is None:
+            raise ValueError("Model training failed - final_model is None")
 
-        cv_mean = cv_scores.mean()
-        cv_std = cv_scores.std()
-        logger.info(f"Model training complete for {latin_name} ({activity_type.value}): CV AUC = {cv_mean:.3f} ± {cv_std:.3f}")
+        cv_mean, cv_std, n_valid, n_total = _summarize_cv_scores(cv_scores)
+        if n_valid > 0:
+            logger.info(
+                "✓ %s - %s: CV AUC = %.4f ± %.4f (%d/%d folds valid)",
+                latin_name,
+                activity_type.value,
+                cv_mean,
+                cv_std,
+                n_valid,
+                n_total,
+            )
+        else:
+            logger.warning(
+                "✗ %s - %s: No valid CV scores", latin_name, activity_type.value
+            )
 
         return TrainingResults(
             latin_name=latin_name,
             activity_type=activity_type.value,
             final_model=final_model,
-            cv_models=cv_models,
+            cv_models=cv_models if cv_models is not None else None,
             cv_scores=cv_scores,
             success=True,
             error=None,
@@ -315,6 +353,32 @@ def train_models_parallel(
     logger.info(
         f"Successfully trained {len(successful_results)} models out of {len(training_data)} attempts"
     )
+    
+    # Print summary of model accuracies
+    if successful_results:
+        logger.info("\n" + "=" * 80)
+        logger.info("MODEL PERFORMANCE SUMMARY")
+        logger.info("=" * 80)
+        for result in successful_results:
+            cv_mean, cv_std, n_valid, n_total = _summarize_cv_scores(result.cv_scores)
+            if n_valid > 0:
+                logger.info(
+                    "  %s - %s: AUC = %.4f ± %.4f (%d/%d folds valid)",
+                    f"{result.latin_name:30s}",
+                    f"{result.activity_type:15s}",
+                    cv_mean,
+                    cv_std,
+                    n_valid,
+                    n_total,
+                )
+            else:
+                logger.info(
+                    "  %s - %s: No valid scores",
+                    f"{result.latin_name:30s}",
+                    f"{result.activity_type:15s}",
+                )
+        logger.info("=" * 80 + "\n")
+    
     return successful_results
 
 
@@ -325,13 +389,14 @@ def prepare_results_dataframe(
     """Prepare a DataFrame with model results."""
     results = []
     for model, data in zip(models, training_data):
+        mean_cv, std_cv, _, _ = _summarize_cv_scores(model.cv_scores)
         results.append(
             {
                 "identifier": model.identifier(),
                 "latin_name": model.latin_name,
                 "activity_type": model.activity_type,
-                "mean_cv_score": model.cv_scores.mean() if model.cv_scores is not None else None,
-                "std_cv_score": model.cv_scores.std() if model.cv_scores is not None else None,
+                "mean_cv_score": mean_cv,
+                "std_cv_score": std_cv,
                 "n_presence": len(data.occurrence[data.occurrence["class"] == 1]),
                 "n_background": len(data.occurrence[data.occurrence["class"] == 0]),
             }
@@ -424,15 +489,22 @@ def log_models_to_mlflow(
     Raises:
         ValueError: If the model training fails - received None values
     """
-    with mlflow.start_run():
+    # Start parent run for this training session
+    parent_run_name = f"SDM_Training_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    with mlflow.start_run(run_name=parent_run_name):
+        logger.info(f"Started MLflow parent run: {parent_run_name}")
         # Log results DataFrame
         mlflow.log_table(data=results_df, artifact_file="model_results.parquet")
+        logger.info(f"Logged {len(models)} models to MLflow in nested runs")
 
         # Log individual models
         for model in models:
             data = training_data[models.index(model)]
-            with mlflow.start_run(nested=True):
-                ## Log model parameters
+            model_identifier = model.identifier()
+            with mlflow.start_run(nested=True, run_name=model_identifier):
+                logger.info(f"Logging model to MLflow: {model_identifier}")
+                
+                # Log basic model parameters
                 mlflow.log_params(
                     {
                         "latin_name": model.latin_name,
@@ -444,7 +516,7 @@ def log_models_to_mlflow(
                     model_params = model.final_model.get_params()
                     mlflow.log_params(model_params)
                 else:
-                    logger.error(f"Model is None for {model.identifier()}")
+                    logger.error(f"Model is None for {model_identifier}")
 
                 ## Log model tags
                 mlflow.set_tag("latin_name", model.latin_name)
@@ -454,33 +526,52 @@ def log_models_to_mlflow(
                 mlflow.set_tag("species_code", species_code)
                 mlflow.set_tag("activity_type", model.activity_type)
 
-                ## Log model metrics
-                cv_mean = model.cv_scores.mean() if model.cv_scores is not None else None # type: ignore
-                cv_std = model.cv_scores.std() if model.cv_scores is not None else None # type: ignore
-                if cv_mean is not None:
-                    mlflow.log_metric(
-                        "mean_cv_score", cv_mean
-                    )
-                if cv_std is not None:
-                    mlflow.log_metric(
-                        "std_cv_score", cv_std
+                # Log model metrics
+                cv_mean, cv_std, n_valid, _ = _summarize_cv_scores(model.cv_scores)
+                if n_valid > 0:
+                    mlflow.log_metric("mean_cv_score", cv_mean)
+                    mlflow.log_metric("std_cv_score", cv_std)
+                else:
+                    logger.info(
+                        "Skipping MLflow metric logging for %s (no valid CV scores)",
+                        model_identifier,
                     )
 
-                ## Log model artifact
+                # Log model artifact
                 if model.final_model is not None:
-                    # Create an input example from the first row of the training data
-                    # Get the feature names from the model's feature selection step
                     occurrence = data.occurrence
                     X = occurrence.drop(columns=["geometry", "class", "sample_weight"])
                     X = X.iloc[0]
                     input_example = pd.DataFrame(X).T
-                    log_model(
-                        model.final_model, 
-                        f"{model.identifier()}_final_model",
-                        input_example=input_example
-                    )
+                    artifact_path = f"{model_identifier}_final_model"
+                    try:
+                        model_info = log_model(
+                            model.final_model, 
+                            artifact_path=artifact_path,  # Keep for compatibility
+                            input_example=input_example
+                        )
+                        logger.info(f"✓ Model logged to MLflow: {model_info.model_uri}")
+                        logger.info(f"  Artifact path: {artifact_path}")
+                        logger.info(f"  Run ID: {mlflow.active_run().info.run_id if mlflow.active_run() else 'N/A'}")
+                    except Exception as e:
+                        if "UNIQUE constraint" in str(e) or "duplicate" in str(e).lower():
+                            logger.warning(f"MLflow metric conflict for {model_identifier}, but model was saved. Error: {e}")
+                        else:
+                            logger.error(f"Failed to log model {model_identifier} to MLflow: {e}")
+                            raise
                 else:
-                    logger.error(f"Model is None for {model.identifier()}")
+                    logger.error(f"Model is None for {model_identifier}")
+        
+        # Log summary information at the end of the parent run
+        parent_run_id = mlflow.active_run().info.run_id if mlflow.active_run() else "N/A"
+        tracking_uri = mlflow.get_tracking_uri()
+        logger.info(f"\n{'='*80}")
+        logger.info(f"MLflow Logging Complete")
+        logger.info(f"{'='*80}")
+        logger.info(f"Parent run: {parent_run_name} (ID: {parent_run_id})")
+        logger.info(f"Total models logged: {len(models)}")
+        logger.info(f"Tracking URI: {tracking_uri}")
+        logger.info(f"{'='*80}\n")
 
 
 def train_sdm_models(
@@ -525,10 +616,9 @@ def train_sdm_models(
     
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Configure MLflow
+    # Configure MLflow from project config
     logger.info("Configuring MLflow tracking...")
-    mlflow.set_tracking_uri(project_config["mlflow"]["tracking_uri"])
-    mlflow.set_experiment(project_config["mlflow"]["experiment_name"])
+    _configure_mlflow_from_config()
 
     # Load data
     logger.info("=== Loading Input Data ===")
@@ -572,16 +662,16 @@ def train_sdm_models(
     # Configure model parameters
     logger.info("=== Configuring Model Parameters ===")
     model_config = DefaultMaxentConfig(
-        feature_types=["linear", "quadratic", "hinge", "product"],
-        beta_multiplier=2.5,
-        beta_lqp=1,
-        beta_hinge=1,
-        beta_threshold=1,
-        beta_categorical=1,
+        feature_types=["linear", "hinge"],  # Removed "product" and "quadratic" to reduce overfitting
+        beta_multiplier=3.0,  # Increased from 2.5 to 3.0 for stronger regularization
+        beta_lqp=1.0,
+        beta_hinge=1.0,
+        beta_threshold=1.0,
+        beta_categorical=1.0,
         n_hinge_features=10,
         n_threshold_features=10,
         transform="cloglog",
-        clamp=True,
+        clamp=False,  # Disabled clamping to prevent extrapolation
         tau=0.5,
         convergence_tolerance=1e-5,
         use_lambdas="best",

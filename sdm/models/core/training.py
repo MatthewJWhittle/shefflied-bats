@@ -233,7 +233,6 @@ def train_single_model(
                     occurrence_gdf=training_data_gdf, 
                     n_cv_folds=3, 
                     feature_columns=current_feature_names,
-                    random_state_kfold=42
                 )
                 
                 mean_cv_score = np.nanmean(cv_scores) if cv_scores.size > 0 else np.nan
