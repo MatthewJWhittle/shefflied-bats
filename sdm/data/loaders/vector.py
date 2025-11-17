@@ -52,7 +52,7 @@ def load_bat_data(
     """Load bat occurrence data.
     
     Args:
-        bats_path: Path to bat data file
+        bats_path: Path to bat data file (supports GeoJSON, GeoPackage, Parquet, etc.)
         accuracy_threshold: Maximum allowed coordinate uncertainty in meters
         
     Returns:
@@ -61,7 +61,11 @@ def load_bat_data(
     bats_path = Path(bats_path)
     
     try:
-        gdf = gpd.read_file(bats_path)
+        # Handle parquet files separately
+        if bats_path.suffix.lower() == '.parquet':
+            gdf = gpd.read_parquet(bats_path)
+        else:
+            gdf = gpd.read_file(bats_path)
         if 'coordinateUncertaintyInMeters' in gdf.columns:
             gdf = gdf[gdf['coordinateUncertaintyInMeters'] <= accuracy_threshold]
         logger.info(f"Loaded {len(gdf)} bat records from {bats_path}")
@@ -76,7 +80,7 @@ def load_background_points(
     """Load background points data.
     
     Args:
-        background_path: Path to background points file
+        background_path: Path to background points file (supports GeoJSON, GeoPackage, Parquet, etc.)
         
     Returns:
         Tuple of (GeoDataFrame containing points, Series of weights)
@@ -84,7 +88,11 @@ def load_background_points(
     background_path = Path(background_path)
     
     try:
-        gdf = gpd.read_file(background_path)
+        # Handle parquet files separately
+        if background_path.suffix.lower() == '.parquet':
+            gdf = gpd.read_parquet(background_path)
+        else:
+            gdf = gpd.read_file(background_path)
         weights = gdf['weight'] if 'weight' in gdf.columns else pd.Series(1, index=gdf.index)
         logger.info(f"Loaded {len(gdf)} background points from {background_path}")
         return gdf, weights

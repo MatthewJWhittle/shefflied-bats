@@ -15,10 +15,10 @@ import elapid as ela # For stack_geodataframes, distance_weights
 logger = logging.getLogger(__name__)
 
 def calculate_background_points(
-    n_presences: int, 
-    min_bg: int = 1000, 
-    max_bg: int = 10000, 
-    factor: int = 10
+    n_presences: int,
+    min_bg: int = 1000,
+    max_bg: int = 10000,
+    factor: int = 10,
 ) -> int:
     """
     Calculate a recommended number of background (pseudo-absence) points
@@ -59,14 +59,17 @@ def filter_gdf_to_grid(gdf, grid, tolerance=50):
 def prepare_occurrence_data(
     presence_gdf: gpd.GeoDataFrame,
     background_gdf: gpd.GeoDataFrame,
-    background_density: pd.Series, # Assumes density is pre-calculated and passed
-    grid_gdf: gpd.GeoDataFrame, # Used for filtering by grid_index
+    background_density: pd.Series,  # Assumes density is pre-calculated and passed
+    grid_gdf: gpd.GeoDataFrame,  # Used for filtering by grid_index
     input_vars: List[str],
     drop_na: bool = True,
     sample_weight_n_neighbors: int = 5,
-    filter_to_grid: bool = True, # Whether to filter points to the grid and remove overlaps
-    subset_background: bool = False, # Whether to subset background points
-    order_by_density_for_subset: bool = True, # For background subsetting
+    filter_to_grid: bool = True,  # Whether to filter points to the grid and remove overlaps
+    subset_background: bool = False,  # Whether to subset background points
+    order_by_density_for_subset: bool = True,  # For background subsetting
+    background_min_bg: int = 1000,
+    background_max_bg: int = 10000,
+    background_factor: int = 10,
 ) -> gpd.GeoDataFrame:
     """
     Prepares presence and background GeoDataFrames for model training.
@@ -131,7 +134,12 @@ def prepare_occurrence_data(
         background_gdf.drop(columns=["grid_index"], inplace=True)
 
     if subset_background:
-        n_bg_calculated = calculate_background_points(len(presence_gdf))
+        n_bg_calculated = calculate_background_points(
+            len(presence_gdf),
+            min_bg=background_min_bg,
+            max_bg=background_max_bg,
+            factor=background_factor,
+        )
         logger.info(f"Subsetting background points to approximately {n_bg_calculated}.")
         
         if order_by_density_for_subset and not background_density.empty:

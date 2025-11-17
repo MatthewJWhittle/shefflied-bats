@@ -8,10 +8,12 @@ in the Sheffield area, including data preparation, model training, and evaluatio
 import logging
 import os
 import pickle
+from contextlib import nullcontext
 from datetime import datetime
 from itertools import product
 from pathlib import Path
 from typing import Dict, List, Optional, TypeVar, cast
+from concurrent.futures import ProcessPoolExecutor
 
 import geopandas as gpd
 import mlflow
@@ -20,7 +22,6 @@ import pandas as pd
 import xarray as xr
 from elapid.models import MaxentConfig
 from mlflow.sklearn import log_model
-from pydantic import BaseModel, ConfigDict
 from sklearn.base import BaseEstimator
 from tqdm import tqdm
 
@@ -36,38 +37,20 @@ from sdm.models.maxent.maxent_model import (
 from sdm.models.utils import prepare_occurrence_data
 from sdm.occurrence import filter_bats_data
 from sdm.raster.io import load_environmental_variables
-from sdm.utils.io import load_config
+from sdm.utils.io import (
+    load_project_config,
+    load_model_config,
+    load_variables_config,
+    CONFIG_PATH,
+    MODEL_CONFIG_PATH,
+    VARIABLES_CONFIG_PATH,
+)
 from sdm.utils.logging_utils import setup_logging
+from sdm.types import TrainingData, TrainingResults, ProjectConfig
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T', bound=pd.DataFrame)
-
-project_config = load_config()
-
-class SDMModel(BaseModel):
-    latin_name: str
-    activity_type: str
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    def identifier(self) -> str:
-        return f"{self.latin_name}_{self.activity_type}"
-
-class TrainingData(SDMModel):
-    occurrence: gpd.GeoDataFrame
-
-
-
-
-class TrainingResults(SDMModel):
-    """Results from training a single model."""
-    final_model: Optional[BaseEstimator] = None
-    cv_models: Optional[List[BaseEstimator]] = None  # List of valid models (None values filtered out)
-    cv_scores: Optional[np.ndarray] = None
-    success: bool = False
-    error: Optional[str] = None
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+T = TypeVar("T", bound=pd.DataFrame)
 
 
 def _summarize_cv_scores(
@@ -88,17 +71,17 @@ def _summarize_cv_scores(
     return float(valid_scores.mean()), float(valid_scores.std()), n_valid, n_total
 
 
-def _configure_mlflow_from_config() -> None:
+def _configure_mlflow_from_config(project_config: ProjectConfig) -> None:
     """Configure MLflow tracking URI and experiment from project configuration."""
 
-    tracking_uri = project_config["mlflow"]["tracking_uri"]
-    experiment_name = project_config["mlflow"]["experiment_name"]
+    tracking_uri = project_config.mlflow.tracking_uri
+    experiment_name = project_config.mlflow.experiment_name
 
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
 
-    logger.info("MLflow tracking URI: %s", tracking_uri)
-    logger.info("MLflow experiment: %s", experiment_name)
+    logger.debug("MLflow tracking URI: %s", tracking_uri)
+    logger.debug("MLflow experiment: %s", experiment_name)
 
 
 def extract_grid_points(
@@ -142,11 +125,17 @@ def generate_training_data(
     ev_columns: List[str],
     min_presence: int = 15,
     subset: Optional[int] = None,
+    subset_background: bool = True,
+    order_by_density_for_subset: bool = True,
+    sample_weight_n_neighbors: int = 5,
+    background_min_bg: int = 1000,
+    background_max_bg: int = 10000,
+    background_factor: int = 10,
 ) -> List[TrainingData]:
     """Generate training data for all valid combinations of species and activity types."""
     training_data = []
     filter_combinations = list(product(latin_names, activity_types))
-    logger.info(f"Generating training data for {len(filter_combinations)} species-activity combinations")
+    logger.debug(f"Generating training data for {len(filter_combinations)} species-activity combinations")
 
     for latin_name, activity_type in tqdm(filter_combinations, desc="Preparing training data"):
         presence = filter_bats_data(
@@ -161,35 +150,45 @@ def generate_training_data(
             )
             continue
 
-        if subset is not None:
-            n_presence = len(presence)
-            presence = cast(gpd.GeoDataFrame, presence.sample(
-                n=min(subset, n_presence), random_state=42
-            ))
+        # Work on local copies so that per-species sampling does not affect others
+        presence_local = cast(gpd.GeoDataFrame, presence.copy())
+        background_local = cast(gpd.GeoDataFrame, background_points_gdf.copy())
+        background_density_local = background_density_series.copy()
 
-            n_background = len(background_points_gdf)
-            background_points_gdf = cast(gpd.GeoDataFrame, background_points_gdf.sample(
-                n=min(subset, n_background), random_state=42
-            ))
-            background_density_series = background_density_series.loc[
-                background_points_gdf.index
+        if subset is not None:
+            n_presence = len(presence_local)
+            presence_local = cast(
+                gpd.GeoDataFrame,
+                presence_local.sample(n=min(subset, n_presence), random_state=42),
+            )
+
+            n_background = len(background_local)
+            background_local = cast(
+                gpd.GeoDataFrame,
+                background_local.sample(n=min(subset, n_background), random_state=42),
+            )
+            background_density_local = background_density_local.loc[
+                background_local.index
             ]
 
         occurrence = prepare_occurrence_data(
-            presence_gdf=cast(gpd.GeoDataFrame, presence),
-            background_gdf=background_points_gdf,
-            background_density=background_density_series,
+            presence_gdf=cast(gpd.GeoDataFrame, presence_local),
+            background_gdf=background_local,
+            background_density=background_density_local,
             grid_gdf=grid_points,
             input_vars=ev_columns,
             filter_to_grid=True,
-            sample_weight_n_neighbors=5,
-            subset_background=True,  # Subset background points proportionally to presence count
-            order_by_density_for_subset=True,  # Prioritize high-density background points
+            sample_weight_n_neighbors=sample_weight_n_neighbors,
+            subset_background=subset_background,
+            order_by_density_for_subset=order_by_density_for_subset,
+            background_min_bg=background_min_bg,
+            background_max_bg=background_max_bg,
+            background_factor=background_factor,
         )
         count_1_output = len(occurrence[occurrence["class"] == 1])
         count_0_output = len(occurrence[occurrence["class"] == 0])
 
-        logger.info(
+        logger.debug(
             f"Generated training data for {latin_name} - {activity_type}: using {count_1_output}/{count_1_input} presence and {count_0_output}/{count_0_input} background points"
         )
 
@@ -201,14 +200,14 @@ def generate_training_data(
             )
         )
 
-    logger.info(f"Successfully generated training data for {len(training_data)} species-activity combinations")
+    logger.debug(f"Successfully generated training data for {len(training_data)} species-activity combinations")
     return training_data
 
 
 
 def train_single_model(
     data: TrainingData,
-    feature_selection: Dict[str, List[str]],
+    feature_selection: Dict[ActivityType, List[str]],
     max_threads_per_model: int,
     model_config: MaxentConfig = DefaultMaxentConfig(),
 ) -> TrainingResults:
@@ -216,7 +215,7 @@ def train_single_model(
     try:
         activity_type = ActivityType(data.activity_type)
         latin_name = data.latin_name
-        logger.info(f"Training model for {latin_name} ({activity_type.value})...")
+        logger.debug(f"Training model for {latin_name} ({activity_type.value})...")
 
         model_features = feature_selection[activity_type]
         logger.debug(f"Using features: {model_features}")
@@ -227,8 +226,6 @@ def train_single_model(
             maxent_n_jobs=max_threads_per_model,
             model_config=model_config,
         )
-
-        logger.info(f"Starting cross-validation for {latin_name} ({activity_type.value})...")
         final_model, cv_models, cv_scores = evaluate_and_train_maxent_model(
             model=model,
             occurrence_gdf=data.occurrence,
@@ -241,7 +238,7 @@ def train_single_model(
 
         cv_mean, cv_std, n_valid, n_total = _summarize_cv_scores(cv_scores)
         if n_valid > 0:
-            logger.info(
+            logger.debug(
                 "✓ %s - %s: CV AUC = %.4f ± %.4f (%d/%d folds valid)",
                 latin_name,
                 activity_type.value,
@@ -281,7 +278,7 @@ def train_single_model(
 
 def train_models_parallel(
     training_data: List[TrainingData],
-    feature_selection: Dict[str, List[str]],
+    feature_selection: Dict[ActivityType, List[str]],
     max_threads_per_model: int = 2,
     n_jobs: Optional[int] = None,
     model_config: MaxentConfig = DefaultMaxentConfig(),
@@ -295,7 +292,7 @@ def train_models_parallel(
         # Use 80% of available CPUs by default
         n_jobs = max(1, int(total_cpus * 0.8) // max_threads_per_model)
 
-    logger.info(
+    logger.debug(
         f"Training with {n_jobs} parallel jobs, {max_threads_per_model} threads per model"
     )
 
@@ -489,20 +486,31 @@ def log_models_to_mlflow(
     Raises:
         ValueError: If the model training fails - received None values
     """
-    # Start parent run for this training session
-    parent_run_name = f"SDM_Training_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    with mlflow.start_run(run_name=parent_run_name):
-        logger.info(f"Started MLflow parent run: {parent_run_name}")
+    # Check if a run is already active (e.g., from tuning script)
+    active_run = mlflow.active_run()
+    
+    if active_run is None:
+        # Start parent run for this training session
+        parent_run_name = f"SDM_Training_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        run_context = mlflow.start_run(run_name=parent_run_name)
+        logger.debug(f"Started MLflow parent run: {parent_run_name}")
+    else:
+        # Use existing run (e.g., from tuning)
+        logger.debug(f"Using existing MLflow run: {active_run.info.run_id}")
+        # Create a context manager that does nothing (we're already in a run)
+        run_context = nullcontext()
+    
+    with run_context:
         # Log results DataFrame
         mlflow.log_table(data=results_df, artifact_file="model_results.parquet")
-        logger.info(f"Logged {len(models)} models to MLflow in nested runs")
+        logger.debug(f"Logging {len(models)} models to MLflow...")
 
         # Log individual models
         for model in models:
             data = training_data[models.index(model)]
             model_identifier = model.identifier()
             with mlflow.start_run(nested=True, run_name=model_identifier):
-                logger.info(f"Logging model to MLflow: {model_identifier}")
+                logger.debug(f"Logging model: {model_identifier}")
                 
                 # Log basic model parameters
                 mlflow.log_params(
@@ -550,9 +558,7 @@ def log_models_to_mlflow(
                             artifact_path=artifact_path,  # Keep for compatibility
                             input_example=input_example
                         )
-                        logger.info(f"✓ Model logged to MLflow: {model_info.model_uri}")
-                        logger.info(f"  Artifact path: {artifact_path}")
-                        logger.info(f"  Run ID: {mlflow.active_run().info.run_id if mlflow.active_run() else 'N/A'}")
+                        logger.debug(f"✓ Model logged to MLflow: {model_info.model_uri}")
                     except Exception as e:
                         if "UNIQUE constraint" in str(e) or "duplicate" in str(e).lower():
                             logger.warning(f"MLflow metric conflict for {model_identifier}, but model was saved. Error: {e}")
@@ -563,34 +569,35 @@ def log_models_to_mlflow(
                     logger.error(f"Model is None for {model_identifier}")
         
         # Log summary information at the end of the parent run
-        parent_run_id = mlflow.active_run().info.run_id if mlflow.active_run() else "N/A"
+        active_run_after = mlflow.active_run()
+        parent_run_id = active_run_after.info.run_id if active_run_after else "N/A"
         tracking_uri = mlflow.get_tracking_uri()
-        logger.info(f"\n{'='*80}")
-        logger.info(f"MLflow Logging Complete")
-        logger.info(f"{'='*80}")
-        logger.info(f"Parent run: {parent_run_name} (ID: {parent_run_id})")
-        logger.info(f"Total models logged: {len(models)}")
-        logger.info(f"Tracking URI: {tracking_uri}")
-        logger.info(f"{'='*80}\n")
+        logger.debug(f"MLflow logging complete - Run ID: {parent_run_id}, {len(models)} models logged")
 
 
 def train_sdm_models(
-    bats_file: Path = Path(project_config["paths"]["occurence_data"]),
-    background_file: Path = Path(project_config["paths"]["background_points"]),
-    ev_file: Path = Path(project_config["paths"]["ev_tiff"]),
-    grid_points_file: Optional[Path] = Path(project_config["paths"]["grid_points"]),
-    output_dir: Path = Path(project_config["paths"]["models"]),
-    min_presence: int = 15,
+    project_config_path: Path = CONFIG_PATH,
+    model_config_path: Path = MODEL_CONFIG_PATH,
+    variables_config_path: Optional[Path] = None,
+    bats_file: Optional[Path] = None,
+    background_file: Optional[Path] = None,
+    ev_file: Optional[Path] = None,
+    grid_points_file: Optional[Path] = None,
+    output_dir: Optional[Path] = None,
+    min_presence: Optional[int] = None,
     n_jobs: Optional[int] = None,
     max_threads_per_model: int = 2,
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     subset_occurrence: Optional[int] = None,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> pd.DataFrame:
     """Run the MaxEnt model training pipeline.
 
     Args:
+        project_config_path: Path to project-level config (paths, spatial, etc.)
+        model_config_path: Path to model hyperparameter config
+        variables_config_path: Path to variables config (roster + per-activity features)
         bats_file: Path to bat data file
         background_file: Path to background points file
         ev_file: Path to environmental variables file
@@ -613,74 +620,144 @@ def train_sdm_models(
     """
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
     logger.info("=== Starting SDM Model Training Pipeline ===")
-    
-    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load configs from the provided paths (or their defaults)
+    project_config = load_project_config(project_config_path)
+    model_cfg = load_model_config(model_config_path)
+    sampling_cfg = model_cfg.sampling
+    maxent_cfg = model_cfg.maxent
+
+    # Resolve sampling parameters (function arguments override config)
+    effective_min_presence = (
+        min_presence if min_presence is not None else sampling_cfg.min_presence
+    )
+    effective_subset_occurrence = (
+        subset_occurrence
+        if subset_occurrence is not None
+        else sampling_cfg.subset_occurrence
+    )
+
+    subset_background = sampling_cfg.subset_background
+    order_by_density_for_subset = sampling_cfg.order_by_density_for_subset
+    sample_weight_n_neighbors = sampling_cfg.sample_weight_n_neighbors
+    background_cfg = sampling_cfg.background
+    background_min_bg = background_cfg.min_bg
+    background_max_bg = background_cfg.max_bg
+    background_factor = background_cfg.factor
+
+    # Resolve variables config path (default from project config if not provided)
+    variables_config_path = (
+        variables_config_path
+        if variables_config_path is not None
+        else Path(project_config.paths.variables_config_path)
+    )
+    variables_cfg = load_variables_config(variables_config_path)
 
     # Configure MLflow from project config
-    logger.info("Configuring MLflow tracking...")
-    _configure_mlflow_from_config()
+    _configure_mlflow_from_config(project_config)
 
     # Load data
-    logger.info("=== Loading Input Data ===")
-    logger.info("Loading bat occurrence data...")
-    bats_ant = load_bat_data(bats_file)
+    logger.info("Loading input data...")
+
+    # Resolve data paths from config if not explicitly provided
+    bats_path = bats_file or Path(project_config.paths.occurence_data)
+    background_path = background_file or Path(project_config.paths.background_points)
+    ev_path = ev_file or Path(project_config.paths.ev_tiff)
+    grid_points_path = grid_points_file or Path(project_config.paths.grid_points)
+    models_output_dir = output_dir or Path(project_config.paths.models)
+
+    models_output_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.debug("Loading bat occurrence data...")
+    bats_ant = load_bat_data(bats_path)
+
+    logger.debug("Loading background points...")
+    background, background_density = load_background_points(background_path)
     
-    logger.info("Loading background points...")
-    background, background_density = load_background_points(background_file)
-    
-    logger.info("Loading environmental variables...")
-    ev_data, ev_raster_path = load_environmental_variables(ev_file)
-    ev_columns = list(ev_data.data_vars.keys())
-    logger.info(f"Found {len(ev_columns)} environmental variables")
+    logger.debug("Loading environmental variables...")
+    ev_data, ev_raster_path = load_environmental_variables(ev_path)
+    all_ev_columns = list(ev_data.data_vars.keys())
+    if variables_cfg.roster:
+        roster_matches = [col for col in all_ev_columns if col in variables_cfg.roster]
+        if roster_matches:
+            ev_columns = roster_matches
+            logger.debug(
+                "Filtered environmental variables to %d columns based on roster",
+                len(ev_columns),
+            )
+        else:
+            ev_columns = all_ev_columns
+            logger.warning(
+                "No roster variables matched available environmental variables; "
+                "using full set (%d columns).",
+                len(ev_columns),
+            )
+    else:
+        ev_columns = all_ev_columns
+        logger.debug(f"Found {len(ev_columns)} environmental variables")
 
     # Load grid points
-    logger.info("Loading grid points...")
-    if grid_points_file is None:
+    logger.debug("Loading grid points...")
+    if grid_points_path is None:
         grid_points = extract_grid_points(ev_data)
     else:
-        grid_points = gpd.read_parquet(grid_points_file)
+        grid_points = gpd.read_parquet(grid_points_path)
 
-    # Annotate points with environmental variables
-    logger.info("=== Annotating Points with Environmental Variables ===")
-    annotated_bats_gdf, annotated_background_gdf = annotate_points(
-        bats_ant, background, ev_raster_path, ev_columns
-    )
+    # Annotate points with environmental variables (skip if already annotated)
+    logger.info("Annotating points with environmental variables...")
+    # Check if data is already annotated by checking if EV columns exist
+    if all(col in bats_ant.columns for col in all_ev_columns[:5]):  # Check first 5 as a sample
+        logger.info("Data appears to be already annotated, skipping annotation")
+        annotated_bats_gdf = bats_ant
+        annotated_background_gdf = background
+    else:
+        annotated_bats_gdf, annotated_background_gdf = annotate_points(
+            bats_ant, background, ev_raster_path, all_ev_columns
+        )
+
+    def _filter_feature_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        base_cols = [col for col in gdf.columns if col not in all_ev_columns]
+        selected_feature_cols = [col for col in ev_columns if col in gdf.columns]
+        return gdf[base_cols + selected_feature_cols]
+
+    annotated_bats_gdf = _filter_feature_columns(annotated_bats_gdf)
+    annotated_background_gdf = _filter_feature_columns(annotated_background_gdf)
 
     # Filter species and activity types if specified
     if species is not None:
-        logger.info(f"Filtering to species: {', '.join(species)}")
+        logger.debug(f"Filtering to species: {', '.join(species)}")
         annotated_bats_gdf = annotated_bats_gdf[annotated_bats_gdf.latin_name.isin(species)]
     
     if activity_types is not None:
-        logger.info(f"Filtering to activity types: {', '.join(activity_types)}")
+        logger.debug(f"Filtering to activity types: {', '.join(activity_types)}")
         annotated_bats_gdf = annotated_bats_gdf[annotated_bats_gdf.activity_type.isin(activity_types)]
 
     latin_names = cast(List[str], annotated_bats_gdf.latin_name.unique().tolist())
     activity_types = cast(List[str], annotated_bats_gdf.activity_type.unique().tolist())
-    logger.info(f"Found {len(latin_names)} species and {len(activity_types)} activity types")
+    logger.info(f"Training models for {len(latin_names)} species × {len(activity_types)} activity types = {len(latin_names) * len(activity_types)} combinations")
 
-    # Configure model parameters
-    logger.info("=== Configuring Model Parameters ===")
+    # Configure model parameters (from config with sensible defaults)
+    logger.debug("Configuring model parameters...")
     model_config = DefaultMaxentConfig(
-        feature_types=["linear", "hinge"],  # Removed "product" and "quadratic" to reduce overfitting
-        beta_multiplier=3.0,  # Increased from 2.5 to 3.0 for stronger regularization
-        beta_lqp=1.0,
-        beta_hinge=1.0,
-        beta_threshold=1.0,
-        beta_categorical=1.0,
-        n_hinge_features=10,
-        n_threshold_features=10,
-        transform="cloglog",
-        clamp=False,  # Disabled clamping to prevent extrapolation
-        tau=0.5,
-        convergence_tolerance=1e-5,
-        use_lambdas="best",
-        n_lambdas=100,
-        class_weights="balanced",
+        feature_types=maxent_cfg.feature_types,
+        beta_multiplier=maxent_cfg.beta_multiplier,
+        beta_lqp=maxent_cfg.beta_lqp,
+        beta_hinge=maxent_cfg.beta_hinge,
+        beta_threshold=maxent_cfg.beta_threshold,
+        beta_categorical=maxent_cfg.beta_categorical,
+        n_hinge_features=maxent_cfg.n_hinge_features,
+        n_threshold_features=maxent_cfg.n_threshold_features,
+        transform=maxent_cfg.transform,
+        clamp=maxent_cfg.clamp,
+        tau=maxent_cfg.tau,
+        convergence_tolerance=maxent_cfg.convergence_tolerance,
+        use_lambdas=maxent_cfg.use_lambdas,
+        n_lambdas=maxent_cfg.n_lambdas,
+        class_weights=maxent_cfg.class_weights,
     )
 
     # Generate training data
-    logger.info("=== Generating Training Data ===")
+    logger.info("Generating training data...")
     training_data = generate_training_data(
         bats_ant=cast(gpd.GeoDataFrame, annotated_bats_gdf),
         background_points_gdf=cast(gpd.GeoDataFrame, annotated_background_gdf),
@@ -689,13 +766,37 @@ def train_sdm_models(
         latin_names=latin_names,
         activity_types=activity_types,
         ev_columns=ev_columns,
-        min_presence=min_presence,
-        subset=subset_occurrence,
+        min_presence=effective_min_presence,
+        subset=effective_subset_occurrence,
+        subset_background=subset_background,
+        order_by_density_for_subset=order_by_density_for_subset,
+        sample_weight_n_neighbors=sample_weight_n_neighbors,
+        background_min_bg=background_min_bg,
+        background_max_bg=background_max_bg,
+        background_factor=background_factor,
     )
 
     # Train models
-    logger.info("=== Training Models ===")
-    feature_selection = {str(k): v for k, v in get_feature_config().items()}
+    logger.info(f"Training {len(training_data)} models...")
+    raw_feature_selection = get_feature_config(variables_cfg.activity_feature_sets)
+    feature_selection: Dict[ActivityType, List[str]] = {}
+    for activity, features in raw_feature_selection.items():
+        filtered = [feat for feat in features if feat in ev_columns]
+        missing = [feat for feat in features if feat not in ev_columns]
+        if missing:
+            logger.warning(
+                "Feature(s) not found for %s: %s",
+                activity.value,
+                ", ".join(missing),
+            )
+        if not filtered:
+            logger.warning(
+                "No valid features remain for %s; defaulting to %d available variables",
+                activity.value,
+                len(ev_columns),
+            )
+            filtered = ev_columns
+        feature_selection[activity] = filtered
     models = train_models_parallel(
         training_data, 
         feature_selection,
@@ -705,20 +806,20 @@ def train_sdm_models(
     )
 
     # Prepare and save results
-    logger.info("=== Saving Results ===")
+    logger.info("Saving results...")
     results_df = prepare_results_dataframe(models, training_data)
-    model_paths = save_models(models, output_dir)
+    model_paths = save_models(models, models_output_dir)
     
     # Add model paths to results
     results_df["model_path"] = [str(model_paths[identifier]) for identifier in results_df["identifier"]]
     
     # Save results and training data
-    save_results(results_df, output_dir)
-    save_training_data(training_data, output_dir)
+    save_results(results_df, models_output_dir)
+    save_training_data(training_data, models_output_dir)
 
     # Log to MLflow
-    logger.info("=== Logging to MLflow ===")
+    logger.info("Logging to MLflow...")
     log_models_to_mlflow(models, training_data, results_df)
 
-    logger.info("=== SDM Model Training Pipeline Complete ===")
+    logger.info("✓ Training pipeline complete")
     return results_df

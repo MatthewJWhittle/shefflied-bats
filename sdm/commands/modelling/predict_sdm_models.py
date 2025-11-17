@@ -11,7 +11,6 @@ from typing import Optional, List, Any, Dict
 import pickle
 
 import pandas as pd
-import rioxarray as rxr
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.raster.io import load_environmental_variables
@@ -102,7 +101,6 @@ def make_predictions(
             models=models,
             raster_path=ev_raster,
             output_path=output_path,
-            feature_names=feature_names,
             window_size=128,
         )
         logger.info(f"Successfully generated predictions for {len(models)} models")

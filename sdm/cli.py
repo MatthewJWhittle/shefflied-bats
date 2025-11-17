@@ -2,16 +2,18 @@
 Simplified CLI for SDM project using config defaults.
 """
 
-import typer
-from typing import Optional, List
-from pathlib import Path
 import logging
+from pathlib import Path
+from typing import Optional, List
 
-from sdm.utils.io import load_config
+import typer
+
+from sdm.utils.io import load_project_config
 from sdm.utils.logging_utils import setup_logging
+from sdm.types import ProjectConfig
 
-# Load default config
-CONFIG = load_config()
+# Load project-level config once for CLI defaults
+PROJECT_CONFIG: ProjectConfig = load_project_config()
 
 app = typer.Typer(
     name="sdm",
@@ -29,13 +31,13 @@ def setup(
     
     setup_logging(verbose=verbose)
     
-    boundary_path = Path(CONFIG["paths"]["boundary"])
+    boundary_path = Path(PROJECT_CONFIG.paths.boundary)
     counties_path = counties_file or Path("data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson")
     
     boundary_gdf = create_boundary(
         counties_file=counties_path,
         county_names=None,  # Yorkshire default
-        target_crs=CONFIG["crs"],
+        target_crs=PROJECT_CONFIG.crs,
         simplify_tolerance=100.0
     )
     
@@ -59,7 +61,7 @@ def data(
     
     setup_logging(verbose=verbose)
     
-    boundary_path = Path(CONFIG["paths"]["boundary"])
+    boundary_path = Path(PROJECT_CONFIG.paths.boundary)
     evs_dir = Path("data/evs")
     
     logging.info("Generating all environmental data layers...")
@@ -139,7 +141,7 @@ def data(
             "os_distance=evs/os-distance-to-feature.tif"
         ],
         boundary_path=boundary_path,
-        output_path=Path(CONFIG["paths"]["ev_tiff"]),
+        output_path=Path(PROJECT_CONFIG.paths.ev_tiff),
         verbose=verbose
     )
     
@@ -147,29 +149,71 @@ def data(
 
 @app.command()
 def background(
-    verbose: bool = False
+    occurrence_data_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.occurence_data),
+        help="Path to bat occurrence data used to generate background points.",
+    ),
+    boundary_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.boundary),
+        help="Path to study boundary for background generation.",
+    ),
+    output_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.processed_data) / "background_generation",
+        help="Directory to write background generation outputs.",
+    ),
+    background_points_output_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.background_points),
+        help="Path to write background points GeoJSON.",
+    ),
+    verbose: bool = False,
 ) -> None:
     """Generate background points for modeling."""
-    from sdm.commands.data_preparation.spatial.generate_background_points import generate_background_points_wrapper
-    
-    setup_logging(verbose=verbose)
-    
-    # Generate background points and write directly to expected location
-    bg_points_path, density_raster_path = generate_background_points_wrapper(
-        occurrence_data_path=Path(CONFIG["paths"]["occurence_data"]),
-        boundary_path=Path(CONFIG["paths"]["boundary"]),
-        output_dir=Path(CONFIG["paths"]["processed_data"]) / "background_generation",
-        background_points_output_path=Path(CONFIG["paths"]["background_points"]),
-        verbose=verbose
+    from sdm.commands.data_preparation.spatial.generate_background_points import (
+        generate_background_points_wrapper,
     )
-    
+
+    setup_logging(verbose=verbose)
+
+    # Generate background points and write directly to expected location
+    _bg_points_path, _density_raster_path = generate_background_points_wrapper(
+        occurrence_data_path=occurrence_data_path,
+        boundary_path=boundary_path,
+        output_dir=output_dir,
+        background_points_output_path=background_points_output_path,
+        verbose=verbose,
+    )
+
     logging.info("Background points generated!")
 
 @app.command()
 def train(
+    bats_file: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.occurence_data),
+        help="Path to bat occurrence data.",
+    ),
+    background_file: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.background_points),
+        help="Path to background points data.",
+    ),
+    ev_file: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.ev_tiff),
+        help="Path to environmental variables raster.",
+    ),
+    output_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.models),
+        help="Directory to write trained models and results.",
+    ),
+    model_config_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.model_config_path),
+        help="Path to model/training configuration YAML.",
+    ),
+    variables_config_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.variables_config_path),
+        help="Path to variables configuration YAML.",
+    ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> None:
     """Train SDM models."""
     from sdm.commands.modelling.train_sdm_models import train_sdm_models
@@ -177,22 +221,36 @@ def train(
     setup_logging(verbose=verbose)
     
     train_sdm_models(
-        bats_file=Path(CONFIG["paths"]["occurence_data"]),
-        background_file=Path(CONFIG["paths"]["background_points"]),
-        ev_file=Path(CONFIG["paths"]["ev_tiff"]),
-        output_dir=Path(CONFIG["paths"]["models"]),
+        model_config_path=model_config_path,
+        variables_config_path=variables_config_path,
+        bats_file=bats_file,
+        background_file=background_file,
+        ev_file=ev_file,
+        output_dir=output_dir,
         species=species,
         activity_types=activity_types,
-        verbose=verbose
+        verbose=verbose,
     )
     
     logging.info("Model training complete!")
 
 @app.command()
 def predict(
+    ev_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.ev_tiff),
+        help="Path to environmental variables raster.",
+    ),
+    models_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.models),
+        help="Directory containing trained models.",
+    ),
+    output_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.predictions),
+        help="Directory to write prediction rasters.",
+    ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> None:
     """Generate model predictions."""
     from sdm.commands.modelling.predict_sdm_models import predict_sdm_models
@@ -200,21 +258,33 @@ def predict(
     setup_logging(verbose=verbose)
     
     predict_sdm_models(
-        ev_path=Path(CONFIG["paths"]["ev_tiff"]),
-        models_dir=Path(CONFIG["paths"]["models"]),
-        output_dir=Path(CONFIG["paths"]["predictions"]),
+        ev_path=ev_path,
+        models_dir=models_dir,
+        output_dir=output_dir,
         species=species,
         activity_types=activity_types,
-        verbose=verbose
+        verbose=verbose,
     )
     
     logging.info("Predictions generated!")
 
 @app.command()
 def visualize(
+    run_summary_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.predictions) / "results.csv",
+        help="Path to model run summary CSV.",
+    ),
+    ev_raster_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.ev_tiff),
+        help="Path to environmental variables raster.",
+    ),
+    visualisations_output_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.predictions) / "visualization",
+        help="Directory to write visualizations.",
+    ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> None:
     """Generate model visualizations."""
     from sdm.commands.visualization.visualise_model_outputs import generate_model_visualisations
@@ -222,12 +292,12 @@ def visualize(
     setup_logging(verbose=verbose)
     
     generate_model_visualisations(
-        run_summary_path=Path(CONFIG["paths"]["predictions"]) / "results.csv",
-        ev_raster_path=Path(CONFIG["paths"]["ev_tiff"]),
-        visualisations_output_dir=Path(CONFIG["paths"]["predictions"]) / "visualization",
+        run_summary_path=run_summary_path,
+        ev_raster_path=ev_raster_path,
+        visualisations_output_dir=visualisations_output_dir,
         species_filter=species,
         activity_filter=activity_types,
-        verbose=verbose
+        verbose=verbose,
     )
     
     logging.info("Visualizations generated!")
@@ -310,3 +380,118 @@ def config(
     print("Current Configuration:")
     print("=" * 50)
     print(yaml.dump(config, default_flow_style=False, sort_keys=False))
+
+@app.command()
+def split_raster(
+    input_raster: Path = typer.Argument(
+        ...,
+        help="Path to the input multi-band raster file.",
+    ),
+    output_dir: Path = typer.Option(
+        ...,
+        help="Directory to write output single-band rasters.",
+    ),
+    output_prefix: Optional[str] = typer.Option(
+        None,
+        help="Prefix for output filenames. If not provided, uses input filename stem.",
+    ),
+    use_band_names: bool = typer.Option(
+        True,
+        help="Use band descriptions/names in output filenames. If False, use band numbers.",
+    ),
+    window_size: int = typer.Option(
+        1024,
+        help="Size of processing windows for efficient I/O.",
+    ),
+    verbose: bool = False,
+) -> None:
+    """Split a multi-band raster into separate single-band rasters."""
+    from sdm.commands.data_preparation.raster.split_raster_by_band import split_raster_by_band
+    
+    setup_logging(verbose=verbose)
+    
+    output_paths = split_raster_by_band(
+        input_raster=input_raster,
+        output_dir=output_dir,
+        output_prefix=output_prefix,
+        use_band_names=use_band_names,
+        window_size=window_size,
+    )
+    
+    logging.info(f"Split raster into {len(output_paths)} files in {output_dir}")
+
+@app.command()
+def tune(
+    bats_file: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.occurence_data),
+        help="Path to bat occurrence data.",
+    ),
+    background_file: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.background_points),
+        help="Path to background points data.",
+    ),
+    ev_file: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.ev_tiff),
+        help="Path to environmental variables raster.",
+    ),
+    output_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.models) / "tuning",
+        help="Directory to write tuning results and best configs.",
+    ),
+    model_config_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.model_config_path),
+        help="Path to base model/training configuration YAML.",
+    ),
+    variables_config_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.variables_config_path),
+        help="Path to base variables configuration YAML.",
+    ),
+    grid_points_file: Optional[Path] = typer.Option(
+        None,
+        help="Path to grid points file (optional).",
+    ),
+    n_trials: int = typer.Option(
+        50,
+        help="Number of Optuna trials to run.",
+    ),
+    subset_occurrence: int = typer.Option(
+        300,
+        help="Number of occurrence records to use for tuning (for speed).",
+    ),
+    species: Optional[List[str]] = None,
+    activity_types: Optional[List[str]] = None,
+    study_name: Optional[str] = typer.Option(
+        None,
+        help="Name for Optuna study (optional).",
+    ),
+    storage: Optional[str] = typer.Option(
+        None,
+        help="Optuna storage URL for distributed tuning (optional).",
+    ),
+    verbose: bool = False,
+) -> None:
+    """Tune hyperparameters for SDM models using Optuna."""
+    from sdm.commands.modelling.tune_hyperparameters import tune_hyperparameters
+    
+    setup_logging(verbose=verbose)
+    
+    study = tune_hyperparameters(
+        project_config_path=Path("config.yml"),
+        model_config_path=model_config_path,
+        variables_config_path=variables_config_path,
+        bats_file=bats_file,
+        background_file=background_file,
+        ev_file=ev_file,
+        output_dir=output_dir,
+        grid_points_file=grid_points_file,
+        n_trials=n_trials,
+        subset_occurrence=subset_occurrence,
+        species=species,
+        activity_types=activity_types,
+        study_name=study_name,
+        storage=storage,
+        verbose=verbose,
+    )
+    
+    logging.info(f"Tuning complete! Best mean CV AUC: {study.best_value:.4f}")
+    logging.info(f"Best configs written to {output_dir}")

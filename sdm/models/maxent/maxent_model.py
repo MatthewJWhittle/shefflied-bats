@@ -1,7 +1,7 @@
 # Core MaxEnt (Elapid-based) model training, evaluation, and prediction logic.
 import warnings
 import logging
-from typing import List, Tuple, Optional, Callable, Any, Union, Dict # Added Union, Dict
+from typing import List, Tuple, Optional, Callable, Any, Union, Dict
 from pathlib import Path
 from enum import StrEnum # Added StrEnum import
 
@@ -198,9 +198,9 @@ def cross_validate_maxent_model(
     fold_metrics = []
     trained_models = []
 
-    logger.info(f"Starting {n_folds}-fold geographic cross-validation...")
+    logger.debug(f"Starting {n_folds}-fold geographic cross-validation...")
     for i, (train_idx, test_idx) in enumerate(gfolds.split(occurrence_gdf)):
-        logger.info(f"Processing fold {i+1}/{n_folds}")
+        logger.debug(f"Processing fold {i+1}/{n_folds}")
         current_model = clone(model) # Use a fresh clone for each fold
 
         X_train, y_train, w_train = extract_split_data(occurrence_gdf, train_idx, feature_columns=feature_columns)
@@ -246,7 +246,7 @@ def cross_validate_maxent_model(
             metric_value = metric_fn(y_test, y_pred_proba)
             fold_metrics.append(metric_value)
             trained_models.append(current_model)
-            logger.info(f"Fold {i+1} metric ({metric_fn.__name__}): {metric_value:.4f}")
+            logger.debug(f"Fold {i+1} metric ({metric_fn.__name__}): {metric_value:.4f}")
         except Exception as e:
             logger.error(f"Error during training/evaluation of fold {i+1}: {e}", exc_info=True)
             fold_metrics.append(np.nan)
@@ -270,7 +270,7 @@ def train_final_maxent_model(
     feature_columns: Optional[List[str]] = None
 ) -> BaseEstimator:
     """Train final model on all data, handling sample weights with NaN values."""
-    logger.info("Training final model on all data...")
+    logger.debug("Training final model on all data...")
     final_model = clone(model)
     train_idx = np.arange(len(occurrence_gdf))
     X_train, y_train, w_train = extract_split_data(occurrence_gdf, train_idx, feature_columns=feature_columns)
@@ -287,7 +287,7 @@ def train_final_maxent_model(
             fit_params['sample_weight'] = w_train
             
     final_model.fit(X_train, y_train, **fit_params)
-    logger.info("Final model training complete.")
+    logger.debug("Final model training complete.")
     return final_model
 
 
@@ -314,7 +314,7 @@ def evaluate_and_train_maxent_model(
     Returns:
         Tuple of (final_trained_model, cv_models, cv_scores).
     """
-    logger.info("Starting model evaluation and final training process...")
+    logger.debug("Starting model evaluation and final training process...")
     cv_models, cv_scores = cross_validate_maxent_model(
         model=model, # Pass the original model for cloning inside CV
         occurrence_gdf=occurrence_gdf,
@@ -323,11 +323,11 @@ def evaluate_and_train_maxent_model(
         feature_columns=feature_columns,
     )
     
-    # Log CV results only if we have valid scores
+    # Log CV results only if we have valid scores (keep as debug, summary will be logged at higher level)
     if len(cv_scores) > 0 and not np.all(np.isnan(cv_scores)):
         valid_scores = cv_scores[~np.isnan(cv_scores)]
         if len(valid_scores) > 0:
-            logger.info(f"CV Mean {metric_fn.__name__}: {np.mean(valid_scores):.4f} (+/- {np.std(valid_scores):.4f})")
+            logger.debug(f"CV Mean {metric_fn.__name__}: {np.mean(valid_scores):.4f} (+/- {np.std(valid_scores):.4f})")
         else:
             logger.warning(f"No valid CV scores available")
     else:
@@ -445,10 +445,26 @@ class ActivityType(StrEnum):
     ROOST = "Roost"
     IN_FLIGHT = "In flight"
 
-def get_feature_config() -> Dict[ActivityType, List[str]]: # Changed to use ActivityType enum
+
+def get_feature_config(
+    activity_feature_sets: Optional[Dict[str, List[str]]] = None,
+) -> Dict[ActivityType, List[str]]:
     """
     Gets the list of feature names to include in the model for different activity types.
+    Allows overriding via a configuration mapping keyed by activity name.
     """
+    if activity_feature_sets:
+        resolved: Dict[ActivityType, List[str]] = {}
+        for activity_name, features in activity_feature_sets.items():
+            try:
+                activity_enum = ActivityType(activity_name)
+                resolved[activity_enum] = features
+            except ValueError:
+                logger.warning("Unknown activity type '%s' in variables config", activity_name)
+        if resolved:
+            return resolved
+
+    # Fallback defaults
     return {
         ActivityType.IN_FLIGHT: [
             "ceh_landcover_improved_grassland",
@@ -493,7 +509,7 @@ def get_feature_config() -> Dict[ActivityType, List[str]]: # Changed to use Acti
             "ceh_landcover_grassland",
             "climate_stats_temp_ann_avg",
         ],
-    } 
+    }
 
 
 

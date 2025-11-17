@@ -10,7 +10,9 @@ import geopandas as gpd
 from affine import Affine
 import pickle
 import pandas as pd
+
 from sdm.raster.utils import construct_transform_shift_bounds
+from sdm.types import ProjectConfig, ModelConfig, VariablesConfig
 
 
 def set_project_wd(verbose=True):
@@ -25,6 +27,8 @@ def set_project_wd(verbose=True):
     return None
 
 CONFIG_PATH = Path(here(".")) / "config.yml"
+MODEL_CONFIG_PATH = Path(here(".")) / "model_config.yml"
+VARIABLES_CONFIG_PATH = Path(here(".")) / "variables_config.yml"
 
 def load_config(config_path: Union[str, Path] = CONFIG_PATH) -> Dict:
     """Loads the YAML configuration file."""
@@ -37,6 +41,12 @@ def load_config(config_path: Union[str, Path] = CONFIG_PATH) -> Dict:
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     return config
+
+
+def load_project_config(config_path: Union[str, Path] = CONFIG_PATH) -> ProjectConfig:
+    """Load project-level configuration as a Pydantic model."""
+    raw = load_config(config_path)
+    return ProjectConfig(**raw)
 
 def load_boundary(
     filepath : Union[str, Path],
@@ -75,20 +85,50 @@ def load_spatial_config() -> Dict:
     return spatial_config
 
 def load_input_variables() -> list:
-    """Load input variables from the main config.yml file."""
-    main_config = load_config()
-    if "input_variables" not in main_config:
-        raise KeyError(f"No 'input_variables' section found in {CONFIG_PATH}")
-    
-    return main_config["input_variables"]
+    """Deprecated helper; input variables moved to variables_config.yml."""
+    raise RuntimeError(
+        "Input variables are now stored in variables_config.yml. "
+        "Use load_variables_config() instead."
+    )
 
-def load_model_config() -> Dict:
-    """Load model configuration from the main config.yml file."""
-    main_config = load_config()
-    if "model" not in main_config:
-        raise KeyError(f"No 'model' section found in {CONFIG_PATH}")
-    
-    return main_config["model"]
+def load_model_config(config_path: Union[str, Path] = MODEL_CONFIG_PATH) -> ModelConfig:
+    """Load model configuration from model_config.yml as a Pydantic model."""
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Model config file not found at {config_path}. "
+            "Create a model_config.yml file in the root of the project."
+        )
+
+    with open(config_path, "r") as f:
+        raw = yaml.safe_load(f) or {}
+
+    model_section = raw.get("model")
+    if model_section is None:
+        raise KeyError(f"No 'model' section found in {config_path}")
+
+    return ModelConfig(**model_section)
+
+
+def load_variables_config(
+    config_path: Union[str, Path] = VARIABLES_CONFIG_PATH,
+) -> VariablesConfig:
+    """Load variables configuration for tuning and feature selection."""
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Variables config file not found at {config_path}. "
+            "Create variables_config.yml or provide a custom path."
+        )
+
+    with open(config_path, "r") as f:
+        raw = yaml.safe_load(f) or {}
+
+    variables_section = raw.get("variables")
+    if variables_section is None:
+        raise KeyError(f"No 'variables' section found in {config_path}")
+
+    return VariablesConfig(**variables_section)
 
 def load_boundary_and_transform(
         boundary_path: Union[str, Path],
