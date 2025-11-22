@@ -39,7 +39,7 @@ def load_os_shps(
         try:
             gdf = gpd.read_file(shp_path)
             results[dataset] = gdf
-            logger.info(f"Loaded {dataset} from {shp_path}")
+            logger.debug(f"Loaded {dataset} from {shp_path}")
         except Exception as e:
             logger.error(f"Error loading {dataset}: {e}")
             
@@ -68,7 +68,7 @@ def load_bat_data(
             gdf = gpd.read_file(bats_path)
         if 'coordinateUncertaintyInMeters' in gdf.columns:
             gdf = gdf[gdf['coordinateUncertaintyInMeters'] <= accuracy_threshold]
-        logger.info(f"Loaded {len(gdf)} bat records from {bats_path}")
+        logger.debug(f"Loaded {len(gdf)} bat records from {bats_path}")
         return gdf
     except Exception as e:
         logger.error(f"Error loading bat data: {e}")
@@ -94,7 +94,7 @@ def load_background_points(
         else:
             gdf = gpd.read_file(background_path)
         weights = gdf['weight'] if 'weight' in gdf.columns else pd.Series(1, index=gdf.index)
-        logger.info(f"Loaded {len(gdf)} background points from {background_path}")
+        logger.debug(f"Loaded {len(gdf)} background points from {background_path}")
         return gdf, weights
     except Exception as e:
         logger.error(f"Error loading background points: {e}")

@@ -468,6 +468,14 @@ def tune(
         None,
         help="Optuna storage URL for distributed tuning (optional).",
     ),
+    n_jobs: int = typer.Option(
+        1,
+        help="Number of parallel jobs for running trials. Use >1 for parallel execution (faster but uses more CPU/memory).",
+    ),
+    n_cv_folds: int = typer.Option(
+        2,
+        help="Number of CV folds for tuning (default: 2, faster than 3). Use 3 for more reliable estimates.",
+    ),
     verbose: bool = False,
 ) -> None:
     """Tune hyperparameters for SDM models using Optuna."""
@@ -490,6 +498,8 @@ def tune(
         activity_types=activity_types,
         study_name=study_name,
         storage=storage,
+        n_jobs=n_jobs,
+        n_cv_folds=n_cv_folds,
         verbose=verbose,
     )
     

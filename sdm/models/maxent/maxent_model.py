@@ -208,13 +208,13 @@ def cross_validate_maxent_model(
 
         # Check both training and test sets have both classes
         if len(y_train.unique()) < 2:
-            logger.warning(f"Skipping fold {i+1} due to only one class in the training set.")
+            logger.debug(f"Skipping fold {i+1} due to only one class in the training set.")
             fold_metrics.append(np.nan)
             trained_models.append(None)
             continue
             
         if len(y_test.unique()) < 2:
-            logger.warning(f"Skipping fold {i+1} due to only one class in the test set.")
+            logger.debug(f"Skipping fold {i+1} due to only one class in the test set.")
             fold_metrics.append(np.nan)
             trained_models.append(None)
             continue
@@ -243,12 +243,28 @@ def cross_validate_maxent_model(
             current_model.fit(X_train, y_train, **fit_params)
             
             y_pred_proba = current_model.predict_proba(X_test)[:, 1] # Probability of class 1
+            
+            # Check for NaN values in predictions
+            if np.any(np.isnan(y_pred_proba)) or np.any(np.isinf(y_pred_proba)):
+                logger.warning(f"Fold {i+1}: Predictions contain NaN/Inf values, skipping fold")
+                fold_metrics.append(np.nan)
+                trained_models.append(None)
+                continue
+            
             metric_value = metric_fn(y_test, y_pred_proba)
+            
+            # Check if metric is valid
+            if np.isnan(metric_value) or np.isinf(metric_value):
+                logger.warning(f"Fold {i+1}: Metric value is NaN/Inf, skipping fold")
+                fold_metrics.append(np.nan)
+                trained_models.append(None)
+                continue
+                
             fold_metrics.append(metric_value)
             trained_models.append(current_model)
             logger.debug(f"Fold {i+1} metric ({metric_fn.__name__}): {metric_value:.4f}")
         except Exception as e:
-            logger.error(f"Error during training/evaluation of fold {i+1}: {e}", exc_info=True)
+            logger.debug(f"Error during training/evaluation of fold {i+1}: {e}")
             fold_metrics.append(np.nan)
             trained_models.append(None)
 

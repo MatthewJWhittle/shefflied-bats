@@ -62,7 +62,7 @@ def make_predictions(
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Load all models
-    logger.info("Loading models...")
+    logger.debug("Loading models...")
     models: Dict[str, Any] = {}
     feature_names = None
     
@@ -84,7 +84,7 @@ def make_predictions(
                     logger.debug(f"Using feature subset: {feature_names}")
             
             models[model_id] = model
-            logger.info(f"Loaded model for {model_id}")
+            logger.debug(f"Loaded model for {model_id}")
             
         except Exception as e:
             logger.error(f"Failed to load model for {model_id}: {e}")
@@ -93,7 +93,7 @@ def make_predictions(
         raise ValueError("No models were successfully loaded")
     
     # Generate predictions
-    logger.info("=== Generating Predictions ===")
+    logger.info(f"Generating predictions for {len(models)} models...")
     output_path = output_dir / "all_predictions.tif"
     
     try:
@@ -103,7 +103,7 @@ def make_predictions(
             output_path=output_path,
             window_size=128,
         )
-        logger.info(f"Successfully generated predictions for {len(models)} models")
+        logger.debug(f"Successfully generated predictions for {len(models)} models")
         
         # Update results with success status
         filtered_index["success"] = True
@@ -117,7 +117,7 @@ def make_predictions(
     # Save results summary
     results_path = output_dir / "prediction_results.csv"
     filtered_index.to_csv(results_path, index=False)
-    logger.info(f"Prediction results saved to {results_path}")
+    logger.debug(f"Prediction results saved to {results_path}")
     
     return filtered_index
 
@@ -148,10 +148,10 @@ def predict_sdm_models(
     """
     setup_logging(level=logging.INFO, verbose=verbose)
     
-    logger.info("=== Starting SDM Model Inference Pipeline ===")
+    logger.info("Starting prediction pipeline...")
     
     # Load model index
-    logger.info("Loading model index...")
+    logger.debug("Loading model index...")
     model_index = load_model_index(models_dir)
     logger.info(f"Found {len(model_index)} models in index")
     
@@ -164,11 +164,10 @@ def predict_sdm_models(
         raise ValueError("No models match the specified criteria")
     
     # Load environmental variables
-    logger.info("Loading environmental variables...")
+    logger.debug("Loading environmental variables...")
     _, ev_raster = load_environmental_variables(ev_path)
     
     # Generate predictions
-    logger.info("=== Starting Prediction Generation ===")
     results_df = make_predictions(
         filtered_index,
         models_dir,
@@ -176,5 +175,5 @@ def predict_sdm_models(
         output_dir
     )
     
-    logger.info("=== SDM Model Inference Pipeline Complete ===")
+    logger.info("✓ Prediction pipeline complete")
     return results_df 

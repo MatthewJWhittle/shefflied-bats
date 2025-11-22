@@ -39,12 +39,12 @@ def save_trained_model(
     model_path = model_sub_dir / model_filename
     with open(model_path, "wb") as f:
         pickle.dump(model_object, f)
-    logger.info(f"Saved model object to: {model_path}")
+    logger.debug(f"Saved model object to: {model_path}")
 
     features_path = model_sub_dir / "features.json"
     with open(features_path, "w") as f:
         json.dump(feature_names, f)
-    logger.info(f"Saved model features to: {features_path}")
+    logger.debug(f"Saved model features to: {features_path}")
     
     return model_path
 
@@ -109,7 +109,7 @@ def log_model_run_to_mlflow(
             else:
                 logger.warning(f"Model file not found at {model_path}, cannot log model to MLflow.")
             
-            logger.info(f"Successfully logged run to MLflow: {run.info.run_name}")
+            logger.debug(f"Successfully logged run to MLflow: {run.info.run_name}")
 
     except Exception as e:
         logger.error(f"Error logging model to MLflow for {model_run_series['species']} - {model_run_series['activity']}: {e}", exc_info=True)
@@ -130,7 +130,7 @@ def train_single_model(
     """Train a single model for a species and activity type combination."""
     
     activity_type_enum = ActivityType(activity_type)
-    logger.info(f"Processing model for: {species_name} - {activity_type_enum.value}")
+    logger.debug(f"Processing model for: {species_name} - {activity_type_enum.value}")
 
     # Initialize variables
     mean_cv_score = np.nan
@@ -237,7 +237,7 @@ def train_single_model(
                 
                 mean_cv_score = np.nanmean(cv_scores) if cv_scores.size > 0 else np.nan
                 std_cv_score = np.nanstd(cv_scores) if cv_scores.size > 0 else np.nan
-                logger.info(f"Model for {species_name} - {activity_type_enum.value}: Mean CV Score = {mean_cv_score:.4f}")
+                logger.debug(f"Model for {species_name} - {activity_type_enum.value}: Mean CV Score = {mean_cv_score:.4f}")
 
                 # Save model
                 saved_model_path = save_trained_model(
@@ -252,7 +252,7 @@ def train_single_model(
                 # Generate prediction raster if requested
                 if generate_prediction_rasters and ev_raster_path:
                     try:
-                        logger.info(f"Generating prediction raster for {species_name} - {activity_type_enum.value}...")
+                        logger.debug(f"Generating prediction raster for {species_name} - {activity_type_enum.value}...")
                         pred_output_dir = output_dir / "predictions" / f"{species_name.replace(' ', '_')}_{activity_type_enum.value.replace(' ', '_').lower()}"
                         pred_output_dir.mkdir(parents=True, exist_ok=True)
                         
@@ -265,7 +265,7 @@ def train_single_model(
                             output_path=str(current_prediction_raster_path)
                         )
                         prediction_raster_path_str = str(current_prediction_raster_path)
-                        logger.info(f"Prediction raster saved to: {prediction_raster_path_str}")
+                        logger.debug(f"Prediction raster saved to: {prediction_raster_path_str}")
 
                     except Exception as e_pred:
                         logger.error(f"Error generating prediction raster for {species_name} - {activity_type_enum.value}: {e_pred}", exc_info=True)
