@@ -7,34 +7,68 @@ This module implements hyperparameter optimization for MaxEnt models, including:
 - Background point sampling parameters
 """
 
+import json
 import logging
-import shutil
-import tempfile
+import warnings
+from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
-import geopandas as gpd
 import mlflow
+import numpy as np
 import optuna
 import yaml
-import numpy as np
-from datetime import datetime
-from optuna.samplers import TPESampler
 from optuna.pruners import MedianPruner
+from optuna.samplers import TPESampler
 
-from sdm.commands.modelling.train_sdm_models import train_sdm_models
-from sdm.data.loaders.vector import load_background_points, load_bat_data
-from sdm.data.processing import annotate_points
-from sdm.raster.io import load_environmental_variables
+from sdm.commands.modelling.train_sdm_models import (
+    TrainingSetup,
+    _summarize_cv_scores,
+    setup_training_data,
+    train_models_with_setup,
+)
+from sdm.models.maxent.maxent_model import ActivityType, DefaultMaxentConfig
+from sdm.types import ModelConfig, VariablesConfig, TrainingResults
 from sdm.utils.io import (
-    load_project_config,
     load_model_config,
+    load_project_config,
     load_variables_config,
 )
 from sdm.utils.logging_utils import setup_logging
-from sdm.types import ModelConfig, VariablesConfig
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def suppress_logs_and_warnings():
+    """Context manager to suppress verbose logging and warnings during trial execution."""
+    # Suppress warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=UserWarning)
+        warnings.filterwarnings("ignore", message="invalid value encountered")
+        
+        # Temporarily reduce logging level for verbose modules
+        old_levels = {}
+        modules_to_quiet = [
+            'sdm.commands.modelling.train_sdm_models',
+            'sdm.models.maxent.maxent_model',
+            'sdm.data.processing',
+            'elapid',
+        ]
+        
+        for module_name in modules_to_quiet:
+            module_logger = logging.getLogger(module_name)
+            old_levels[module_name] = module_logger.level
+            module_logger.setLevel(logging.ERROR)
+        
+        try:
+            yield
+        finally:
+            # Restore logging levels
+            for module_name, level in old_levels.items():
+                logging.getLogger(module_name).setLevel(level)
 
 
 def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict:
@@ -129,12 +163,65 @@ def suggest_sampling_hyperparameters(trial: optuna.Trial) -> Dict:
     }
 
 
+def _apply_feature_bounds(
+    trial: optuna.Trial,
+    activity_type: str,
+    selected: List[str],
+    roster: List[str],
+    min_features: int = 5,
+    max_features: int = 30,
+) -> List[str]:
+    """Apply minimum and maximum feature bounds.
+    
+    Args:
+        trial: Optuna trial object
+        activity_type: Activity type name
+        selected: Currently selected features
+        roster: Full list of available features
+        min_features: Minimum number of features required
+        max_features: Maximum number of features allowed
+        
+    Returns:
+        Bounded list of selected features
+    """
+    # Ensure minimum number of features
+    if len(selected) < min_features:
+        remaining = [f for f in roster if f not in selected]
+        n_needed = min_features - len(selected)
+        selected.extend(remaining[:n_needed])
+    
+    # Limit to maximum features if needed
+    if len(selected) > max_features:
+        # Use Optuna to prioritize which features to keep
+        feature_priorities = {}
+        for feature in selected:
+            priority_key = f"priority_{activity_type}_{feature}"
+            priority = trial.suggest_float(priority_key, 0.0, 1.0)
+            feature_priorities[feature] = priority
+        
+        # Keep top features by priority
+        sorted_features = sorted(
+            feature_priorities.items(), key=lambda x: x[1], reverse=True
+        )
+        selected = [f for f, _ in sorted_features[:max_features]]
+    
+    return selected
+
+
 def suggest_feature_selection(
-    trial: optuna.Trial, roster: List[str], activity_types: List[str]
+    trial: optuna.Trial, 
+    roster: List[str], 
+    activity_types: List[str],
 ) -> Dict[str, List[str]]:
     """Suggest feature selection from Optuna trial.
     
-    Uses a binary selection approach where Optuna suggests which features to include.
+    Uses Optuna to learn which features work best by suggesting binary inclusion
+    for each feature. Each feature gets a parameter key "{activity_type}_{feature}"
+    with values [True, False]. This allows Optuna's TPE sampler to learn which
+    features contribute most to model performance.
+    
+    This approach is simpler and more direct than using candidate sets - Optuna
+    can learn from all features in the roster simultaneously.
     
     Args:
         trial: Optuna trial object
@@ -147,59 +234,318 @@ def suggest_feature_selection(
     activity_feature_sets = {}
     
     for activity_type in activity_types:
-        # Sample number of features to use (between 5 and min(30, len(roster)))
-        n_features = trial.suggest_int(
-            f"n_features_{activity_type}",
-            5,
-            min(30, len(roster)),
-        )
-        
-        # Use a deterministic but varied selection based on trial number
-        # This ensures reproducibility while still exploring different combinations
-        # We'll use a hash-based approach to select features
+        # For each feature in the roster, let Optuna decide whether to include it
+        # Use feature name as the parameter key: "{activity_type}_{feature}"
         selected = []
-        trial_seed = hash((trial.number, activity_type)) % (2**32)
-        np.random.seed(trial_seed)
+        for feature in roster:
+            include_key = f"{activity_type}_{feature}"
+            include = trial.suggest_categorical(include_key, [True, False])
+            if include:
+                selected.append(feature)
         
-        # Sample without replacement
-        selected_indices = np.random.choice(
-            len(roster), size=min(n_features, len(roster)), replace=False
+        # Apply minimum and maximum bounds
+        selected = _apply_feature_bounds(trial, activity_type, selected, roster)
+        
+        activity_feature_sets[activity_type] = selected
+    
+    return activity_feature_sets
+    
+
+
+
+def _calculate_mean_cv_auc(models: List[TrainingResults]) -> float:
+    """Calculate mean CV AUC from training results.
+    
+    Args:
+        models: List of TrainingResults objects
+        
+    Returns:
+        Mean CV AUC score, or 0.0 if no valid scores
+    """
+    valid_aucs = []
+    for model in models:
+        if model.success and model.cv_scores is not None:
+            cv_mean, _, n_valid, _ = _summarize_cv_scores(model.cv_scores)
+            if n_valid > 0:
+                valid_aucs.append(cv_mean)
+    
+    if len(valid_aucs) > 0:
+        return float(np.mean(valid_aucs))
+    return 0.0
+
+
+def _create_maxent_config_from_params(maxent_params: Dict[str, Any]) -> DefaultMaxentConfig:
+    """Create MaxEnt config from suggested parameters.
+    
+    Args:
+        maxent_params: Dictionary of MaxEnt hyperparameters (keys match DefaultMaxentConfig parameter names)
+        
+    Returns:
+        DefaultMaxentConfig object
+    """
+    # Use ** unpacking - DefaultMaxentConfig has defaults for all parameters
+    return DefaultMaxentConfig(**maxent_params)
+
+
+def _prepare_trial_hyperparameters(
+    trial: optuna.Trial,
+    base_variables_config: VariablesConfig,
+    subset_occurrence: int,
+    activity_types: Optional[List[str]],
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[ActivityType, List[str]]]:
+    """Prepare hyperparameters for a trial.
+    
+    Args:
+        trial: Optuna trial object
+        base_variables_config: Base variables config
+        subset_occurrence: Number of occurrence records to use for tuning
+        activity_types: List of activity types to tune (optional)
+        
+    Returns:
+        Tuple of (maxent_params, sampling_params, feature_selection)
+    """
+    # Suggest hyperparameters
+    maxent_params = suggest_maxent_hyperparameters(trial)
+    sampling_params_dict = suggest_sampling_hyperparameters(trial)
+    
+    # Add subset_occurrence to sampling params
+    sampling_params_dict["subset_occurrence"] = subset_occurrence
+    
+    # Get activity types from base config or use provided
+    if activity_types is None:
+        activity_types_list = list(base_variables_config.activity_feature_sets.keys())
+    else:
+        activity_types_list = activity_types
+    
+    # Suggest feature selection
+    feature_selection_dict = suggest_feature_selection(
+        trial, 
+        base_variables_config.roster, 
+        activity_types_list,
+    )
+    
+    # Convert feature selection to ActivityType enum keys
+    feature_selection: Dict[ActivityType, List[str]] = {
+        ActivityType(k): v for k, v in feature_selection_dict.items()
+    }
+    
+    return maxent_params, sampling_params_dict, feature_selection
+
+
+def objective(
+    trial: optuna.Trial,
+    setup: TrainingSetup,
+    base_model_config: ModelConfig,
+    base_variables_config: VariablesConfig,
+    subset_occurrence: int,
+    activity_types: Optional[List[str]],
+    n_cv_folds: int = 2,
+) -> float:
+    """Optuna objective function for hyperparameter tuning.
+    
+    Args:
+        trial: Optuna trial object
+        setup: TrainingSetup with shared data (reused across trials)
+        base_model_config: Base model config
+        base_variables_config: Base variables config
+        subset_occurrence: Number of occurrence records to use for tuning
+        activity_types: List of activity types to tune (optional)
+        n_cv_folds: Number of CV folds (default: 2 for faster tuning)
+        
+    Returns:
+        Mean CV AUC score (to maximize)
+    """
+    try:
+        # Prepare hyperparameters
+        maxent_params, sampling_params_dict, feature_selection = _prepare_trial_hyperparameters(
+            trial, base_variables_config, subset_occurrence, activity_types
         )
-        selected = [roster[i] for i in sorted(selected_indices)]
+        
+        # Create MaxEnt config from suggested parameters
+        model_config = _create_maxent_config_from_params(maxent_params)
+        
+        # Run training with subset data
+        # Create nested MLflow run for this trial
+        trial_run_name = f"trial_{trial.number}"
+        with mlflow.start_run(nested=True, run_name=trial_run_name):
+            # Log trial parameters to MLflow
+            mlflow.log_params(trial.params)
+            mlflow.log_metric("trial_number", trial.number)
+            
+            # Suppress verbose logging and warnings during training
+            with suppress_logs_and_warnings():
+                # Train models using modular function
+                # Use fewer threads and CV folds for faster tuning
+                models, _ = train_models_with_setup(
+                    setup=setup,
+                    model_config=model_config,
+                    feature_selection=feature_selection,
+                    sampling_params=sampling_params_dict,
+                    min_presence=base_model_config.sampling.min_presence,
+                    max_threads_per_model=1,  # Use 1 thread per model for tuning (faster, less overhead)
+                    n_jobs=1,  # Single job per trial (parallelism handled by Optuna)
+                    n_cv_folds=n_cv_folds,  # Use fewer folds for faster tuning
+                    verbose=False,
+                )
+            
+            # Calculate mean CV AUC from results
+            mean_auc = _calculate_mean_cv_auc(models)
+            
+            if mean_auc > 0.0:
+                mlflow.log_metric("mean_cv_auc", mean_auc)
+                mlflow.log_metric("n_models", len([m for m in models if m.success and m.cv_scores is not None]))
+                # Log score to console (logger automatically respects level)
+                logger.info(f"Trial {trial.number}: mean CV AUC = {mean_auc:.4f}")
+            else:
+                logger.debug(f"Trial {trial.number}: No valid models with CV scores")
+            
+            # Report intermediate value for pruning
+            trial.report(mean_auc, step=trial.number)
+            
+            # Handle pruning
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+            
+            return mean_auc
+    
+    except optuna.TrialPruned:
+        # Re-raise pruning exceptions
+        raise
+    except Exception as e:
+        logger.debug(f"Trial {trial.number} failed: {e}")
+        # Return a low score for failed trials
+        return 0.0
+
+
+def _reconstruct_feature_selection(
+    trial_params: Dict[str, Any],
+    roster: List[str],
+    activity_types: List[str],
+) -> Dict[str, List[str]]:
+    """Reconstruct feature selection from trial parameters.
+    
+    This function uses the same logic as suggest_feature_selection but reads
+    from trial parameters instead of making Optuna suggestions.
+    
+    Args:
+        trial_params: Trial parameters dictionary
+        roster: Full list of available features
+        activity_types: List of activity types
+        
+    Returns:
+        Dictionary mapping activity type to selected features
+    """
+    activity_feature_sets = {}
+    
+    for activity_type in activity_types:
+        # Extract features that were set to True in the trial
+        # Parameter key format: "{activity_type}_{feature}"
+        selected = []
+        for feature in roster:
+            feature_key = f"{activity_type}_{feature}"
+            if feature_key in trial_params and trial_params[feature_key]:
+                selected.append(feature)
+        
+        # Reconstruct bounds (same logic as _apply_feature_bounds but from params)
+        # Apply maximum bound if needed
+        if len(selected) > 30:
+            feature_priorities = {}
+            for feature in selected:
+                priority_key = f"priority_{activity_type}_{feature}"
+                if priority_key in trial_params:
+                    feature_priorities[feature] = trial_params[priority_key]
+            
+            if feature_priorities:
+                sorted_features = sorted(
+                    feature_priorities.items(), key=lambda x: x[1], reverse=True
+                )
+                selected = [f for f, _ in sorted_features[:30]]
+            else:
+                # Fallback: just take first 30
+                selected = selected[:30]
+        
+        # Apply minimum bound
+        if len(selected) < 5:
+            remaining = [f for f in roster if f not in selected]
+            n_needed = 5 - len(selected)
+            selected.extend(remaining[:n_needed])
         
         activity_feature_sets[activity_type] = selected
     
     return activity_feature_sets
 
 
-def create_temporary_configs(
-    maxent_params: Dict,
-    sampling_params: Dict,
-    feature_selection: Dict[str, List[str]],
+def _extract_maxent_params(trial_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract MaxEnt hyperparameters from trial parameters.
+    
+    Args:
+        trial_params: Trial parameters dictionary
+        
+    Returns:
+        Dictionary of MaxEnt hyperparameters
+    """
+    # Convert feature_types from string back to list (Optuna stores it as string)
+    feature_types_str = trial_params["feature_types"]
+    if isinstance(feature_types_str, str):
+        feature_types = feature_types_str.split(",") if "," in feature_types_str else [feature_types_str]
+    else:
+        feature_types = feature_types_str
+    
+    return {
+        "feature_types": feature_types,
+        "beta_multiplier": trial_params["beta_multiplier"],
+        "beta_lqp": trial_params["beta_lqp"],
+        "beta_hinge": trial_params["beta_hinge"],
+        "beta_threshold": trial_params["beta_threshold"],
+        "beta_categorical": trial_params["beta_categorical"],
+        "n_hinge_features": trial_params["n_hinge_features"],
+        "n_threshold_features": trial_params["n_threshold_features"],
+        "clamp": trial_params["clamp"],
+        "tau": trial_params["tau"],
+        "transform": trial_params["transform"],
+    }
+
+
+def _extract_sampling_params(trial_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract sampling hyperparameters from trial parameters.
+    
+    Args:
+        trial_params: Trial parameters dictionary
+        
+    Returns:
+        Dictionary of sampling hyperparameters
+    """
+    return {
+        "background": {
+            "factor": trial_params["background_factor"],
+            "min_bg": trial_params["background_min_bg"],
+            "max_bg": trial_params["background_max_bg"],
+        },
+        "subset_background": trial_params["subset_background"],
+        "order_by_density_for_subset": trial_params["order_by_density_for_subset"],
+        "sample_weight_n_neighbors": trial_params["sample_weight_n_neighbors"],
+    }
+
+
+def _write_model_config(
+    maxent_params: Dict[str, Any],
+    sampling_params: Dict[str, Any],
     base_model_config: ModelConfig,
-    base_variables_config: VariablesConfig,
-    temp_dir: Path,
-) -> Tuple[Path, Path]:
-    """Create temporary config files for a trial.
+    output_path: Path,
+) -> None:
+    """Write model configuration to file.
     
     Args:
         maxent_params: MaxEnt hyperparameters
         sampling_params: Sampling hyperparameters
-        feature_selection: Feature selection per activity type
-        base_model_config: Base model config to inherit from
-        base_variables_config: Base variables config to inherit from
-        temp_dir: Temporary directory for config files
-        
-    Returns:
-        Tuple of (model_config_path, variables_config_path)
+        base_model_config: Base model config
+        output_path: Path to write config file
     """
-    # Create model config
     model_config_dict = {
         "model": {
             "record_age_years": base_model_config.record_age_years,
             "maxent": {
                 **maxent_params,
-                # Keep other maxent params from base config
                 "convergence_tolerance": base_model_config.maxent.convergence_tolerance,
                 "use_lambdas": base_model_config.maxent.use_lambdas,
                 "n_lambdas": base_model_config.maxent.n_lambdas,
@@ -213,11 +559,24 @@ def create_temporary_configs(
         }
     }
     
-    model_config_path = temp_dir / "model_config.yml"
-    with open(model_config_path, "w") as f:
-        yaml.dump(model_config_dict, f, default_flow_style=False)
+    with open(output_path, "w") as f:
+        yaml.dump(model_config_dict, f, default_flow_style=False, sort_keys=False)
     
-    # Create variables config
+    logger.debug(f"Wrote best model config to {output_path}")
+
+
+def _write_variables_config(
+    feature_selection: Dict[str, List[str]],
+    base_variables_config: VariablesConfig,
+    output_path: Path,
+) -> None:
+    """Write variables configuration to file.
+    
+    Args:
+        feature_selection: Feature selection per activity type
+        base_variables_config: Base variables config
+        output_path: Path to write config file
+    """
     variables_config_dict = {
         "variables": {
             "roster": base_variables_config.roster,
@@ -225,154 +584,10 @@ def create_temporary_configs(
         }
     }
     
-    variables_config_path = temp_dir / "variables_config.yml"
-    with open(variables_config_path, "w") as f:
-        yaml.dump(variables_config_dict, f, default_flow_style=False)
+    with open(output_path, "w") as f:
+        yaml.dump(variables_config_dict, f, default_flow_style=False, sort_keys=False)
     
-    return model_config_path, variables_config_path
-
-
-def objective(
-    trial: optuna.Trial,
-    project_config_path: Path,
-    base_model_config: ModelConfig,
-    base_variables_config: VariablesConfig,
-    bats_file: Path,
-    background_file: Path,
-    ev_file: Path,
-    grid_points_file: Optional[Path],
-    output_dir: Path,
-    subset_occurrence: int,
-    species: Optional[List[str]],
-    activity_types: Optional[List[str]],
-    temp_dir: Path,
-    annotated_bats: Optional[gpd.GeoDataFrame] = None,
-    annotated_background: Optional[gpd.GeoDataFrame] = None,
-    all_ev_columns: Optional[List[str]] = None,
-) -> float:
-    """Optuna objective function for hyperparameter tuning.
-    
-    Args:
-        trial: Optuna trial object
-        project_config_path: Path to project config
-        base_model_config: Base model config
-        base_variables_config: Base variables config
-        bats_file: Path to bat occurrence data
-        background_file: Path to background points
-        ev_file: Path to environmental variables
-        grid_points_file: Path to grid points (optional)
-        output_dir: Output directory for training
-        subset_occurrence: Number of occurrence records to use for tuning
-        species: List of species to tune (optional)
-        activity_types: List of activity types to tune (optional)
-        temp_dir: Temporary directory for config files
-        
-    Returns:
-        Mean CV AUC score (to maximize)
-    """
-    try:
-        # Suggest hyperparameters
-        maxent_params = suggest_maxent_hyperparameters(trial)
-        sampling_params = suggest_sampling_hyperparameters(trial)
-        
-        # Get activity types from base config or use provided
-        if activity_types is None:
-            # Extract from base config
-            activity_types_list = list(base_variables_config.activity_feature_sets.keys())
-        else:
-            activity_types_list = activity_types
-        
-        # Suggest feature selection
-        feature_selection = suggest_feature_selection(
-            trial, base_variables_config.roster, activity_types_list
-        )
-        
-        # Create temporary config files
-        model_config_path, variables_config_path = create_temporary_configs(
-            maxent_params,
-            sampling_params,
-            feature_selection,
-            base_model_config,
-            base_variables_config,
-            temp_dir,
-        )
-        
-        # Use pre-annotated data if available (saves time by skipping annotation)
-        # We pass the full annotated data - train_sdm_models will filter by features based on variables_config
-        if annotated_bats is not None and annotated_background is not None:
-            # Save full annotated data to temp files (don't filter - let train_sdm_models handle it)
-            trial_bats_file = temp_dir / f"trial_{trial.number}_bats.parquet"
-            trial_background_file = temp_dir / f"trial_{trial.number}_background.parquet"
-            annotated_bats.to_parquet(trial_bats_file)
-            annotated_background.to_parquet(trial_background_file)
-            
-            # Use the annotated files (train_sdm_models will skip annotation if data already has EV columns)
-            trial_bats_file_path = trial_bats_file
-            trial_background_file_path = trial_background_file
-        else:
-            # Fallback to original files (will be annotated by train_sdm_models)
-            trial_bats_file_path = bats_file
-            trial_background_file_path = background_file
-        
-        # Run training with subset data
-        # Create nested MLflow run for this trial
-        trial_run_name = f"trial_{trial.number}"
-        with mlflow.start_run(nested=True, run_name=trial_run_name):
-            # Log trial parameters to MLflow
-            mlflow.log_params(trial.params)
-            mlflow.log_metric("trial_number", trial.number)
-            
-            results_df = train_sdm_models(
-                project_config_path=project_config_path,
-                model_config_path=model_config_path,
-                variables_config_path=variables_config_path,
-                bats_file=trial_bats_file_path,
-                background_file=trial_background_file_path,
-                ev_file=ev_file,
-                grid_points_file=grid_points_file,
-                output_dir=output_dir / f"trial_{trial.number}",
-                subset_occurrence=subset_occurrence,
-                species=species,
-                activity_types=activity_types,
-                verbose=False,
-            )
-            
-            # Log trial results
-            if "cv_auc_mean" in results_df.columns:
-                valid_aucs = results_df["cv_auc_mean"].dropna()
-                if len(valid_aucs) > 0:
-                    mean_auc = float(valid_aucs.mean())
-                    mlflow.log_metric("mean_cv_auc", mean_auc)
-                    mlflow.log_metric("n_models", len(valid_aucs))
-                else:
-                    mean_auc = 0.0
-            else:
-                mean_auc = 0.0
-            
-            # Calculate mean CV AUC across all models for return value
-            if "cv_auc_mean" in results_df.columns:
-                valid_aucs = results_df["cv_auc_mean"].dropna()
-                if len(valid_aucs) > 0:
-                    mean_auc = float(valid_aucs.mean())
-                else:
-                    mean_auc = 0.0
-            else:
-                logger.warning("No cv_auc_mean column in results, returning 0.0")
-                mean_auc = 0.0
-            
-            # Report intermediate value for pruning
-            trial.report(mean_auc, step=trial.number)
-            
-            # Handle pruning
-            if trial.should_prune():
-                raise optuna.TrialPruned()
-            
-            return mean_auc
-    
-    except Exception as e:
-        logger.error(f"Trial {trial.number} failed: {e}")
-        # Return a low score for failed trials
-        return 0.0
+    logger.debug(f"Wrote best variables config to {output_path}")
 
 
 def write_best_configs(
@@ -395,102 +610,42 @@ def write_best_configs(
     """
     best_trial = study.best_trial
     
-    logger.info(f"Best trial: {best_trial.number}")
-    logger.info(f"Best value (mean CV AUC): {best_trial.value:.4f}")
-    logger.info("Best parameters:")
+    # Log detailed parameters at DEBUG level (logger automatically respects level)
+    logger.debug(f"Best trial: {best_trial.number}")
+    logger.debug(f"Best value (mean CV AUC): {best_trial.value:.4f}")
+    logger.debug("Best parameters:")
     for key, value in best_trial.params.items():
-        logger.info(f"  {key}: {value}")
+        logger.debug(f"  {key}: {value}")
     
     # Extract best parameters
-    best_maxent_params = {
-        "feature_types": best_trial.params["feature_types"],
-        "beta_multiplier": best_trial.params["beta_multiplier"],
-        "beta_lqp": best_trial.params["beta_lqp"],
-        "beta_hinge": best_trial.params["beta_hinge"],
-        "beta_threshold": best_trial.params["beta_threshold"],
-        "beta_categorical": best_trial.params["beta_categorical"],
-        "n_hinge_features": best_trial.params["n_hinge_features"],
-        "n_threshold_features": best_trial.params["n_threshold_features"],
-        "clamp": best_trial.params["clamp"],
-        "tau": best_trial.params["tau"],
-        "transform": best_trial.params["transform"],
-    }
-    
-    best_sampling_params = {
-        "background": {
-            "factor": best_trial.params["background_factor"],
-            "min_bg": best_trial.params["background_min_bg"],
-            "max_bg": best_trial.params["background_max_bg"],
-        },
-        "subset_background": best_trial.params["subset_background"],
-        "order_by_density_for_subset": best_trial.params["order_by_density_for_subset"],
-        "sample_weight_n_neighbors": best_trial.params["sample_weight_n_neighbors"],
-    }
+    best_maxent_params = _extract_maxent_params(best_trial.params)
+    best_sampling_params = _extract_sampling_params(best_trial.params)
     
     # Reconstruct feature selection from best trial
-    # We need to re-run the feature selection logic with the best trial's parameters
     if activity_types is None:
         activity_types_list = list(base_variables_config.activity_feature_sets.keys())
     else:
         activity_types_list = activity_types
     
-    best_feature_selection = {}
-    for activity_type in activity_types_list:
-        n_features_key = f"n_features_{activity_type}"
-        if n_features_key in best_trial.params:
-            n_features = best_trial.params[n_features_key]
-            # Reconstruct the feature selection using the same hash-based approach
-            trial_seed = hash((best_trial.number, activity_type)) % (2**32)
-            np.random.seed(trial_seed)
-            selected_indices = np.random.choice(
-                len(base_variables_config.roster),
-                size=min(n_features, len(base_variables_config.roster)),
-                replace=False,
-            )
-            selected = [base_variables_config.roster[i] for i in sorted(selected_indices)]
-            best_feature_selection[activity_type] = selected
-        else:
-            # Fallback to base config
-            best_feature_selection[activity_type] = base_variables_config.activity_feature_sets.get(
-                activity_type, []
-            )
+    best_feature_selection = _reconstruct_feature_selection(
+        best_trial.params,
+        base_variables_config.roster,
+        activity_types_list,
+    )
     
-    # Write model config
-    model_config_dict = {
-        "model": {
-            "record_age_years": base_model_config.record_age_years,
-            "maxent": {
-                **best_maxent_params,
-                "convergence_tolerance": base_model_config.maxent.convergence_tolerance,
-                "use_lambdas": base_model_config.maxent.use_lambdas,
-                "n_lambdas": base_model_config.maxent.n_lambdas,
-                "class_weights": base_model_config.maxent.class_weights,
-            },
-            "sampling": {
-                "min_presence": base_model_config.sampling.min_presence,
-                "subset_occurrence": base_model_config.sampling.subset_occurrence,
-                **best_sampling_params,
-            },
-        }
-    }
+    # Write config files
+    _write_model_config(
+        best_maxent_params,
+        best_sampling_params,
+        base_model_config,
+        output_model_config_path,
+    )
     
-    with open(output_model_config_path, "w") as f:
-        yaml.dump(model_config_dict, f, default_flow_style=False, sort_keys=False)
-    
-    logger.info(f"Wrote best model config to {output_model_config_path}")
-    
-    # Write variables config
-    variables_config_dict = {
-        "variables": {
-            "roster": base_variables_config.roster,
-            "activity_feature_sets": best_feature_selection,
-        }
-    }
-    
-    with open(output_variables_config_path, "w") as f:
-        yaml.dump(variables_config_dict, f, default_flow_style=False, sort_keys=False)
-    
-    logger.info(f"Wrote best variables config to {output_variables_config_path}")
+    _write_variables_config(
+        best_feature_selection,
+        base_variables_config,
+        output_variables_config_path,
+    )
 
 
 def tune_hyperparameters(
@@ -508,6 +663,8 @@ def tune_hyperparameters(
     activity_types: Optional[List[str]] = None,
     study_name: Optional[str] = None,
     storage: Optional[str] = None,
+    n_jobs: int = 1,
+    n_cv_folds: int = 2,
     verbose: bool = False,
 ) -> optuna.Study:
     """Run hyperparameter tuning using Optuna.
@@ -527,13 +684,15 @@ def tune_hyperparameters(
         activity_types: List of activity types to tune (optional)
         study_name: Name for Optuna study (optional)
         storage: Optuna storage URL (optional, for distributed tuning)
+        n_jobs: Number of parallel jobs for running trials (default: 1, sequential)
+        n_cv_folds: Number of CV folds for tuning (default: 2, faster than 3)
         verbose: Enable verbose logging
         
     Returns:
         Optuna study object
     """
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
-    logger.info("=== Starting Hyperparameter Tuning ===")
+    logger.info("Starting hyperparameter tuning...")
     
     # Load base configs
     project_config = load_project_config(project_config_path)
@@ -544,50 +703,20 @@ def tune_hyperparameters(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Create temporary directory for trial configs
-    temp_dir = Path(tempfile.mkdtemp(prefix="sdm_tune_"))
-    logger.info(f"Using temporary directory: {temp_dir}")
-    
-    # Annotate points once before starting trials (this is expensive and doesn't change)
-    logger.info("=== Annotating Points (one-time setup) ===")
-    logger.info("Loading data for annotation...")
-    bats_ant = load_bat_data(bats_file)
-    background, _ = load_background_points(background_file)
-    
-    logger.info("Loading environmental variables...")
-    ev_data, ev_raster_path = load_environmental_variables(ev_file)
-    all_ev_columns = list(ev_data.data_vars.keys())
-    
-    # Filter to roster if specified
-    if base_variables_config.roster:
-        roster_matches = [col for col in all_ev_columns if col in base_variables_config.roster]
-        if roster_matches:
-            ev_columns = roster_matches
-            logger.info(
-                f"Filtered environmental variables to {len(ev_columns)} columns based on roster"
-            )
-        else:
-            ev_columns = all_ev_columns
-            logger.warning(
-                "No roster variables matched available environmental variables; "
-                f"using full set ({len(ev_columns)} columns)."
-            )
-    else:
-        ev_columns = all_ev_columns
-        logger.info(f"Found {len(ev_columns)} environmental variables")
-    
-    logger.info("Annotating points with environmental variables...")
-    annotated_bats_gdf, annotated_background_gdf = annotate_points(
-        bats_ant, background, ev_raster_path, all_ev_columns
+    # Set up shared training data once (reused across all trials)
+    logger.debug("Setting up shared training data (one-time)...")
+    setup = setup_training_data(
+        project_config_path=project_config_path,
+        variables_config_path=variables_config_path,
+        bats_file=bats_file,
+        background_file=background_file,
+        ev_file=ev_file,
+        grid_points_file=grid_points_file,
+        species=species,
+        activity_types=activity_types,
+        verbose=verbose,
     )
-    logger.info("Annotation complete - will reuse for all trials")
-    
-    # Save annotated data to temporary files for reuse
-    annotated_bats_file = temp_dir / "annotated_bats.parquet"
-    annotated_background_file = temp_dir / "annotated_background.parquet"
-    annotated_bats_gdf.to_parquet(annotated_bats_file)
-    annotated_background_gdf.to_parquet(annotated_background_file)
-    logger.info(f"Saved annotated data to temporary files for reuse")
+    logger.debug("Setup complete - shared data will be reused for all trials")
     
     # Configure MLflow and create parent run for tuning session
     project_config = load_project_config(project_config_path)
@@ -596,7 +725,7 @@ def tune_hyperparameters(
     
     parent_run_name = f"Hyperparameter_Tuning_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     parent_run = mlflow.start_run(run_name=parent_run_name)
-    logger.info(f"Started MLflow parent run: {parent_run_name} (ID: {parent_run.info.run_id})")
+    logger.debug(f"Started MLflow parent run: {parent_run_name} (ID: {parent_run.info.run_id})")
     
     try:
         # Log tuning configuration
@@ -613,7 +742,8 @@ def tune_hyperparameters(
         # Create Optuna study
         study_name = study_name or "sdm_hyperparameter_tuning"
         sampler = TPESampler(seed=42)
-        pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=10)
+        # More aggressive pruning for faster tuning: prune earlier and more often
+        pruner = MedianPruner(n_startup_trials=3, n_warmup_steps=5)
         
         study = optuna.create_study(
             study_name=study_name,
@@ -624,30 +754,84 @@ def tune_hyperparameters(
             load_if_exists=True,
         )
         
-        # Create objective function with fixed arguments (including pre-annotated data)
-        def objective_fn(trial):
+        # Enqueue first trial with all features enabled (as suggested in the article)
+        # This gives Optuna a baseline to compare against
+        if activity_types is None:
+            activity_types_list = list(base_variables_config.activity_feature_sets.keys())
+        else:
+            activity_types_list = activity_types
+        
+        default_trial_params = {}
+        # Add all features as True for each activity type
+        for activity_type in activity_types_list:
+            for feature in base_variables_config.roster:
+                default_trial_params[f"{activity_type}_{feature}"] = True
+        
+        # Also add default values for other hyperparameters
+        # (Optuna will suggest these, but we can provide sensible defaults)
+        default_trial_params.update({
+            "feature_types": "linear,hinge",
+            "beta_multiplier": 1.0,
+            "beta_lqp": 1.0,
+            "beta_hinge": 1.0,
+            "beta_threshold": 1.0,
+            "beta_categorical": 1.0,
+            "n_hinge_features": 10,
+            "n_threshold_features": 10,
+            "clamp": True,
+            "tau": 0.5,
+            "transform": "cloglog",
+            "background_factor": 10,
+            "background_min_bg": 1000,
+            "background_max_bg": 10000,
+            "subset_background": True,
+            "order_by_density_for_subset": True,
+            "sample_weight_n_neighbors": 5,
+        })
+        
+        study.enqueue_trial(default_trial_params)
+        logger.debug("Enqueued first trial with all features enabled")
+        
+        # Create objective function with fixed arguments (including shared setup)
+        def objective_fn(trial: optuna.Trial) -> float:
             return objective(
                 trial,
-                project_config_path,
+                setup,
                 base_model_config,
                 base_variables_config,
-                bats_file,
-                background_file,
-                ev_file,
-                grid_points_file,
-                output_dir,
                 subset_occurrence,
-                species,
                 activity_types,
-                temp_dir,
-                annotated_bats=annotated_bats_gdf,
-                annotated_background=annotated_background_gdf,
-                all_ev_columns=all_ev_columns,
+                n_cv_folds,
             )
         
-        # Run optimization
-        logger.info(f"Starting optimization with {n_trials} trials...")
-        study.optimize(objective_fn, n_trials=n_trials, show_progress_bar=True)
+        # Run optimization with parallel trials if n_jobs > 1
+        logger.info(f"Starting optimization with {n_trials} trials (n_jobs={n_jobs}, n_cv_folds={n_cv_folds})...")
+        logger.info("Note: Verbose logs and warnings are suppressed during trials for cleaner output.")
+        if n_jobs > 1:
+            logger.info(f"Running {n_jobs} trials in parallel for faster optimization")
+        
+        # Suppress Optuna's default trial logging (we log to MLflow instead)
+        # Suppress all Optuna loggers to avoid redundant "Trial X finished..." messages
+        optuna_loggers = [
+            logging.getLogger("optuna"),
+            logging.getLogger("optuna.study"),
+            logging.getLogger("optuna.trial"),
+        ]
+        old_optuna_levels = {}
+        for optuna_logger in optuna_loggers:
+            old_optuna_levels[optuna_logger] = optuna_logger.level
+            optuna_logger.setLevel(logging.WARNING)  # Only show warnings/errors from Optuna
+        
+        # Suppress warnings during optimization
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", message="invalid value encountered")
+            study.optimize(objective_fn, n_trials=n_trials, n_jobs=n_jobs, show_progress_bar=True)
+        
+        # Restore Optuna logging levels
+        for optuna_logger, old_level in old_optuna_levels.items():
+            optuna_logger.setLevel(old_level)
         
         # Write best configs
         best_model_config_path = output_dir / "best_model_config.yml"
@@ -682,29 +866,27 @@ def tune_hyperparameters(
             "best_trial_number": study.best_trial.number,
             "n_trials": len(study.trials),
         }
-        import json
+        
         study_summary_path = output_dir / "study_summary.json"
         with open(study_summary_path, "w") as f:
             json.dump(study_summary, f, indent=2)
         mlflow.log_artifact(str(study_summary_path), "best_configs")
         
-        logger.info("=== Hyperparameter Tuning Complete ===")
+        logger.info("=" * 80)
+        logger.info("✓ Hyperparameter tuning complete")
+        logger.info("=" * 80)
+        logger.info(f"Best trial: {study.best_trial.number}")
         logger.info(f"Best mean CV AUC: {study.best_value:.4f}")
+        logger.info(f"Trials completed: {len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])}")
+        logger.info(f"Trials pruned: {len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])}")
         logger.info(f"Best configs written to:")
         logger.info(f"  - {best_model_config_path}")
         logger.info(f"  - {best_variables_config_path}")
-        logger.info(f"Results logged to MLflow parent run: {parent_run_name}")
+        logger.debug(f"Results logged to MLflow parent run: {parent_run_name}")
         
     finally:
         # End parent run
         mlflow.end_run()
-        
-        # Clean up temporary directory
-        try:
-            shutil.rmtree(temp_dir)
-            logger.debug(f"Cleaned up temporary directory: {temp_dir}")
-        except Exception as e:
-            logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
     
     return study
 
