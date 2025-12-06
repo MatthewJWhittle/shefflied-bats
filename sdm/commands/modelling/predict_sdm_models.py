@@ -11,8 +11,10 @@ from typing import Optional, List, Any, Dict
 import pickle
 
 import pandas as pd
+import rioxarray as rxr
 
 from sdm.utils.logging_utils import setup_logging
+from sdm.utils.io import load_boundary
 from sdm.raster.io import load_environmental_variables
 from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.feature_subsetter import FeatureSubsetter
@@ -57,6 +59,7 @@ def make_predictions(
     models_dir: Path,
     ev_raster: Path,
     output_dir: Path,
+    boundary_path: Optional[Path] = None,
 ) -> pd.DataFrame:
     """Apply trained models to make predictions."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -105,6 +108,53 @@ def make_predictions(
         )
         logger.debug(f"Successfully generated predictions for {len(models)} models")
         
+        # Clip to boundary if provided
+        if boundary_path and boundary_path.exists():
+            logger.info(f"Clipping predictions to boundary: {boundary_path}")
+            try:
+                # Load boundary
+                boundary_gdf = load_boundary(boundary_path, buffer_distance=0)
+                
+                # Load the prediction raster
+                pred_raster = rxr.open_rasterio(output_path)
+                
+                # Store original transform and CRS to preserve them
+                original_transform = pred_raster.rio.transform()
+                original_crs = pred_raster.rio.crs
+                original_nodata = pred_raster.rio.nodata
+                
+                # Ensure CRS matches
+                if pred_raster.rio.crs != boundary_gdf.crs:
+                    boundary_gdf = boundary_gdf.to_crs(pred_raster.rio.crs)
+                
+                # Get union of all boundary geometries
+                # Use unary_union if available, otherwise try union_all() (geopandas extension)
+                if hasattr(boundary_gdf, 'union_all'):
+                    boundary_union = boundary_gdf.union_all()
+                else:
+                    boundary_union = boundary_gdf.geometry.unary_union
+                
+                # Clip the raster with crop=False to maintain original extent and transform
+                pred_raster_clipped = pred_raster.rio.clip(
+                    [boundary_union],
+                    crs=boundary_gdf.crs,
+                    all_touched=True,
+                    crop=False  # Maintain original raster extent and transform
+                )
+                
+                # Ensure the transform and CRS are preserved
+                pred_raster_clipped = pred_raster_clipped.rio.write_transform(original_transform)
+                pred_raster_clipped = pred_raster_clipped.rio.write_crs(original_crs)
+                if original_nodata is not None:
+                    pred_raster_clipped = pred_raster_clipped.rio.write_nodata(original_nodata)
+                
+                # Save the clipped raster (overwrite the original)
+                pred_raster_clipped.rio.to_raster(output_path)
+                logger.info(f"Clipped predictions saved to: {output_path}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to clip predictions to boundary: {e}. Output saved without clipping.")
+        
         # Update results with success status
         filtered_index["success"] = True
         filtered_index["prediction_path"] = str(output_path)
@@ -125,6 +175,7 @@ def predict_sdm_models(
     ev_path: Path = Path("data/evs/evs-to-model.tif"),
     models_dir: Path = Path("data/sdm_models"),
     output_dir: Path = Path("data/sdm_predictions"),
+    boundary_path: Optional[Path] = None,
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     verbose: bool = False
@@ -135,6 +186,7 @@ def predict_sdm_models(
         ev_path: Path to environmental variables raster.
         models_dir: Directory containing trained models.
         output_dir: Directory for output prediction files.
+        boundary_path: Optional path to boundary file for clipping output raster.
         species: Optional: Specific species to generate predictions for (Latin names).
         activity_types: Optional: Specific activity types to generate predictions for.
         verbose: Enable verbose logging.
@@ -172,7 +224,8 @@ def predict_sdm_models(
         filtered_index,
         models_dir,
         ev_raster,
-        output_dir
+        output_dir,
+        boundary_path=boundary_path,
     )
     
     logger.info("✓ Prediction pipeline complete")

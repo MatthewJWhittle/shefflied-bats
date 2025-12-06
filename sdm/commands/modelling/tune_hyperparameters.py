@@ -4,41 +4,104 @@ Hyperparameter tuning for SDM models using Optuna.
 This module implements hyperparameter optimization for MaxEnt models, including:
 - Model hyperparameters (beta_multiplier, feature_types, etc.)
 - Feature selection (sampling from roster)
-- Background point sampling parameters
+
+Uses the new modular approach with efficient one-time data preparation.
 """
 
 import logging
-import shutil
-import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
 
 import geopandas as gpd
 import mlflow
 import optuna
 import yaml
 import numpy as np
-from datetime import datetime
+import pandas as pd
 from optuna.samplers import TPESampler
 from optuna.pruners import MedianPruner
+from pydantic import BaseModel
 
-from sdm.commands.modelling.train_sdm_models import train_sdm_models
-from sdm.data.loaders.vector import load_background_points, load_bat_data
-from sdm.data.processing import annotate_points
+from sdm.commands.modelling.train_sdm_models import (
+    simplify_boundary,
+    prepare_species_training_data,
+    prepare_training_data,
+    _summarize_cv_scores,
+    _configure_mlflow_from_config,
+)
+from sdm.data.loaders.vector import load_bat_data
+from sdm.models.maxent.maxent_model import (
+    ActivityType,
+    DefaultMaxentConfig,
+    create_maxent_pipeline,
+    cross_validate_maxent_model,
+)
+from sdm.occurrence.sampling import (
+    BackgroundMethod,
+    TransformMethod,
+    generate_background_points_from_data,
+)
 from sdm.raster.io import load_environmental_variables
 from sdm.utils.io import (
     load_project_config,
     load_model_config,
     load_variables_config,
+    load_boundary,
+    get_tuning_config_path,
 )
 from sdm.utils.logging_utils import setup_logging
-from sdm.types import ModelConfig, VariablesConfig
+from sdm.types import ModelConfig, VariablesConfig, TrainingData
+from sdm.commands.modelling.utils import get_model_id
+from sklearn.metrics import roc_auc_score
 
 logger = logging.getLogger(__name__)
 
 
-def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict:
+class TuningResult(BaseModel):
+    """Summary of tuning results for a single species–activity study."""
+
+    latin_name: str
+    activity_type: str
+    study_name: str
+
+    best_objective: float
+    mean_cv_auc: Optional[float]
+    std_cv_auc: Optional[float]
+
+    n_features: Optional[int]
+    n_features_available: int
+
+    best_trial_number: int
+    n_trials: int
+    n_trials_pruned: int
+    n_trials_complete: int
+
+    stability_penalty: float
+    feature_penalty: float
+    correlation_penalty: Optional[float] = None
+    min_presence: int
+    n_cv_folds: int
+
+    grid_size_m: float
+    subset_grid_size_m: float
+    n_background_points: int
+    background_method: str
+    transform_method: str
+
+
+def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
     """Suggest MaxEnt hyperparameters from Optuna trial.
+    
+    Fixed parameters (for consistency across species):
+    - clamp: False (allows extrapolation)
+    - tau: 0.5 (regularization strength)
+    - transform: "cloglog" (output transform for consistent map interpretation)
+    
+    Tuned parameters:
+    - feature_types: Model feature complexity
+    - beta_multiplier, beta_lqp, beta_hinge, beta_threshold, beta_categorical: Regularization
+    - n_hinge_features, n_threshold_features: Number of special features (conditional)
     
     Args:
         trial: Optuna trial object
@@ -47,17 +110,20 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict:
         Dictionary of suggested hyperparameters
     """
     # Feature types - categorical choice
-    # Use string representation to avoid Optuna warnings about lists
     feature_type_options = [
         "linear",
         "hinge",
+        "threshold",
         "linear,hinge",
         "linear,quadratic",
         "linear,hinge,quadratic",
+        "linear,hinge,threshold",
     ]
     feature_types_str = trial.suggest_categorical("feature_types", feature_type_options)
-    # Convert back to list
-    feature_types = feature_types_str.split(",") if "," in feature_types_str else [feature_types_str]
+    
+    # Check if hinge/threshold are in the feature types string
+    has_hinge = "hinge" in feature_types_str
+    has_threshold = "threshold" in feature_types_str
     
     # Beta multiplier - log uniform distribution
     beta_multiplier = trial.suggest_float("beta_multiplier", 0.1, 10.0, log=True)
@@ -69,17 +135,25 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict:
     beta_categorical = trial.suggest_float("beta_categorical", 0.1, 5.0, log=True)
     
     # Number of hinge/threshold features
-    n_hinge_features = trial.suggest_int("n_hinge_features", 0, 20)
-    n_threshold_features = trial.suggest_int("n_threshold_features", 0, 20)
+    # If hinge/threshold are in feature_types, need at least 2 features (elapid requirement)
+    # Otherwise can be 0
+    if has_hinge:
+        n_hinge_features = trial.suggest_int("n_hinge_features", 2, 20)
+    else:
+        n_hinge_features = 0
     
-    # Clamp
-    clamp = trial.suggest_categorical("clamp", [True, False])
+    if has_threshold:
+        n_threshold_features = trial.suggest_int("n_threshold_features", 2, 20)
+    else:
+        n_threshold_features = 0
     
-    # Tau
-    tau = trial.suggest_float("tau", 0.1, 0.9)
+    # Convert back to list
+    feature_types = feature_types_str.split(",") if "," in feature_types_str else [feature_types_str]
     
-    # Transform
-    transform = trial.suggest_categorical("transform", ["cloglog", "logistic", "raw"])
+    # Fixed parameters for consistency across species (for comparable suitability maps)
+    clamp = True  # Fixed: restrict suitability to training range
+    tau = 0.5  # Fixed: regularization strength
+    transform = "cloglog"  # Fixed: output transform for consistent map interpretation
     
     return {
         "feature_types": feature_types,
@@ -96,294 +170,395 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict:
     }
 
 
-def suggest_sampling_hyperparameters(trial: optuna.Trial) -> Dict:
-    """Suggest sampling hyperparameters from Optuna trial.
+
+def precompute_correlation_matrix(
+    training_gdf: gpd.GeoDataFrame,
+    available_features: List[str],
+    sample_size: int = 3000,
+) -> Optional[pd.DataFrame]:
+    """Precompute correlation matrix for all available features.
     
     Args:
-        trial: Optuna trial object
+        training_gdf: Training GeoDataFrame with features and class column
+        available_features: List of all available feature names
+        sample_size: Number of points to sample for correlation calculation
         
     Returns:
-        Dictionary of suggested sampling hyperparameters
+        Correlation matrix DataFrame, or None if calculation fails
     """
-    # Background sampling
-    background_factor = trial.suggest_int("background_factor", 5, 20)
-    background_min_bg = trial.suggest_int("background_min_bg", 500, 2000, step=100)
-    background_max_bg = trial.suggest_int("background_max_bg", 5000, 20000, step=500)
-    
-    # Subset parameters
-    subset_background = trial.suggest_categorical("subset_background", [True, False])
-    order_by_density_for_subset = trial.suggest_categorical(
-        "order_by_density_for_subset", [True, False]
-    )
-    sample_weight_n_neighbors = trial.suggest_int("sample_weight_n_neighbors", 3, 10)
-    
-    return {
-        "background": {
-            "factor": background_factor,
-            "min_bg": background_min_bg,
-            "max_bg": background_max_bg,
-        },
-        "subset_background": subset_background,
-        "order_by_density_for_subset": order_by_density_for_subset,
-        "sample_weight_n_neighbors": sample_weight_n_neighbors,
-    }
+    try:
+        # Extract feature data and remove NaN values
+        feature_data = training_gdf[available_features].dropna()
+        
+        if len(feature_data) == 0:
+            logger.warning(
+                "No valid data after dropping NaN values for correlation calculation"
+            )
+            return None
+        
+        # Random sample if data is larger than sample_size
+        if len(feature_data) > sample_size:
+            feature_data = feature_data.sample(n=sample_size, random_state=42)
+        
+        # Check for constant features (zero variance) - these cause correlation issues
+        feature_std = feature_data.std()
+        constant_features = feature_std[feature_std == 0].index.tolist()
+        if constant_features:
+            logger.warning(
+                f"Constant features detected (zero variance): {constant_features}, "
+                f"excluding from correlation calculation"
+            )
+            # Remove constant features from data
+            feature_data = feature_data.drop(columns=constant_features)
+        
+        # Calculate Pearson correlation matrix
+        corr_matrix = feature_data.corr(method="pearson")
+        
+        return corr_matrix
+        
+    except Exception as e:
+        logger.warning(
+            f"Error precomputing correlation matrix: {e}"
+        )
+        return None
 
 
-def suggest_feature_selection(
-    trial: optuna.Trial, roster: List[str], activity_types: List[str]
-) -> Dict[str, List[str]]:
-    """Suggest feature selection from Optuna trial.
+def calculate_feature_correlation_penalty(
+    selected_features: List[str],
+    precomputed_corr_matrix: Optional[pd.DataFrame],
+) -> float:
+    """Calculate mean absolute correlation penalty for selected features.
     
-    Uses a binary selection approach where Optuna suggests which features to include.
+    Uses a precomputed correlation matrix to extract the relevant subset
+    for the selected features and returns mean absolute correlation
+    (excluding diagonal) as a penalty metric.
+    
+    Args:
+        selected_features: List of selected feature names
+        precomputed_corr_matrix: Precomputed correlation matrix for all features
+        
+    Returns:
+        Mean absolute correlation value (0.0 to 1.0), or 0.0 if calculation fails
+    """
+    # Edge case: single feature or no features - no correlation to calculate
+    if len(selected_features) < 2:
+        return 0.0
+    
+    # If no precomputed matrix, return 0 (shouldn't happen, but handle gracefully)
+    if precomputed_corr_matrix is None:
+        return 0.0
+    
+    try:
+        # Filter to only selected features that exist in the correlation matrix
+        available_in_matrix = [f for f in selected_features if f in precomputed_corr_matrix.columns]
+        
+        if len(available_in_matrix) < 2:
+            return 0.0
+        
+        # Extract submatrix for selected features
+        corr_submatrix = precomputed_corr_matrix.loc[available_in_matrix, available_in_matrix]
+        
+        # Extract upper triangle (excluding diagonal) and calculate mean absolute correlation
+        mask = np.triu(np.ones_like(corr_submatrix, dtype=bool), k=1)
+        upper_triangle = corr_submatrix.where(mask)
+        abs_correlations = upper_triangle.abs()
+        
+        # Calculate mean, skipping NaN values
+        mean_abs_corr = abs_correlations.mean(skipna=True)
+        
+        # Convert to scalar if needed (handle both Series and scalar results)
+        if isinstance(mean_abs_corr, (pd.Series, np.ndarray)):
+            # If it's still a Series/array, get the first value or mean
+            mean_abs_corr = float(mean_abs_corr.iloc[0] if hasattr(mean_abs_corr, 'iloc') else mean_abs_corr.flat[0])
+        else:
+            mean_abs_corr = float(mean_abs_corr)
+        
+        # Handle NaN or invalid values
+        if np.isnan(mean_abs_corr) or np.isinf(mean_abs_corr):
+            return 0.0
+        
+        return mean_abs_corr
+        
+    except Exception as e:
+        logger.warning(
+            f"Error calculating feature correlation penalty: {e}, "
+            f"returning penalty 0.0"
+        )
+        return 0.0
+
+
+def get_default_trial_params(
+    available_features: List[str],
+) -> Dict[str, Any]:
+    """Generate default trial parameters for the first trial.
+    
+    Uses all available features and default MaxEnt hyperparameters
+    based on DefaultMaxentConfig defaults.
+    
+    Args:
+        available_features: List of available feature names
+        
+    Returns:
+        Dictionary of trial parameters ready for enqueue_trial
+    """
+    params = {}
+    
+    # Select all features (True for each)
+    for feature in available_features:
+        params[f"feature_{feature}"] = True
+    
+    # Default MaxEnt hyperparameters (based on DefaultMaxentConfig)
+    # Using "linear,hinge,quadratic" as closest match to default ["linear", "hinge", "product"]
+    params["feature_types"] = "linear,hinge,quadratic"
+    params["beta_multiplier"] = 1.5  # Default from DefaultMaxentConfig
+    params["beta_lqp"] = 1.0  # Default
+    params["beta_hinge"] = 1.0  # Default
+    params["beta_threshold"] = 1.0  # Default
+    params["beta_categorical"] = 1.0  # Default
+    params["n_hinge_features"] = 10  # Default (hinge is in feature_types)
+    params["n_threshold_features"] = 0  # Not in default feature types
+    
+    return params
+
+
+def pick_features(
+    trial: optuna.Trial,
+    available_features: List[str],
+) -> List[str]:
+    """Suggest feature selection for a single activity type.
+    
+    Uses binary selection where Optuna suggests whether to include each feature.
+    This makes feature selection part of the search space.
+    
+    Note: activity_type parameter is kept for API consistency but not used in
+    parameter names since each study is for a single species-activity combination.
     
     Args:
         trial: Optuna trial object
         roster: Full list of available features
-        activity_types: List of activity types to select features for
+        activity_type: Activity type (kept for API consistency, not used in param names)
         
     Returns:
-        Dictionary mapping activity type to selected features
+        List of selected features
     """
-    activity_feature_sets = {}
+    selected = []
     
-    for activity_type in activity_types:
-        # Sample number of features to use (between 5 and min(30, len(roster)))
-        n_features = trial.suggest_int(
-            f"n_features_{activity_type}",
-            5,
-            min(30, len(roster)),
+    # For each feature, suggest whether to include it (binary decision)
+    # Parameter name is just the feature name since activity type is fixed per study
+    for feature in available_features:
+        include = trial.suggest_categorical(
+            f"feature_{feature}",
+            [True, False]
         )
-        
-        # Use a deterministic but varied selection based on trial number
-        # This ensures reproducibility while still exploring different combinations
-        # We'll use a hash-based approach to select features
-        selected = []
-        trial_seed = hash((trial.number, activity_type)) % (2**32)
-        np.random.seed(trial_seed)
-        
-        # Sample without replacement
-        selected_indices = np.random.choice(
-            len(roster), size=min(n_features, len(roster)), replace=False
-        )
-        selected = [roster[i] for i in sorted(selected_indices)]
-        
-        activity_feature_sets[activity_type] = selected
+        if include:
+            selected.append(feature)
     
-    return activity_feature_sets
-
-
-def create_temporary_configs(
-    maxent_params: Dict,
-    sampling_params: Dict,
-    feature_selection: Dict[str, List[str]],
-    base_model_config: ModelConfig,
-    base_variables_config: VariablesConfig,
-    temp_dir: Path,
-) -> Tuple[Path, Path]:
-    """Create temporary config files for a trial.
-    
-    Args:
-        maxent_params: MaxEnt hyperparameters
-        sampling_params: Sampling hyperparameters
-        feature_selection: Feature selection per activity type
-        base_model_config: Base model config to inherit from
-        base_variables_config: Base variables config to inherit from
-        temp_dir: Temporary directory for config files
-        
-    Returns:
-        Tuple of (model_config_path, variables_config_path)
-    """
-    # Create model config
-    model_config_dict = {
-        "model": {
-            "record_age_years": base_model_config.record_age_years,
-            "maxent": {
-                **maxent_params,
-                # Keep other maxent params from base config
-                "convergence_tolerance": base_model_config.maxent.convergence_tolerance,
-                "use_lambdas": base_model_config.maxent.use_lambdas,
-                "n_lambdas": base_model_config.maxent.n_lambdas,
-                "class_weights": base_model_config.maxent.class_weights,
-            },
-            "sampling": {
-                "min_presence": base_model_config.sampling.min_presence,
-                "subset_occurrence": base_model_config.sampling.subset_occurrence,
-                **sampling_params,
-            },
-        }
-    }
-    
-    model_config_path = temp_dir / "model_config.yml"
-    with open(model_config_path, "w") as f:
-        yaml.dump(model_config_dict, f, default_flow_style=False)
-    
-    # Create variables config
-    variables_config_dict = {
-        "variables": {
-            "roster": base_variables_config.roster,
-            "activity_feature_sets": feature_selection,
-        }
-    }
-    
-    variables_config_path = temp_dir / "variables_config.yml"
-    with open(variables_config_path, "w") as f:
-        yaml.dump(variables_config_dict, f, default_flow_style=False)
-    
-    return model_config_path, variables_config_path
-
-
-def objective(
-    trial: optuna.Trial,
-    project_config_path: Path,
-    base_model_config: ModelConfig,
-    base_variables_config: VariablesConfig,
-    bats_file: Path,
-    background_file: Path,
-    ev_file: Path,
-    grid_points_file: Optional[Path],
-    output_dir: Path,
-    subset_occurrence: int,
-    species: Optional[List[str]],
-    activity_types: Optional[List[str]],
-    temp_dir: Path,
-    annotated_bats: Optional[gpd.GeoDataFrame] = None,
-    annotated_background: Optional[gpd.GeoDataFrame] = None,
-    all_ev_columns: Optional[List[str]] = None,
-) -> float:
-    """Optuna objective function for hyperparameter tuning.
-    
-    Args:
-        trial: Optuna trial object
-        project_config_path: Path to project config
-        base_model_config: Base model config
-        base_variables_config: Base variables config
-        bats_file: Path to bat occurrence data
-        background_file: Path to background points
-        ev_file: Path to environmental variables
-        grid_points_file: Path to grid points (optional)
-        output_dir: Output directory for training
-        subset_occurrence: Number of occurrence records to use for tuning
-        species: List of species to tune (optional)
-        activity_types: List of activity types to tune (optional)
-        temp_dir: Temporary directory for config files
-        
-    Returns:
-        Mean CV AUC score (to maximize)
-    """
-    try:
-        # Suggest hyperparameters
-        maxent_params = suggest_maxent_hyperparameters(trial)
-        sampling_params = suggest_sampling_hyperparameters(trial)
-        
-        # Get activity types from base config or use provided
-        if activity_types is None:
-            # Extract from base config
-            activity_types_list = list(base_variables_config.activity_feature_sets.keys())
-        else:
-            activity_types_list = activity_types
-        
-        # Suggest feature selection
-        feature_selection = suggest_feature_selection(
-            trial, base_variables_config.roster, activity_types_list
-        )
-        
-        # Create temporary config files
-        model_config_path, variables_config_path = create_temporary_configs(
-            maxent_params,
-            sampling_params,
-            feature_selection,
-            base_model_config,
-            base_variables_config,
-            temp_dir,
-        )
-        
-        # Use pre-annotated data if available (saves time by skipping annotation)
-        # We pass the full annotated data - train_sdm_models will filter by features based on variables_config
-        if annotated_bats is not None and annotated_background is not None:
-            # Save full annotated data to temp files (don't filter - let train_sdm_models handle it)
-            trial_bats_file = temp_dir / f"trial_{trial.number}_bats.parquet"
-            trial_background_file = temp_dir / f"trial_{trial.number}_background.parquet"
-            annotated_bats.to_parquet(trial_bats_file)
-            annotated_background.to_parquet(trial_background_file)
-            
-            # Use the annotated files (train_sdm_models will skip annotation if data already has EV columns)
-            trial_bats_file_path = trial_bats_file
-            trial_background_file_path = trial_background_file
-        else:
-            # Fallback to original files (will be annotated by train_sdm_models)
-            trial_bats_file_path = bats_file
-            trial_background_file_path = background_file
-        
-        # Run training with subset data
-        # Create nested MLflow run for this trial
-        trial_run_name = f"trial_{trial.number}"
-        with mlflow.start_run(nested=True, run_name=trial_run_name):
-            # Log trial parameters to MLflow
-            mlflow.log_params(trial.params)
-            mlflow.log_metric("trial_number", trial.number)
-            
-            results_df = train_sdm_models(
-                project_config_path=project_config_path,
-                model_config_path=model_config_path,
-                variables_config_path=variables_config_path,
-                bats_file=trial_bats_file_path,
-                background_file=trial_background_file_path,
-                ev_file=ev_file,
-                grid_points_file=grid_points_file,
-                output_dir=output_dir / f"trial_{trial.number}",
-                subset_occurrence=subset_occurrence,
-                species=species,
-                activity_types=activity_types,
-                verbose=False,
+    # Ensure minimum number of features (at least 5)
+    if len(selected) < 5:
+        remaining = [f for f in available_features if f not in selected]
+        n_needed = 5 - len(selected)
+        if len(remaining) >= n_needed:
+            trial_seed = hash((trial.number, "min_features")) % (2**32)
+            rng = np.random.default_rng(trial_seed)
+            additional_indices = rng.choice(
+                len(remaining), size=n_needed, replace=False
             )
-            
-            # Log trial results
-            if "cv_auc_mean" in results_df.columns:
-                valid_aucs = results_df["cv_auc_mean"].dropna()
-                if len(valid_aucs) > 0:
-                    mean_auc = float(valid_aucs.mean())
-                    mlflow.log_metric("mean_cv_auc", mean_auc)
-                    mlflow.log_metric("n_models", len(valid_aucs))
-                else:
-                    mean_auc = 0.0
-            else:
-                mean_auc = 0.0
-            
-            # Calculate mean CV AUC across all models for return value
-            if "cv_auc_mean" in results_df.columns:
-                valid_aucs = results_df["cv_auc_mean"].dropna()
-                if len(valid_aucs) > 0:
-                    mean_auc = float(valid_aucs.mean())
-                else:
-                    mean_auc = 0.0
-            else:
-                logger.warning("No cv_auc_mean column in results, returning 0.0")
-                mean_auc = 0.0
-            
-            # Report intermediate value for pruning
-            trial.report(mean_auc, step=trial.number)
-            
-            # Handle pruning
-            if trial.should_prune():
-                raise optuna.TrialPruned()
-            
-            return mean_auc
+            additional = [remaining[i] for i in sorted(additional_indices)]
+            selected.extend(additional)
     
-    except Exception as e:
-        logger.error(f"Trial {trial.number} failed: {e}")
-        # Return a low score for failed trials
-        return 0.0
+    return sorted(selected)
 
 
-def write_best_configs(
+def eval_model(
+    data: TrainingData,
+    max_threads_per_model: int = 2,
+    n_cv_folds: int = 2,  # Reduced from 3 for faster tuning
+) -> Tuple[float, float]:
+    """Evaluate a model and return CV scores and stability for tuning."""
+    # Create model
+    model = create_maxent_pipeline(
+        feature_names=data.model_features,
+        maxent_n_jobs=max_threads_per_model,
+        model_config=data.maxent_config,
+    )
+    
+    # Verify all required features are in the data
+    missing_features = list(set(data.model_features) - set(data.occurrence.columns))
+
+    if missing_features:
+        raise ValueError(
+            f"Missing features {missing_features} for {data.latin_name} - {data.activity_type}"
+        )
+
+    if data.occurrence["class"].isna().any():
+        raise ValueError(
+            f"NaN values in class column for {data.latin_name} - {data.activity_type}"
+        )
+    
+    # Only do CV evaluation (no final model training for tuning)
+    _cv_models, cv_scores = cross_validate_maxent_model(
+        model=model,
+        occurrence_gdf=data.occurrence,
+        n_folds=n_cv_folds,
+        metric_fn=roc_auc_score,
+        feature_columns=data.model_features,  # Explicitly pass feature columns
+    )
+    
+    # Get mean and std CV scores
+    cv_mean, cv_std, _, _ = _summarize_cv_scores(cv_scores)
+    
+    return cv_mean, cv_std
+
+
+def objective_train_model(
+    trial: optuna.Trial,
+    species_training_gdf: gpd.GeoDataFrame,
+    base_model_config: ModelConfig,
+    available_features: List[str],
+    latin_name: str,
+    activity_type: str,
+    min_presence: int,
+    n_cv_folds: int = 2,
+    stability_penalty: float = 0.05,
+    feature_penalty: float = 0.005,
+    correlation_penalty: float = 0.02,
+    precomputed_corr_matrix: Optional[pd.DataFrame] = None,
+) -> float:
+    """Optuna objective for a single species–activity combination.
+    
+    Args:
+        trial: Optuna trial object.
+        species_training_gdf: Pre-computed training data (presence + background,
+            with EVs, class, and sample_weight) for this species–activity pair.
+        base_model_config: Base model config.
+        available_features: List of available variables for tuning / feature selection.
+        latin_name: Species latin name.
+        activity_type: Activity type.
+        min_presence: Minimum presence records required.
+        n_cv_folds: Number of CV folds.
+        stability_penalty: Penalty for high standard deviation.
+        feature_penalty: Penalty for high number of features.
+        correlation_penalty: Penalty multiplier for feature correlation.
+        precomputed_corr_matrix: Precomputed correlation matrix for all features.
+        
+    Returns:
+        Objective value derived from CV AUC (to maximize).
+    """
+    # Basic integrity checks on pre-computed training data
+    if len(species_training_gdf) == 0:
+        raise ValueError(
+            f"Trial {trial.number}: No training data for {latin_name} - {activity_type}"
+        )
+    
+    if "class" not in species_training_gdf.columns:
+        raise ValueError(
+            f"Trial {trial.number}: No 'class' column for {latin_name} - {activity_type}"
+        )
+    
+    n_presence = len(species_training_gdf[species_training_gdf["class"] == 1])
+    if n_presence < min_presence:
+        raise ValueError(
+            f"Trial {trial.number}: Insufficient presence records ({n_presence} < {min_presence}) "
+            f"for {latin_name} - {activity_type}"
+        )
+
+    # Suggest hyperparameters (only model params and features)
+    maxent_params = suggest_maxent_hyperparameters(trial)
+    
+    # Suggest feature selection for this single activity type
+    selected_features = pick_features(
+        trial, available_features,
+    )
+    
+    # Create model config
+    model_config = DefaultMaxentConfig(
+        **maxent_params,
+        convergence_tolerance=base_model_config.maxent.convergence_tolerance,
+        use_lambdas=base_model_config.maxent.use_lambdas,
+        n_lambdas=base_model_config.maxent.n_lambdas,
+        class_weights=base_model_config.maxent.class_weights,
+    )
+    
+    # Verify all required features are in the data
+    missing_features = [f for f in selected_features if f not in species_training_gdf.columns]
+    if missing_features:
+        raise ValueError(
+            f"Trial {trial.number}: Missing features {missing_features} for {latin_name} - {activity_type}"
+        )
+
+    # Create training data object
+    training_data = TrainingData(
+        latin_name=latin_name,
+        activity_type=ActivityType(activity_type),
+        occurrence=species_training_gdf,
+        maxent_config=model_config,
+        model_features=selected_features,
+    )
+    
+    # Train model and get scores
+    mean_auc, std_auc = eval_model(
+        data=training_data,
+        max_threads_per_model=1,  # Use 1 thread per model for tuning
+        n_cv_folds=n_cv_folds,
+    )
+    
+    # If all CV folds failed (NaN scores), prune this trial
+    # This allows Optuna to continue with other trials instead of crashing
+    if np.isnan(mean_auc) or np.isnan(std_auc):
+        logger.warning(
+            f"Trial {trial.number}: No valid scores returned for {latin_name} - {activity_type}, "
+            f"pruning trial"
+        )
+        raise optuna.TrialPruned(
+            f"No valid CV scores (all folds failed) for {latin_name} - {activity_type}"
+        )
+    
+    # Calculate feature penalty
+    n_features = len(selected_features)
+    feature_penalty_score = feature_penalty * n_features
+    
+    # Calculate correlation penalty using precomputed matrix
+    mean_abs_correlation = calculate_feature_correlation_penalty(
+        selected_features=selected_features,
+        precomputed_corr_matrix=precomputed_corr_matrix,
+    )
+    correlation_penalty_score = correlation_penalty * mean_abs_correlation
+    
+    # Calculate composite objective score
+    stability_penalty_score = stability_penalty * std_auc  # Penalize high std (instability)
+    objective_value = mean_auc - stability_penalty_score - feature_penalty_score - correlation_penalty_score
+    
+    # Ensure non-negative
+    objective_value = max(0.0, objective_value)
+    
+    # Store metrics and metadata as user attributes for logging / analysis
+    trial.set_user_attr("mean_auc", mean_auc)
+    trial.set_user_attr("std_auc", std_auc)
+    trial.set_user_attr("n_features", n_features)
+    trial.set_user_attr("n_cv_folds", n_cv_folds)
+    trial.set_user_attr("mean_abs_correlation", mean_abs_correlation)
+    trial.set_user_attr("correlation_penalty_score", correlation_penalty_score)
+    
+    # Report intermediate value for pruning
+    trial.report(objective_value, step=trial.number)
+    
+    # Handle pruning
+    if trial.should_prune():
+        raise optuna.TrialPruned()
+    
+    return objective_value
+
+
+def write_best_config(
     study: optuna.Study,
     base_model_config: ModelConfig,
     base_variables_config: VariablesConfig,
     output_model_config_path: Path,
     output_variables_config_path: Path,
-    activity_types: Optional[List[str]] = None,
+    latin_name: str,
+    activity_type: str,
 ) -> None:
-    """Write best hyperparameters to config files.
+    """Write best hyperparameters to config files for a single species-activity combination.
     
     Args:
         study: Optuna study object
@@ -391,74 +566,65 @@ def write_best_configs(
         base_variables_config: Base variables config
         output_model_config_path: Path to write best model config
         output_variables_config_path: Path to write best variables config
-        activity_types: List of activity types (optional)
+        latin_name: Species latin name
+        activity_type: Activity type
     """
     best_trial = study.best_trial
     
-    logger.info(f"Best trial: {best_trial.number}")
-    logger.info(f"Best value (mean CV AUC): {best_trial.value:.4f}")
-    logger.info("Best parameters:")
-    for key, value in best_trial.params.items():
-        logger.info(f"  {key}: {value}")
+    logger.info(f"Best trial for {latin_name} - {activity_type}: {best_trial.number}")
+    logger.info(
+        "Best objective value (mean AUC - stability_penalty - feature_penalty - correlation_penalty): "
+        f"{best_trial.value:.4f}"
+    )
+    
+    # Log mean AUC if available
+    mean_auc = best_trial.user_attrs.get("mean_auc")
+    if mean_auc is not None:
+        logger.info(f"Corresponding mean CV AUC: {mean_auc:.4f}")
     
     # Extract best parameters
+    feature_types_str = best_trial.params["feature_types"]
+    feature_types = feature_types_str.split(",") if "," in feature_types_str else [feature_types_str]
+    
+    # Get n_hinge_features and n_threshold_features only if they were suggested
+    n_hinge_features = best_trial.params.get("n_hinge_features", 0)
+    n_threshold_features = best_trial.params.get("n_threshold_features", 0)
+    
+    # Fixed parameters (not tuned, consistent across all models)
+    clamp = False
+    tau = 0.5
+    transform = "cloglog"
+    
     best_maxent_params = {
-        "feature_types": best_trial.params["feature_types"],
+        "feature_types": feature_types,
         "beta_multiplier": best_trial.params["beta_multiplier"],
         "beta_lqp": best_trial.params["beta_lqp"],
         "beta_hinge": best_trial.params["beta_hinge"],
         "beta_threshold": best_trial.params["beta_threshold"],
         "beta_categorical": best_trial.params["beta_categorical"],
-        "n_hinge_features": best_trial.params["n_hinge_features"],
-        "n_threshold_features": best_trial.params["n_threshold_features"],
-        "clamp": best_trial.params["clamp"],
-        "tau": best_trial.params["tau"],
-        "transform": best_trial.params["transform"],
+        "n_hinge_features": n_hinge_features,
+        "n_threshold_features": n_threshold_features,
+        "clamp": clamp,
+        "tau": tau,
+        "transform": transform,
     }
     
-    best_sampling_params = {
-        "background": {
-            "factor": best_trial.params["background_factor"],
-            "min_bg": best_trial.params["background_min_bg"],
-            "max_bg": best_trial.params["background_max_bg"],
-        },
-        "subset_background": best_trial.params["subset_background"],
-        "order_by_density_for_subset": best_trial.params["order_by_density_for_subset"],
-        "sample_weight_n_neighbors": best_trial.params["sample_weight_n_neighbors"],
-    }
+    # Reconstruct selected features from binary decisions
+    roster = base_variables_config.variables
+    selected_features = []
+    for feature in roster:
+        param_name = f"feature_{feature}"
+        if param_name in best_trial.params and best_trial.params[param_name]:
+            selected_features.append(feature)
     
-    # Reconstruct feature selection from best trial
-    # We need to re-run the feature selection logic with the best trial's parameters
-    if activity_types is None:
-        activity_types_list = list(base_variables_config.activity_feature_sets.keys())
-    else:
-        activity_types_list = activity_types
+    # If no features were selected (shouldn't happen, but handle gracefully)
+    if len(selected_features) == 0:
+        logger.warning(f"No features selected for {latin_name} - {activity_type}, using all features")
+        selected_features = roster.copy()
     
-    best_feature_selection = {}
-    for activity_type in activity_types_list:
-        n_features_key = f"n_features_{activity_type}"
-        if n_features_key in best_trial.params:
-            n_features = best_trial.params[n_features_key]
-            # Reconstruct the feature selection using the same hash-based approach
-            trial_seed = hash((best_trial.number, activity_type)) % (2**32)
-            np.random.seed(trial_seed)
-            selected_indices = np.random.choice(
-                len(base_variables_config.roster),
-                size=min(n_features, len(base_variables_config.roster)),
-                replace=False,
-            )
-            selected = [base_variables_config.roster[i] for i in sorted(selected_indices)]
-            best_feature_selection[activity_type] = selected
-        else:
-            # Fallback to base config
-            best_feature_selection[activity_type] = base_variables_config.activity_feature_sets.get(
-                activity_type, []
-            )
-    
-    # Write model config
+    # Create model config - only include maxent section (what we're tuning)
     model_config_dict = {
         "model": {
-            "record_age_years": base_model_config.record_age_years,
             "maxent": {
                 **best_maxent_params,
                 "convergence_tolerance": base_model_config.maxent.convergence_tolerance,
@@ -466,31 +632,24 @@ def write_best_configs(
                 "n_lambdas": base_model_config.maxent.n_lambdas,
                 "class_weights": base_model_config.maxent.class_weights,
             },
-            "sampling": {
-                "min_presence": base_model_config.sampling.min_presence,
-                "subset_occurrence": base_model_config.sampling.subset_occurrence,
-                **best_sampling_params,
-            },
         }
     }
     
+    # Create variables config with just the selected features list
+    # Simple structure: just a list of variables
+    variables_config_dict = {
+        "variables": selected_features
+    }
+    
+    # Write configs
     with open(output_model_config_path, "w") as f:
         yaml.dump(model_config_dict, f, default_flow_style=False, sort_keys=False)
-    
-    logger.info(f"Wrote best model config to {output_model_config_path}")
-    
-    # Write variables config
-    variables_config_dict = {
-        "variables": {
-            "roster": base_variables_config.roster,
-            "activity_feature_sets": best_feature_selection,
-        }
-    }
     
     with open(output_variables_config_path, "w") as f:
         yaml.dump(variables_config_dict, f, default_flow_style=False, sort_keys=False)
     
-    logger.info(f"Wrote best variables config to {output_variables_config_path}")
+    logger.info(f"Best configs written for {latin_name} - {activity_type}")
+
 
 
 def tune_hyperparameters(
@@ -498,213 +657,361 @@ def tune_hyperparameters(
     model_config_path: Path,
     variables_config_path: Path,
     bats_file: Path,
-    background_file: Path,
     ev_file: Path,
     output_dir: Path,
-    grid_points_file: Optional[Path] = None,
     n_trials: int = 50,
-    subset_occurrence: int = 100,
+    stability_penalty: float = 0.05,
+    feature_penalty: float = 0.0075,
+    correlation_penalty: float = 0.01,
+    correlation_sample_size: int = 10_000,
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     study_name: Optional[str] = None,
     storage: Optional[str] = None,
     verbose: bool = False,
-) -> optuna.Study:
-    """Run hyperparameter tuning using Optuna.
+    # Background point generation parameters (fixed, not tuned)
+    n_background_points: int = 4000,
+    background_method: BackgroundMethod = BackgroundMethod.CONTRAST,
+    background_value: float = 0.00,
+    sigma: float = 6.5,
+    transform_method: TransformMethod = TransformMethod.PRESENCE,
+    # Species-specific processing parameters (fixed, not tuned)
+    grid_size_m: float = 2000,
+    d_min: float = 500,
+    d_max: float = np.inf,
+    sample_weight_n_neighbors: int = 10,
+    # Grid sampling for subsetting data
+    subset_grid_size_m: float = 2000,  # Larger grid for subsetting
+    # Tuning optimization parameters
+    n_cv_folds: int = 2,  # Number of CV folds (reduced from 3 for faster tuning)
+    n_jobs: Optional[int] = None,  # Parallel trials (None = sequential)
+) -> Optional[optuna.Study]:
+    """Run hyperparameter tuning using Optuna with the new modular approach.
+    
+    This function:
+    - Does expensive operations once (convert EVs, annotate points, generate background)
+    - Uses grid sampling to subset data for faster tuning
+    - Only tunes model parameters and feature selection (not background points)
     
     Args:
         project_config_path: Path to project config
         model_config_path: Path to base model config
         variables_config_path: Path to base variables config
         bats_file: Path to bat occurrence data
-        background_file: Path to background points
         ev_file: Path to environmental variables
         output_dir: Output directory for tuning results
-        grid_points_file: Path to grid points (optional)
         n_trials: Number of Optuna trials to run
-        subset_occurrence: Number of occurrence records to use for tuning
+        stability_penalty: Penalty for high standard deviation
+        feature_penalty: Penalty for high number of features
+        correlation_penalty: Penalty multiplier for feature correlation
+        correlation_sample_size: Number of points to sample for correlation calculation
         species: List of species to tune (optional)
         activity_types: List of activity types to tune (optional)
         study_name: Name for Optuna study (optional)
         storage: Optuna storage URL (optional, for distributed tuning)
         verbose: Enable verbose logging
+        n_background_points: Number of background points per activity (fixed)
+        background_method: Background generation method (fixed)
+        background_value: Background value (fixed)
+        sigma: Gaussian smoothing sigma (fixed)
+        transform_method: Transform method (fixed)
+        grid_size_m: Grid size for training data sampling (fixed)
+        d_min: Minimum distance for background filtering (fixed)
+        d_max: Maximum distance for background filtering (fixed)
+        sample_weight_n_neighbors: Number of neighbors for sample weighting (fixed)
+        subset_grid_size_m: Grid size for subsetting data (larger = fewer points)
+        n_cv_folds: Number of CV folds for evaluation (reduced for faster tuning)
+        n_jobs: Number of parallel trials (None = sequential, 1 = sequential, >1 = parallel)
         
     Returns:
         Optuna study object
     """
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
-    logger.info("=== Starting Hyperparameter Tuning ===")
+    logger.info("=== Starting Hyperparameter Tuning (Modular Approach) ===")
     
     # Load base configs
     project_config = load_project_config(project_config_path)
     base_model_config = load_model_config(model_config_path)
-    base_variables_config = load_variables_config(variables_config_path)
+    
     
     # Create output directory
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Create temporary directory for trial configs
-    temp_dir = Path(tempfile.mkdtemp(prefix="sdm_tune_"))
-    logger.info(f"Using temporary directory: {temp_dir}")
+    # Configure MLflow
+    _configure_mlflow_from_config(project_config)
     
-    # Annotate points once before starting trials (this is expensive and doesn't change)
-    logger.info("=== Annotating Points (one-time setup) ===")
-    logger.info("Loading data for annotation...")
-    bats_ant = load_bat_data(bats_file)
-    background, _ = load_background_points(background_file)
+    # ========================================================================
+    # LOAD CORE DATA (IN-MEMORY OBJECTS)
+    # ========================================================================
+    logger.info("Loading input data for hyperparameter tuning...")
     
-    logger.info("Loading environmental variables...")
-    ev_data, ev_raster_path = load_environmental_variables(ev_file)
-    all_ev_columns = list(ev_data.data_vars.keys())
+    # Load raw bat occurrence data (presence-only)
+    occurrence_gdf = load_bat_data(bats_file)
+    occurrence_gdf = occurrence_gdf[occurrence_gdf.accuracy <= 100]
     
-    # Filter to roster if specified
-    if base_variables_config.roster:
-        roster_matches = [col for col in all_ev_columns if col in base_variables_config.roster]
-        if roster_matches:
-            ev_columns = roster_matches
-            logger.info(
-                f"Filtered environmental variables to {len(ev_columns)} columns based on roster"
-            )
-        else:
-            ev_columns = all_ev_columns
-            logger.warning(
-                "No roster variables matched available environmental variables; "
-                f"using full set ({len(ev_columns)} columns)."
-            )
-    else:
-        ev_columns = all_ev_columns
-        logger.info(f"Found {len(ev_columns)} environmental variables")
+    # Optional filtering of occurrence records
+    if species is not None:
+        logger.info(f"Filtering to species: {', '.join(species)}")
+        occurrence_gdf = occurrence_gdf[occurrence_gdf.latin_name.isin(species)]
     
-    logger.info("Annotating points with environmental variables...")
-    annotated_bats_gdf, annotated_background_gdf = annotate_points(
-        bats_ant, background, ev_raster_path, all_ev_columns
+    if activity_types is not None:
+        logger.info(f"Filtering to activity types: {', '.join(activity_types)}")
+        occurrence_gdf = occurrence_gdf[occurrence_gdf.activity_type.isin(activity_types)]
+    
+    # Load boundary
+    boundary_path = Path(project_config.paths.boundary)
+    boundary = load_boundary(
+        filepath=boundary_path, buffer_distance=0, target_crs=27700
     )
-    logger.info("Annotation complete - will reuse for all trials")
+    boundary = simplify_boundary(boundary, tolerance=100)
     
-    # Save annotated data to temporary files for reuse
-    annotated_bats_file = temp_dir / "annotated_bats.parquet"
-    annotated_background_file = temp_dir / "annotated_background.parquet"
-    annotated_bats_gdf.to_parquet(annotated_bats_file)
-    annotated_background_gdf.to_parquet(annotated_background_file)
-    logger.info(f"Saved annotated data to temporary files for reuse")
+    # Load environmental variables
+    evs_to_model, _ = load_environmental_variables(ev_file)
     
-    # Configure MLflow and create parent run for tuning session
-    project_config = load_project_config(project_config_path)
-    mlflow.set_tracking_uri(project_config.mlflow.tracking_uri)
-    mlflow.set_experiment(project_config.mlflow.experiment_name)
-    
+    # ========================================================================
+    # ONE-TIME STUDY DATA PREPARATION (IN-MEMORY)
+    # ========================================================================
+    (
+        presence_with_evs_gdf,
+        background_with_evs_gdf,
+        available_features,
+    ) = prepare_training_data(
+        occurrence_gdf=occurrence_gdf,
+        boundary=boundary,
+        evs_to_model=evs_to_model,
+        n_background_points=n_background_points,
+        background_method=background_method,
+        background_value=background_value,
+        sigma=sigma,
+        transform_method=transform_method,
+    )
+
+    base_variables_config = VariablesConfig(
+        variables=available_features,
+    )
+    # ========================================================================
+    # OPTUNA TUNING - PER SPECIES-ACTIVITY COMBINATION
+    # ========================================================================
     parent_run_name = f"Hyperparameter_Tuning_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    parent_run = mlflow.start_run(run_name=parent_run_name)
-    logger.info(f"Started MLflow parent run: {parent_run_name} (ID: {parent_run.info.run_id})")
+    _parent_run = mlflow.start_run(run_name=parent_run_name)
+    logger.info(f"Started MLflow parent run: {parent_run_name}")
+    
+    # Aggregate results across all combinations
+    all_results: List[TuningResult] = []
     
     try:
         # Log tuning configuration
         mlflow.log_params({
             "tuning_n_trials": n_trials,
-            "tuning_subset_occurrence": subset_occurrence,
-            "tuning_study_name": study_name or "sdm_hyperparameter_tuning",
+            "tuning_subset_grid_size_m": subset_grid_size_m,
+            "tuning_approach": "per_species_activity",
         })
         if species:
             mlflow.log_param("tuning_species", ",".join(species))
         if activity_types:
             mlflow.log_param("tuning_activity_types", ",".join(activity_types))
         
-        # Create Optuna study
-        study_name = study_name or "sdm_hyperparameter_tuning"
-        sampler = TPESampler(seed=42)
-        pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=10)
-        
-        study = optuna.create_study(
-            study_name=study_name,
-            direction="maximize",
-            sampler=sampler,
-            pruner=pruner,
-            storage=storage,
-            load_if_exists=True,
+        # Get all species-activity combinations present in the (annotated) data
+        combinations_df = (
+            presence_with_evs_gdf[["latin_name", "activity_type"]]
+            .drop_duplicates()
         )
+        combinations = list(combinations_df.itertuples(index=False, name=None))
+        logger.info(f"Tuning {len(combinations)} species-activity combinations...")
         
-        # Create objective function with fixed arguments (including pre-annotated data)
-        def objective_fn(trial):
-            return objective(
-                trial,
-                project_config_path,
-                base_model_config,
-                base_variables_config,
-                bats_file,
-                background_file,
-                ev_file,
-                grid_points_file,
-                output_dir,
-                subset_occurrence,
-                species,
-                activity_types,
-                temp_dir,
-                annotated_bats=annotated_bats_gdf,
-                annotated_background=annotated_background_gdf,
-                all_ev_columns=all_ev_columns,
+        # Loop over each species-activity combination
+        for idx, (latin_name, activity_type) in enumerate(combinations, 1):
+            logger.info(f"\n{'='*80}")
+            logger.info(f"Tuning {idx}/{len(combinations)}: {latin_name} - {activity_type}")
+            logger.info(f"{'='*80}")
+            
+            # Check if we have data for this combination
+            species_presence_with_evs_gdf = presence_with_evs_gdf[
+                (presence_with_evs_gdf["latin_name"] == latin_name) &
+                (presence_with_evs_gdf["activity_type"] == activity_type)
+            ]
+            n_presence = len(species_presence_with_evs_gdf)
+            
+            if n_presence < base_model_config.sampling.min_presence:
+                logger.warning(
+                    f"Skipping {latin_name} - {activity_type}: "
+                    f"insufficient presence records ({n_presence} < {base_model_config.sampling.min_presence})"
+                )
+                continue
+            
+            # Prepare training data once for this combination (shared across trials)
+            species_training_gdf = prepare_species_training_data(
+                presence_data=presence_with_evs_gdf,
+                background_data=background_with_evs_gdf,
+                latin_name=latin_name,
+                activity_type=activity_type,
+                ev_columns=available_features,
+                grid_size_m=grid_size_m,
+                d_min=d_min,
+                d_max=d_max,
+                sample_weight_n_neighbors=sample_weight_n_neighbors,
             )
-        
-        # Run optimization
-        logger.info(f"Starting optimization with {n_trials} trials...")
-        study.optimize(objective_fn, n_trials=n_trials, show_progress_bar=True)
-        
-        # Write best configs
-        best_model_config_path = output_dir / "best_model_config.yml"
-        best_variables_config_path = output_dir / "best_variables_config.yml"
-        
-        write_best_configs(
-            study,
-            base_model_config,
-            base_variables_config,
-            best_model_config_path,
-            best_variables_config_path,
-            activity_types,
-        )
-        
-        # Log best results to MLflow parent run
-        mlflow.log_metric("best_mean_cv_auc", study.best_value)
-        mlflow.log_metric("n_trials_completed", len(study.trials))
-        mlflow.log_metric("n_trials_pruned", len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]))
-        mlflow.log_metric("n_trials_complete", len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]))
-        
-        # Log best parameters
-        for key, value in study.best_params.items():
-            mlflow.log_param(f"best_{key}", value)
-        
-        # Log best config files as artifacts
-        mlflow.log_artifact(str(best_model_config_path), "best_configs")
-        mlflow.log_artifact(str(best_variables_config_path), "best_configs")
-        
-        # Log Optuna study summary
-        study_summary = {
-            "best_value": float(study.best_value),
-            "best_trial_number": study.best_trial.number,
-            "n_trials": len(study.trials),
-        }
-        import json
-        study_summary_path = output_dir / "study_summary.json"
-        with open(study_summary_path, "w") as f:
-            json.dump(study_summary, f, indent=2)
-        mlflow.log_artifact(str(study_summary_path), "best_configs")
-        
-        logger.info("=== Hyperparameter Tuning Complete ===")
-        logger.info(f"Best mean CV AUC: {study.best_value:.4f}")
-        logger.info(f"Best configs written to:")
-        logger.info(f"  - {best_model_config_path}")
-        logger.info(f"  - {best_variables_config_path}")
+
+            # Basic sanity checks before starting tuning for this combination
+            if len(species_training_gdf) == 0:
+                logger.warning(
+                    f"Skipping {latin_name} - {activity_type}: "
+                    f"no training data generated by prepare_species_training_data"
+                )
+                continue
+
+            if "class" not in species_training_gdf.columns:
+                logger.warning(
+                    f"Skipping {latin_name} - {activity_type}: "
+                    f"missing 'class' column in training data"
+                )
+                continue
+
+            n_presence_training = len(species_training_gdf[species_training_gdf["class"] == 1])
+            if n_presence_training < base_model_config.sampling.min_presence:
+                logger.warning(
+                    f"Skipping {latin_name} - {activity_type}: "
+                    f"only {n_presence_training} presence records in training data "
+                    f"(minimum {base_model_config.sampling.min_presence} required)"
+                )
+                continue
+
+            # Create study name for this combination
+            study_name_combination = f"{study_name or 'sdm_tuning'}_{latin_name}_{activity_type}".replace(" ", "_")
+            sampler = TPESampler(seed=42)
+            pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=10)
+            
+            study = optuna.create_study(
+                study_name=study_name_combination,
+                direction="maximize",
+                sampler=sampler,
+                pruner=pruner,
+                storage=storage,
+                load_if_exists=True,
+            )
+            
+            # Precompute correlation matrix once for this species-activity combination
+            logger.debug(f"Precomputing correlation matrix for {latin_name} - {activity_type}...")
+            precomputed_corr_matrix = precompute_correlation_matrix(
+                training_gdf=species_training_gdf,
+                available_features=available_features,
+                sample_size=correlation_sample_size,
+            )
+            
+            # Create objective function for this combination
+            def objective_fn(trial: optuna.Trial):
+                return objective_train_model(
+                    trial,
+                    species_training_gdf=species_training_gdf,
+                    base_model_config=base_model_config,
+                    available_features=available_features,
+                    latin_name=latin_name,
+                    activity_type=activity_type,
+                    min_presence=base_model_config.sampling.min_presence,
+                    n_cv_folds=n_cv_folds,
+                    stability_penalty=stability_penalty,
+                    feature_penalty=feature_penalty,
+                    correlation_penalty=correlation_penalty,
+                    precomputed_corr_matrix=precomputed_corr_matrix,
+                )
+            
+            # Enqueue default trial with all features and sensible MaxEnt config
+            default_params = get_default_trial_params(available_features)
+            study.enqueue_trial(default_params)
+            logger.info(
+                f"Enqueued default trial with all {len(available_features)} features "
+                f"and default MaxEnt hyperparameters"
+            )
+            
+            # Run optimization
+            n_jobs_optuna = n_jobs if n_jobs is not None else 1
+            logger.info(f"Starting optimization with {n_trials} trials (n_jobs={n_jobs_optuna}, n_cv_folds={n_cv_folds})...")
+            study.optimize(
+                objective_fn,
+                n_trials=n_trials,
+                n_jobs=n_jobs_optuna,
+                show_progress_bar=verbose,
+            )
+            
+            # Check if any trials completed successfully
+            n_completed = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+            
+            if n_completed > 0:
+                # Write best configs for this combination
+                combination_dir = get_tuning_config_path(output_dir, get_model_id([latin_name, activity_type]))
+                combination_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Use consistent file names (not "best_*") for easy loading
+                model_config_path = combination_dir / "model_config.yml"
+                variables_config_path = combination_dir / "variables_config.yml"
+                
+                write_best_config(
+                    study,
+                    base_model_config,
+                    base_variables_config,
+                    model_config_path,
+                    variables_config_path,
+                    latin_name,
+                    activity_type,
+                )
+                
+                # Store results for this study
+                best_trial = study.best_trial
+                mean_cv_auc = best_trial.user_attrs.get("mean_auc")
+                std_cv_auc = best_trial.user_attrs.get("std_auc")
+                n_features = best_trial.user_attrs.get("n_features")
+
+                all_results.append(
+                    TuningResult(
+                        latin_name=latin_name,
+                        activity_type=activity_type,
+                        study_name=study.study_name,
+                        best_objective=float(study.best_value),
+                        mean_cv_auc=float(mean_cv_auc) if mean_cv_auc is not None else None,
+                        std_cv_auc=float(std_cv_auc) if std_cv_auc is not None else None,
+                        n_features=int(n_features) if n_features is not None else None,
+                        n_features_available=len(available_features),
+                        best_trial_number=best_trial.number,
+                        n_trials=len(study.trials),
+                        n_trials_pruned=len(
+                            [t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]
+                        ),
+                        n_trials_complete=n_completed,
+                        stability_penalty=stability_penalty,
+                        feature_penalty=feature_penalty,
+                        correlation_penalty=correlation_penalty,
+                        min_presence=base_model_config.sampling.min_presence,
+                        n_cv_folds=n_cv_folds,
+                        grid_size_m=grid_size_m,
+                        subset_grid_size_m=subset_grid_size_m,
+                        n_background_points=n_background_points,
+                        background_method=background_method.value,
+                        transform_method=transform_method.value,
+                    )
+                )
+            else:
+                # All trials were pruned - skip writing configs
+                logger.warning(
+                    f"Skipping config write for {latin_name} - {activity_type}: "
+                    f"all {len(study.trials)} trials were pruned (no valid models)"
+                )
+            
+
+        logger.info("\n=== Hyperparameter Tuning Complete ===")
+        logger.info(f"Tuned {len(all_results)} species-activity combinations")
+        if all_results:
+            mean_best_auc = np.mean([r.best_objective for r in all_results])
+            logger.info(f"Mean best objective value: {mean_best_auc:.4f}")
+
+            # Write summary CSV with one row per species–activity model
+            results_df = pd.DataFrame([r.model_dump() for r in all_results])
+            csv_path = output_dir / "tuning_results.csv"
+            results_df.to_csv(csv_path, index=False)
+            logger.info(f"Wrote tuning summary CSV to {csv_path}")
+
         logger.info(f"Results logged to MLflow parent run: {parent_run_name}")
         
     finally:
         # End parent run
         mlflow.end_run()
-        
-        # Clean up temporary directory
-        try:
-            shutil.rmtree(temp_dir)
-            logger.debug(f"Cleaned up temporary directory: {temp_dir}")
-        except Exception as e:
-            logger.warning(f"Failed to clean up temporary directory {temp_dir}: {e}")
-    
-    return study
-

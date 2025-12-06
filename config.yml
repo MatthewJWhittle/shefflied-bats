@@ -5,6 +5,7 @@ paths:
   raw_data: "data/raw"
   processed_data: "data/processed"
   models: "data/sdm_models"
+  tuning_dir: "data/sdm_tuning"
   predictions: "data/sdm_predictions"
   model_config: "model_config.yml"
   variables_config: "variables_config.yml"

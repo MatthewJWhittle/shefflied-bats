@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
 import geopandas as gpd
 import numpy as np
@@ -12,6 +12,7 @@ class PathsConfig(BaseModel):
     predictions: str
     model_config_path: str = Field(alias="model_config")
     variables_config_path: str = Field(alias="variables_config")
+    tuning_dir: str
     occurence_data: str
     background_points: str
     boundary: str
@@ -75,9 +76,8 @@ class SamplingConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    record_age_years: int
     maxent: MaxentConfigModel
-    sampling: SamplingConfig
+    sampling: Optional[SamplingConfig] = None
 
 
 class SDMModel(BaseModel):
@@ -92,6 +92,8 @@ class SDMModel(BaseModel):
 
 class TrainingData(SDMModel):
     occurrence: gpd.GeoDataFrame
+    maxent_config: Any  # DefaultMaxentConfig - using Any to avoid circular imports, required for training
+    model_features: List[str]  # Required for training - list of feature column names to use
 
 
 class TrainingResults(SDMModel):
@@ -107,7 +109,10 @@ class TrainingResults(SDMModel):
 
 
 class VariablesConfig(BaseModel):
-    roster: List[str]
-    activity_feature_sets: Dict[str, List[str]]
+    variables: List[str]
 
+    def validate(self, features: List[str]) -> "VariablesConfig":
+        if not set(self.variables).issubset(set(features)):
+            raise ValueError(f"Variables config contains features that are not in the features list: {set(self.variables) - set(features)}")
+        return self
 

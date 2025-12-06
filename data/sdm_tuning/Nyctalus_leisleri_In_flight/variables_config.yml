@@ -1,0 +1,14 @@
+variables:
+- climate_stats_temp_ann_avg
+- os_distance_distance_to_buildings
+- terrain_stats_twi
+- climate_bioclim_bio_9
+- os_distance_distance_to_major_roads
+- os_distance_distance_to_water
+- ceh_landcover_arable_500m
+- ceh_landcover_improved_grassland_500m
+- ceh_landcover_coniferous_woodland_500m
+- climate_bioclim_bio_7
+- vom_vegetation_height_mean
+- vom_vegetation_height_mean_500m
+- ceh_landcover_broadleaved_woodland_500m

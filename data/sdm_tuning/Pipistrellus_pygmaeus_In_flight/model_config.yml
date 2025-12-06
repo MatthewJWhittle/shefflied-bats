@@ -1,0 +1,20 @@
+model:
+  maxent:
+    feature_types:
+    - linear
+    - hinge
+    - quadratic
+    beta_multiplier: 4.827894898273879
+    beta_lqp: 4.909364295672467
+    beta_hinge: 1.5323926458643031
+    beta_threshold: 2.682306997937571
+    beta_categorical: 1.5386144096403003
+    n_hinge_features: 8
+    n_threshold_features: 0
+    clamp: false
+    tau: 0.5
+    transform: cloglog
+    convergence_tolerance: 1.0e-05
+    use_lambdas: best
+    n_lambdas: 100
+    class_weights: balanced
