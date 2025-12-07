@@ -543,6 +543,8 @@ def _configure_mlflow_from_config(project_config: ProjectConfig) -> None:
 def train_single_model(
     data: TrainingData,
     max_threads_per_model: int,
+    n_cv_folds: int = 3,
+    min_presence: int = 15,
 ) -> TrainingResults:
     """Train a single MaxEnt model for a given set of training data."""
     try:
@@ -575,10 +577,15 @@ def train_single_model(
             model_config=model_config,
         )
         logger.info(f"Model features: {model_features}")
+        # do 2 folds if n_presence < 15, 3 folds otherwise
+        n_presence = len(data.occurrence[data.occurrence["class"] == 1])
+        if n_presence < min_presence:
+            n_cv_folds = 2
+            logger.info(f"Using 2 folds for {latin_name} - {activity_type.value} because n_presence < {min_presence}")
         final_model, cv_models, cv_scores = evaluate_and_train_maxent_model(
             model=model,
             occurrence_gdf=data.occurrence,
-            n_cv_folds=3,
+            n_cv_folds=n_cv_folds,
             metric_fn=roc_auc_score,
             feature_columns=model_features,  # Explicitly pass feature columns to avoid using extra columns as features
         )

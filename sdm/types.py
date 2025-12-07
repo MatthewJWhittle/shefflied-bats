@@ -1,11 +1,14 @@
-from typing import List, Optional, Any
+from __future__ import annotations
+
+from typing import List, Optional, Any, TYPE_CHECKING
 
 import geopandas as gpd
 import numpy as np
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from sdm.occurrence.sampling import BackgroundMethod, TransformMethod
+if TYPE_CHECKING:
+    from sdm.occurrence.sampling import BackgroundMethod, TransformMethod
 
 class PathsConfig(BaseModel):
     raw_data: str
@@ -74,17 +77,33 @@ class BackgroundConfig(BaseModel):
     n_background_points: int = 4000
     background_value: float = 0.00
     sigma: float = 6.5
-    background_method: BackgroundMethod = Field(default=BackgroundMethod.CONTRAST)
-    transform_method: TransformMethod = Field(default=TransformMethod.PRESENCE)
+    background_method: Any = Field(default="contrast")  # type: ignore[assignment]
+    transform_method: Any = Field(default="presence")  # type: ignore[assignment]
     
-    @field_validator("background_method", "transform_method", mode="before")
+    @field_validator("background_method", mode="before")
     @classmethod
-    def normalize_enum(cls, v: Any) -> str:
-        """Normalize enum input to lowercase string for StrEnum conversion."""
-        if isinstance(v, (BackgroundMethod, TransformMethod)):
-            return v.value
+    def validate_background_method(cls, v: Any) -> Any:
+        """Normalize and convert background_method string to enum."""
+        # Lazy import to avoid circular dependency
+        from sdm.occurrence.sampling import BackgroundMethod
+        
+        if isinstance(v, BackgroundMethod):
+            return v
         if isinstance(v, str):
-            return v.lower()
+            return BackgroundMethod(v.lower())
+        return v
+    
+    @field_validator("transform_method", mode="before")
+    @classmethod
+    def validate_transform_method(cls, v: Any) -> Any:
+        """Normalize and convert transform_method string to enum."""
+        # Lazy import to avoid circular dependency
+        from sdm.occurrence.sampling import TransformMethod
+        
+        if isinstance(v, TransformMethod):
+            return v
+        if isinstance(v, str):
+            return TransformMethod(v.lower())
         return v
     
     model_config = ConfigDict(populate_by_name=True)
@@ -141,4 +160,6 @@ class VariablesConfig(BaseModel):
         if not set(self.variables).issubset(set(features)):
             raise ValueError(f"Variables config contains features that are not in the features list: {set(self.variables) - set(features)}")
         return self
+
+
 
