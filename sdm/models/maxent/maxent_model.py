@@ -59,7 +59,7 @@ class DefaultMaxentConfig(MaxentConfig):
             beta_categorical: float = 1.0,
             n_hinge_features: int = 10,
             n_threshold_features: int = 10,
-            clamp: bool = False,  # Fixed to False for consistency with tuning and comparable suitability maps
+            clamp: bool = True,  
             convergence_tolerance: float = 1e-5,
             use_lambdas: str = "best",
             n_lambdas: int = 100,

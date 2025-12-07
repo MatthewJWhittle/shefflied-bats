@@ -1,13 +1,12 @@
 variables:
-- climate_stats_temp_ann_var
-- climate_stats_prec_ann_var
-- climate_stats_temp_mat_avg
+- climate_bioclim_bio_2
+- ceh_landcover_wetland
 - os_distance_distance_to_buildings
-- os_distance_distance_to_major_roads
-- os_cover_buildings
+- ceh_landcover_upland_heathland
+- vom_vegetation_height_std
+- ceh_landcover_suburban
 - terrain_stats_tpi
+- os_cover_water
+- terrain_stats_twi
 - ceh_landcover_coniferous_woodland
-- ceh_landcover_grassland_500m
-- os_cover_water_500m
-- ceh_landcover_urban_500m
-- ceh_landcover_improved_grassland_500m
+- ceh_landcover_suburban_500m

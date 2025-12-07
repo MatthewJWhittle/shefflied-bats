@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Optional, List, Tuple, Any, Dict
 import pickle
 import shutil
-import warnings
 
 import numpy as np
 import pandas as pd
@@ -216,51 +215,25 @@ def compute_shap_for_model(
     background = X.sample(n=n_background, random_state=random_state)
     
     # Prediction function returning probability for positive class
-    # Suppress overflow warnings from elapid and handle them gracefully
     def predict_fn(data):
-        with warnings.catch_warnings():
-            # Suppress overflow warnings from elapid's exp calculations
-            # Match any RuntimeWarning containing "overflow"
-            warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*overflow.*')
-            try:
-                proba = model.predict_proba(data)
-                # Clamp probabilities to valid range [0, 1] in case of overflow
-                proba = np.clip(proba, 0.0, 1.0)
-                return proba[:, positive_class]
-            except (OverflowError, FloatingPointError):
-                # If overflow still occurs, return safe default probabilities
-                logger.warning("Overflow in predict_proba, using safe defaults")
-                return np.full(len(data), 0.5)
+        proba = model.predict_proba(data)
+        return proba[:, positive_class]
     
     # Create SHAP explainer with permutation algorithm
-    # Suppress warnings during explainer creation and usage
-    with warnings.catch_warnings():
-        # Suppress overflow warnings from elapid
-        warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*overflow.*')
-        explainer = shap.Explainer(
-            predict_fn,
-            background,
-            algorithm="permutation",
-            model_output="probability",
-        )
-        
-        # Data to explain
-        n_explain = min(n_explain, len(X))
-        X_explain = X.sample(n=n_explain, random_state=random_state + 1)
-        
-        # Calculate SHAP values (suppress warnings here too)
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*overflow.*')
-            shap_values = explainer(X_explain)
+    explainer = shap.Explainer(
+        predict_fn,
+        background,
+        algorithm="permutation",
+        model_output="probability",
+    )
     
-    # Verify SHAP values have the correct number of features
-    if hasattr(shap_values, 'values'):
-        n_shap_features = shap_values.values.shape[1]
-        if n_shap_features != len(feature_names):
-            raise ValueError(
-                f"SHAP values have {n_shap_features} features but model expects {len(feature_names)}. "
-                f"Model features: {feature_names}, X_explain columns: {list(X_explain.columns)}"
-            )
+    # Data to explain
+    n_explain = min(n_explain, len(X))
+    X_explain = X.sample(n=n_explain, random_state=random_state + 1)
+    
+    # Calculate SHAP values
+    shap_values = explainer(X_explain)
+    
     
     return explainer, shap_values, X_explain
 
@@ -328,7 +301,7 @@ def generate_shap_plots(
     shap_values: shap.Explanation,
     X_explain: pd.DataFrame,
     model_output_dir: Path,
-    top_features: int = 5
+    top_features: Optional[int] = None
 ) -> Dict[str, Path]:
     """
     Generate SHAP plots for a single model.
@@ -340,7 +313,7 @@ def generate_shap_plots(
         shap_values: SHAP Explanation object
         X_explain: DataFrame of explained points
         model_output_dir: Directory to save plots (must exist and be cleared)
-        top_features: Number of top features for dependence plots
+        top_features: Number of top features for dependence plots (None = all features)
         
     Returns:
         Dictionary mapping plot type to file path
@@ -351,7 +324,7 @@ def generate_shap_plots(
     # Get the actual number of features from SHAP values
     n_features = shap_values.values.shape[1] if hasattr(shap_values, 'values') else len(X_explain.columns)
     # Display all features (or up to a reasonable max)
-    max_display = min(n_features, 25)
+    max_display = n_features
     
     importance_path = model_output_dir / "shap_importance.png"
     plt.figure(figsize=(10, 8))
@@ -363,14 +336,23 @@ def generate_shap_plots(
     plot_paths['importance'] = importance_path
     logger.debug(f"Saved importance plot to {importance_path} (showing {max_display} of {n_features} features)")
     
-    # Get top features by mean absolute SHAP value
-    mean_shap = np.abs(shap_values.values).mean(axis=0)
+    # Get feature names
     feature_names = shap_values.feature_names if hasattr(shap_values, 'feature_names') else X_explain.columns.tolist()
-    top_indices = np.argsort(mean_shap)[-top_features:][::-1]
-    top_feature_names = [feature_names[i] for i in top_indices]
     
-    # Dependence plots for top features
-    for i, feature_name in enumerate(top_feature_names):
+    # Determine which features to plot
+    if top_features is None:
+        # Plot all features
+        features_to_plot = feature_names
+        logger.debug(f"Generating dependence plots for all {len(features_to_plot)} features")
+    else:
+        # Get top features by mean absolute SHAP value
+        mean_shap = np.abs(shap_values.values).mean(axis=0)
+        top_indices = np.argsort(mean_shap)[-top_features:][::-1]
+        features_to_plot = [feature_names[i] for i in top_indices]
+        logger.debug(f"Generating dependence plots for top {len(features_to_plot)} of {len(feature_names)} features")
+    
+    # Dependence plots for selected features
+    for i, feature_name in enumerate(features_to_plot):
         # Replace special characters in feature name for filename
         safe_feature_name = feature_name.replace("/", "_").replace("\\", "_")
         dep_path = model_output_dir / f"shap_dependence_{safe_feature_name}.png"
@@ -489,10 +471,7 @@ def process_single_model(
             shutil.rmtree(model_output_dir)
         model_output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Generate plots
-        if top_features is None:
-            # do all
-            top_features = len(feature_names)
+        # Generate plots (pass top_features directly - None means all features)
         plot_paths = generate_shap_plots(
             model_id=model_id,
             latin_name=latin_name,
@@ -500,7 +479,7 @@ def process_single_model(
             shap_values=shap_values,
             X_explain=X_explain,
             model_output_dir=model_output_dir,
-            top_features=top_features
+            top_features=top_features  # None = all features, int = top N features
         )
         
         logger.info(f"✓ Completed {model_id}")

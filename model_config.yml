@@ -5,14 +5,14 @@ model:
     feature_types:
       - "linear"
       - "hinge"
-    beta_multiplier: 2.0
+    beta_multiplier: 3.0
     beta_lqp: 1.0
     beta_hinge: 1.0
     beta_threshold: 1.0
     beta_categorical: 1.0
     n_hinge_features: 10
     n_threshold_features: 10
-    clamp: false
+    clamp: true
     convergence_tolerance: 1.0e-5
     use_lambdas: "best"
     n_lambdas: 100
@@ -30,5 +30,12 @@ model:
       factor: 10
       min_bg: 1000
       max_bg: 10000
+
+  background:
+    n_background_points: 8000
+    background_method: "contrast"
+    background_value: 0.025
+    sigma: 6.5
+    transform_method: "presence"
 
 

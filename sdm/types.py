@@ -1,9 +1,11 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Any
 
 import geopandas as gpd
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from sdm.occurrence.sampling import BackgroundMethod, TransformMethod
 
 class PathsConfig(BaseModel):
     raw_data: str
@@ -66,6 +68,28 @@ class SamplingBackgroundConfig(BaseModel):
     max_bg: int = 10000
 
 
+class BackgroundConfig(BaseModel):
+    """Configuration for background point generation with typed enum properties."""
+    
+    n_background_points: int = 4000
+    background_value: float = 0.00
+    sigma: float = 6.5
+    background_method: BackgroundMethod = Field(default=BackgroundMethod.CONTRAST)
+    transform_method: TransformMethod = Field(default=TransformMethod.PRESENCE)
+    
+    @field_validator("background_method", "transform_method", mode="before")
+    @classmethod
+    def normalize_enum(cls, v: Any) -> str:
+        """Normalize enum input to lowercase string for StrEnum conversion."""
+        if isinstance(v, (BackgroundMethod, TransformMethod)):
+            return v.value
+        if isinstance(v, str):
+            return v.lower()
+        return v
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class SamplingConfig(BaseModel):
     min_presence: int = 15
     subset_occurrence: Optional[int] = None
@@ -78,6 +102,7 @@ class SamplingConfig(BaseModel):
 class ModelConfig(BaseModel):
     maxent: MaxentConfigModel
     sampling: Optional[SamplingConfig] = None
+    background: Optional[BackgroundConfig] = None
 
 
 class SDMModel(BaseModel):
@@ -111,7 +136,8 @@ class TrainingResults(SDMModel):
 class VariablesConfig(BaseModel):
     variables: List[str]
 
-    def validate(self, features: List[str]) -> "VariablesConfig":
+    def validate_features(self, features: List[str]) -> "VariablesConfig":
+        """Validate that all variables in this config exist in the provided features list."""
         if not set(self.variables).issubset(set(features)):
             raise ValueError(f"Variables config contains features that are not in the features list: {set(self.variables) - set(features)}")
         return self

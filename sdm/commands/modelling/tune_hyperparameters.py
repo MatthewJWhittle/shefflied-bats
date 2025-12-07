@@ -51,7 +51,7 @@ from sdm.utils.io import (
     get_tuning_config_path,
 )
 from sdm.utils.logging_utils import setup_logging
-from sdm.types import ModelConfig, VariablesConfig, TrainingData
+from sdm.types import ModelConfig, VariablesConfig, TrainingData, BackgroundConfig
 from sdm.commands.modelling.utils import get_model_id
 from sklearn.metrics import roc_auc_score
 
@@ -94,7 +94,7 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
     """Suggest MaxEnt hyperparameters from Optuna trial.
     
     Fixed parameters (for consistency across species):
-    - clamp: False (allows extrapolation)
+    - clamp: true (allows extrapolation)
     - tau: 0.5 (regularization strength)
     - transform: "cloglog" (output transform for consistent map interpretation)
     
@@ -591,7 +591,7 @@ def write_best_config(
     n_threshold_features = best_trial.params.get("n_threshold_features", 0)
     
     # Fixed parameters (not tuned, consistent across all models)
-    clamp = False
+    clamp = True
     tau = 0.5
     transform = "cloglog"
     
@@ -732,6 +732,26 @@ def tune_hyperparameters(
     # Load base configs
     project_config = load_project_config(project_config_path)
     base_model_config = load_model_config(model_config_path)
+    
+    # Get background config from model config (use provided values as overrides)
+    bg_config = base_model_config.background or BackgroundConfig()
+    
+    # Use function parameters if provided, otherwise use config values (which have defaults)
+    # BackgroundConfig has default enum values, so background_method and transform_method are never None
+    n_background_points = n_background_points if n_background_points != 4000 else bg_config.n_background_points
+    background_method = background_method if background_method != BackgroundMethod.CONTRAST else bg_config.background_method
+    background_value = background_value if background_value != 0.00 else bg_config.background_value
+    sigma = sigma if sigma != 6.5 else bg_config.sigma
+    transform_method = transform_method if transform_method != TransformMethod.PRESENCE else bg_config.transform_method
+    
+    # Type assertions to satisfy linter (these are guaranteed by default values)
+    assert background_method is not None, "background_method should be set by BackgroundConfig"
+    assert transform_method is not None, "transform_method should be set by BackgroundConfig"
+    
+    logger.info(
+        f"Background point config: n={n_background_points}, method={background_method.value}, "
+        f"value={background_value}, sigma={sigma}, transform={transform_method.value}"
+    )
     
     
     # Create output directory

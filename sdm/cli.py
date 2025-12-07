@@ -225,27 +225,6 @@ def train(
         2,
         help="Maximum threads per model.",
     ),
-    # Background point generation parameters
-    n_background_points: int = typer.Option(
-        4000,
-        help="Number of background points to generate per activity type.",
-    ),
-    background_method: str = typer.Option(
-        "contrast",
-        help="Method for background point generation (contrast, percentile, scale, fixed, binary).",
-    ),
-    background_value: float = typer.Option(
-        0.00,
-        help="Value for background method.",
-    ),
-    sigma: float = typer.Option(
-        6.5,
-        help="Gaussian smoothing sigma for background generation.",
-    ),
-    transform_method: str = typer.Option(
-        "presence",
-        help="Transform method for density (log, sqrt, presence, cap, rank).",
-    ),
     # Species-specific processing parameters
     grid_size_m: float = typer.Option(
         1000,
@@ -267,32 +246,12 @@ def train(
 ) -> None:
     """Train SDM models using the new modular approach.
     
-    Background points are generated on-the-fly per activity type during training.
+    Background point generation parameters are loaded from model_config.yml.
     """
     from sdm.commands.modelling.train_sdm_models import train_sdm_models
-    from sdm.occurrence.sampling import BackgroundMethod, TransformMethod
     import numpy as np
     
     setup_logging(verbose=verbose)
-    
-    # Convert string enums to enum types
-    bg_method_map = {
-        "contrast": BackgroundMethod.CONTRAST,
-        "percentile": BackgroundMethod.PERCENTILE,
-        "scale": BackgroundMethod.SCALE,
-        "fixed": BackgroundMethod.FIXED,
-        "binary": BackgroundMethod.BINARY,
-    }
-    transform_map = {
-        "log": TransformMethod.LOG,
-        "sqrt": TransformMethod.SQRT,
-        "presence": TransformMethod.PRESENCE,
-        "cap": TransformMethod.CAP,
-        "rank": TransformMethod.RANK,
-    }
-    
-    background_method_enum = bg_method_map.get(background_method.lower(), BackgroundMethod.CONTRAST)
-    transform_method_enum = transform_map.get(transform_method.lower(), TransformMethod.PRESENCE)
     
     # Convert d_max: None means np.inf
     d_max_value = d_max if d_max is not None else np.inf
@@ -310,11 +269,6 @@ def train(
         species=species,
         activity_types=activity_types,
         verbose=verbose,
-        n_background_points=n_background_points,
-        background_method=background_method_enum,
-        background_value=background_value,
-        sigma=sigma,
-        transform_method=transform_method_enum,
         grid_size_m=grid_size_m,
         d_min=d_min,
         d_max=d_max_value,
@@ -343,6 +297,11 @@ def predict(
     ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
+    split_files: bool = typer.Option(
+        True,
+        "--split-files/--no-split-files",
+        help="If True, write each model prediction as a separate file. If False, write all predictions in one combined file.",
+    ),
     verbose: bool = False,
 ) -> None:
     """Generate model predictions."""
@@ -357,6 +316,7 @@ def predict(
         boundary_path=boundary_path,
         species=species,
         activity_types=activity_types,
+        split_files=split_files,
         verbose=verbose,
     )
     
@@ -420,9 +380,9 @@ def explain(
         200,
         help="Number of background samples for SHAP (default: 100).",
     ),
-    top_features: int = typer.Option(
-        10,
-        help="Number of top features for dependence plots (default: 5).",
+    top_features: Optional[int] = typer.Option(
+        None,
+        help="Number of top features for dependence plots (None = all features, default: all).",
     ),
     n_jobs: int = typer.Option(
         -1,

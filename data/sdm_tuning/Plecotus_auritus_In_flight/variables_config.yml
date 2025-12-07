@@ -1,13 +1,15 @@
 variables:
-- climate_bioclim_bio_4
+- climate_stats_temp_ann_avg
 - os_distance_distance_to_buildings
-- os_distance_distance_to_minor_roads
-- bgs_coast_distance_to_coast
-- ceh_landcover_arable
-- vom_vegetation_height_std
-- os_cover_water
-- ceh_landcover_urban
-- ceh_landcover_improved_grassland
-- vom_vegetation_height_max_500m
+- climate_bioclim_bio_8
+- vom_vegetation_height_max
+- ceh_landcover_suburban
+- os_cover_buildings
+- terrain_stats_aspect_northness_slope
+- ceh_landcover_wetland_500m
+- ceh_landcover_grassland_500m
+- ceh_landcover_arable_500m
 - ceh_landcover_broadleaved_woodland_500m
-- ceh_landcover_urban_500m
+- vom_vegetation_height_mean_500m
+- os_cover_water_500m
+- ceh_landcover_coniferous_woodland_500m

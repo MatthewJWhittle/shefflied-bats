@@ -51,7 +51,7 @@ from sdm.utils.io import (
     MODEL_CONFIG_PATH,
 )
 from sdm.utils.logging_utils import setup_logging
-from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig
+from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig
 from sdm.commands.modelling.utils import get_model_id
 logger = logging.getLogger(__name__)
 
@@ -957,12 +957,6 @@ def train_sdm_models(
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     verbose: bool = False,
-    # Background point generation parameters
-    n_background_points: int = 4000,
-    background_method: BackgroundMethod = BackgroundMethod.CONTRAST,
-    background_value: float = 0.00,
-    sigma: float = 6.5,
-    transform_method: TransformMethod = TransformMethod.PRESENCE,
     # Species-specific processing parameters
     grid_size_m: float = 2000,
     d_min: float = 500,
@@ -992,15 +986,14 @@ def train_sdm_models(
         species: List of species to model
         activity_types: List of activity types to model
         verbose: Enable verbose logging
-        n_background_points: Number of background points to generate per activity
-        background_method: Method for background point generation
-        background_value: Value for background method
-        sigma: Gaussian smoothing sigma for background generation
-        transform_method: Transform method for density in background generation
         grid_size_m: Grid cell size for spatial sampling (meters)
         d_min: Minimum distance from presence for background (meters)
         d_max: Maximum distance from presence for background (meters)
         sample_weight_n_neighbors: Number of neighbors for sample weighting
+        
+    Note:
+        Background point generation parameters are loaded from model_config.yml
+        under the 'background' key. See BackgroundConfig for available options.
         
     Returns:
         DataFrame containing model results
@@ -1015,6 +1008,18 @@ def train_sdm_models(
     # Load configs
     project_config = load_project_config(project_config_path)
     base_model_cfg = load_model_config(model_config_path)
+    
+    # Get background config from model config (with defaults if not present)
+    background_config = base_model_cfg.background or BackgroundConfig()
+    # BackgroundConfig has default enum values, but add assertions for type checker
+    assert background_config.background_method is not None
+    assert background_config.transform_method is not None
+    logger.info(
+        f"Background point config: n={background_config.n_background_points}, "
+        f"method={background_config.background_method.value}, "
+        f"value={background_config.background_value}, sigma={background_config.sigma}, "
+        f"transform={background_config.transform_method.value}"
+    )
     
     # Configure MLflow
     _configure_mlflow_from_config(project_config)
@@ -1059,6 +1064,9 @@ def train_sdm_models(
     )
     
     # Prepare shared training data (presence/background annotated with EVs)
+    # Unpack background config for prepare_training_data (keeps interface simple for testing)
+    assert background_config.background_method is not None
+    assert background_config.transform_method is not None
     (
         presence_with_evs_gdf,
         background_with_evs_gdf,
@@ -1067,11 +1075,11 @@ def train_sdm_models(
         occurrence_gdf=bats_ant,
         boundary=boundary,
         evs_to_model=evs_to_model,
-        n_background_points=n_background_points,
-        background_method=background_method,
-        background_value=background_value,
-        sigma=sigma,
-        transform_method=transform_method,
+        n_background_points=background_config.n_background_points,
+        background_method=background_config.background_method,
+        background_value=background_config.background_value,
+        sigma=background_config.sigma,
+        transform_method=background_config.transform_method,
     )
     
     # Create default model config from base config (used as fallback)
@@ -1155,7 +1163,7 @@ def train_sdm_models(
                     variables_config_path = tuning_dir_path / identifier / "variables_config.yml"
                     variables_config = load_variables_config(variables_config_path)
                     # This will raise an error if the variables config contains features that are not in the data
-                    model_features_config = variables_config.validate(ev_columns)
+                    model_features_config = variables_config.validate_features(ev_columns)
                     logger.debug(f"Loaded variables config for {identifier}: {model_features_config.variables}")
 
                 except FileNotFoundError:
@@ -1213,4 +1221,8 @@ def train_sdm_models(
     log_models_to_mlflow(models, training_data, results_df)
     
     logger.info("✓ Training pipeline complete")
+
+    # print a summary of the results (model id, mean cv score, std cv score) in a table format
+    logger.info("Summary of results:")
+    logger.info(results_df[["identifier", "mean_cv_score", "std_cv_score"]].to_string(index=False))
     return results_df

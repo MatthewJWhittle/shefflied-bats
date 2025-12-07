@@ -21,6 +21,8 @@ from sdm.utils.io import load_boundary
 from sdm.raster.io import load_environmental_variables
 from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.feature_subsetter import FeatureSubsetter
+from sdm.commands.data_preparation.raster.split_raster_by_band import split_raster_by_band
+from sdm.commands.modelling.utils import get_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +155,8 @@ def make_predictions(
     ev_raster: Path,
     output_dir: Path,
     boundary_path: Optional[Path] = None,
-) -> pd.DataFrame:
+    split_files: bool = True,
+) -> None:
     """Apply trained models to make predictions."""
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -166,7 +169,7 @@ def make_predictions(
         model_path = Path(row.model_path)
         latin_name = row.latin_name
         activity_type = row.activity_type
-        model_id = f"{latin_name}_{activity_type}"
+        model_id = get_model_id([latin_name, activity_type])
         
         try:
             # Load model
@@ -220,21 +223,25 @@ def make_predictions(
             except Exception as e:
                 logger.warning(f"Failed to mask predictions to boundary: {e}. Output saved without masking.")
         
-        # Update results with success status
-        filtered_index["success"] = True
-        filtered_index["prediction_path"] = str(output_path)
+        # Split into separate files if requested
+        if split_files:
+            logger.info("Splitting predictions into separate files...")
+            try:
+                split_raster_by_band(
+                    input_raster=output_path,
+                    output_dir=output_dir,
+                    output_prefix="prediction",
+                    use_band_names=True,
+                    window_size=128,
+                )
+                logger.info("Successfully split predictions into separate files")
+                
+            except Exception as e:
+                logger.warning(f"Failed to split predictions into separate files: {e}. Combined file available at {output_path}")
         
     except Exception as e:
         logger.error(f"Failed to generate predictions: {e}")
-        filtered_index["success"] = False
-        filtered_index["error"] = str(e)
-    
-    # Save results summary
-    results_path = output_dir / "prediction_results.csv"
-    filtered_index.to_csv(results_path, index=False)
-    logger.debug(f"Prediction results saved to {results_path}")
-    
-    return filtered_index
+        raise
 
 def predict_sdm_models(
     ev_path: Path = Path("data/evs/evs-to-model.tif"),
@@ -243,8 +250,9 @@ def predict_sdm_models(
     boundary_path: Optional[Path] = None,
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
+    split_files: bool = True,
     verbose: bool = False
-) -> pd.DataFrame:
+) -> None:
     """Run the model inference pipeline.
 
     Args:
@@ -254,10 +262,8 @@ def predict_sdm_models(
         boundary_path: Optional path to boundary file for clipping output raster.
         species: Optional: Specific species to generate predictions for (Latin names).
         activity_types: Optional: Specific activity types to generate predictions for.
+        split_files: If True, write each model prediction as a separate file. If False, write all predictions in one combined file.
         verbose: Enable verbose logging.
-
-    Returns:
-        DataFrame containing prediction results.
 
     Raises:
         FileNotFoundError: If model index or input files are not found.
@@ -285,13 +291,13 @@ def predict_sdm_models(
     _, ev_raster = load_environmental_variables(ev_path)
     
     # Generate predictions
-    results_df = make_predictions(
+    make_predictions(
         filtered_index,
         models_dir,
         ev_raster,
         output_dir,
         boundary_path=boundary_path,
+        split_files=split_files,
     )
     
-    logger.info("✓ Prediction pipeline complete")
-    return results_df 
+    logger.info("✓ Prediction pipeline complete") 
