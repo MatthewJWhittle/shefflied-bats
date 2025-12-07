@@ -1,13 +1,14 @@
 model:
   maxent:
     feature_types:
-    - hinge
-    beta_multiplier: 1.2164094928160247
-    beta_lqp: 0.4017353352732927
-    beta_hinge: 1.1292524752195292
-    beta_threshold: 1.1780900653366233
-    beta_categorical: 4.8401124279664005
-    n_hinge_features: 9
+    - linear
+    - quadratic
+    beta_multiplier: 0.14505711935768165
+    beta_lqp: 0.11259255118573494
+    beta_hinge: 0.5435274582447313
+    beta_threshold: 0.10138879445958233
+    beta_categorical: 0.1234904465742684
+    n_hinge_features: 0
     n_threshold_features: 0
     clamp: false
     tau: 0.5

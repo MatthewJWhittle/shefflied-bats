@@ -964,7 +964,7 @@ def train_sdm_models(
     sigma: float = 6.5,
     transform_method: TransformMethod = TransformMethod.PRESENCE,
     # Species-specific processing parameters
-    grid_size_m: float = 1000,
+    grid_size_m: float = 2000,
     d_min: float = 500,
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,

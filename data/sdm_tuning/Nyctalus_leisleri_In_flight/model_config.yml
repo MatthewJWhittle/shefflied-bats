@@ -3,11 +3,11 @@ model:
     feature_types:
     - linear
     - quadratic
-    beta_multiplier: 0.5780772620524096
-    beta_lqp: 0.3748200056113153
-    beta_hinge: 0.3729223565165902
-    beta_threshold: 1.5665697887003156
-    beta_categorical: 0.965960497751081
+    beta_multiplier: 3.9754355332125586
+    beta_lqp: 4.334962762717161
+    beta_hinge: 0.4772641439578614
+    beta_threshold: 0.12235411452762768
+    beta_categorical: 1.091661258695722
     n_hinge_features: 0
     n_threshold_features: 0
     clamp: false

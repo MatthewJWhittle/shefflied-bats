@@ -7,11 +7,14 @@ predictions across the study area using the new modular structure.
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Union
 import pickle
 
 import pandas as pd
-import rioxarray as rxr
+import numpy as np
+import rasterio as rio
+from rasterio.features import geometry_mask
+import geopandas as gpd
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary
@@ -53,6 +56,96 @@ def load_model(model_path: Path) -> Any:
     except Exception as e:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise
+
+def mask_raster_to_boundary(
+    raster_path: Union[str, Path],
+    boundary_geom: Union[gpd.GeoDataFrame, Any],
+    output_path: Optional[Union[str, Path]] = None,
+    all_touched: bool = True,
+) -> None:
+    """Mask a raster to a boundary geometry using rasterio.
+    
+    Sets all pixels outside the boundary geometry to nodata while preserving
+    the original raster transform, CRS, and profile.
+    
+    Args:
+        raster_path: Path to input raster file
+        boundary_geom: Boundary geometry (GeoDataFrame or shapely geometry)
+        output_path: Optional output path (defaults to overwriting input)
+        all_touched: If True, include pixels touched by boundary (default: True)
+    """
+    raster_path = Path(raster_path)
+    if output_path is None:
+        output_path = raster_path
+    else:
+        output_path = Path(output_path)
+    
+    # Get boundary geometry
+    if isinstance(boundary_geom, gpd.GeoDataFrame):
+        if hasattr(boundary_geom, 'union_all'):
+            geom = boundary_geom.union_all()
+        else:
+            geom = boundary_geom.geometry.unary_union
+    else:
+        geom = boundary_geom
+    
+    # Read raster and create mask
+    with rio.open(raster_path, 'r') as src:
+        # Ensure boundary is in same CRS as raster
+        if isinstance(boundary_geom, gpd.GeoDataFrame) and boundary_geom.crs != src.crs:
+            boundary_gdf = boundary_geom.to_crs(src.crs)
+            if hasattr(boundary_gdf, 'union_all'):
+                geom = boundary_gdf.union_all()
+            else:
+                geom = boundary_gdf.geometry.unary_union
+        
+        # Create mask: True where geometry covers pixel
+        mask = geometry_mask(
+            [geom],
+            out_shape=(src.height, src.width),
+            transform=src.transform,
+            invert=True,  # True where geometry covers pixel
+            all_touched=all_touched
+        )
+        
+        # Read all bands
+        data = src.read()
+        nodata = src.nodata
+        descriptions = src.descriptions  # Store before closing
+        
+        # If nodata is None, use a default based on dtype
+        if nodata is None:
+            if np.issubdtype(data.dtype, np.floating):
+                nodata = np.nan
+            else:
+                nodata = 0
+        
+        # Apply mask: set pixels outside boundary to nodata
+        # mask is True inside boundary, False outside
+        # We want to set False (outside) to nodata
+        for band_idx in range(src.count):
+            band_data = data[band_idx, :, :].copy()
+            # Set values outside mask to nodata
+            if np.isnan(nodata):
+                band_data[~mask] = np.nan
+            else:
+                band_data[~mask] = nodata
+            data[band_idx, :, :] = band_data
+        
+        # Copy profile and update nodata
+        profile = src.profile.copy()
+        profile.update({
+            'nodata': nodata,
+        })
+    
+    # Write masked data
+    with rio.open(output_path, 'w', **profile) as dst:
+        dst.write(data)
+        # Copy band descriptions if they exist
+        if descriptions:
+            dst.descriptions = descriptions
+    
+    logger.debug(f"Masked raster {raster_path} to boundary, saved to {output_path}")
 
 def make_predictions(
     filtered_index: pd.DataFrame,
@@ -108,52 +201,24 @@ def make_predictions(
         )
         logger.debug(f"Successfully generated predictions for {len(models)} models")
         
-        # Clip to boundary if provided
+        # Mask to boundary if provided
         if boundary_path and boundary_path.exists():
-            logger.info(f"Clipping predictions to boundary: {boundary_path}")
+            logger.info(f"Masking predictions to boundary: {boundary_path}")
             try:
                 # Load boundary
                 boundary_gdf = load_boundary(boundary_path, buffer_distance=0)
                 
-                # Load the prediction raster
-                pred_raster = rxr.open_rasterio(output_path)
-                
-                # Store original transform and CRS to preserve them
-                original_transform = pred_raster.rio.transform()
-                original_crs = pred_raster.rio.crs
-                original_nodata = pred_raster.rio.nodata
-                
-                # Ensure CRS matches
-                if pred_raster.rio.crs != boundary_gdf.crs:
-                    boundary_gdf = boundary_gdf.to_crs(pred_raster.rio.crs)
-                
-                # Get union of all boundary geometries
-                # Use unary_union if available, otherwise try union_all() (geopandas extension)
-                if hasattr(boundary_gdf, 'union_all'):
-                    boundary_union = boundary_gdf.union_all()
-                else:
-                    boundary_union = boundary_gdf.geometry.unary_union
-                
-                # Clip the raster with crop=False to maintain original extent and transform
-                pred_raster_clipped = pred_raster.rio.clip(
-                    [boundary_union],
-                    crs=boundary_gdf.crs,
-                    all_touched=True,
-                    crop=False  # Maintain original raster extent and transform
+                # Mask raster to boundary (preserves transform and profile)
+                mask_raster_to_boundary(
+                    raster_path=output_path,
+                    boundary_geom=boundary_gdf,
+                    output_path=output_path,
+                    all_touched=True
                 )
-                
-                # Ensure the transform and CRS are preserved
-                pred_raster_clipped = pred_raster_clipped.rio.write_transform(original_transform)
-                pred_raster_clipped = pred_raster_clipped.rio.write_crs(original_crs)
-                if original_nodata is not None:
-                    pred_raster_clipped = pred_raster_clipped.rio.write_nodata(original_nodata)
-                
-                # Save the clipped raster (overwrite the original)
-                pred_raster_clipped.rio.to_raster(output_path)
-                logger.info(f"Clipped predictions saved to: {output_path}")
+                logger.info(f"Masked predictions saved to: {output_path}")
                 
             except Exception as e:
-                logger.warning(f"Failed to clip predictions to boundary: {e}. Output saved without clipping.")
+                logger.warning(f"Failed to mask predictions to boundary: {e}. Output saved without masking.")
         
         # Update results with success status
         filtered_index["success"] = True

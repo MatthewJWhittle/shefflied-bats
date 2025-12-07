@@ -399,8 +399,8 @@ def process_single_model(
     output_dir: Path,
     n_background: int,
     n_explain: int,
-    top_features: int,
-    random_state: int
+    top_features: Optional[int] = None,
+    random_state: int = 42
 ) -> Dict[str, Any]:
     """
     Process a single model: load, compute SHAP, generate plots.
@@ -490,6 +490,9 @@ def process_single_model(
         model_output_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate plots
+        if top_features is None:
+            # do all
+            top_features = len(feature_names)
         plot_paths = generate_shap_plots(
             model_id=model_id,
             latin_name=latin_name,
@@ -535,7 +538,7 @@ def explain_sdm_models(
     activity_types: Optional[List[str]] = None,
     n_explain: int = 200,
     n_background: int = 100,
-    top_features: int = 5,
+    top_features: Optional[int] = None,
     n_jobs: Optional[int] = None,
     verbose: bool = False
 ) -> pd.DataFrame:
@@ -550,7 +553,7 @@ def explain_sdm_models(
         activity_types: Optional list of activity types to explain
         n_explain: Number of points to explain (default: 200)
         n_background: Number of background samples for SHAP (default: 100)
-        top_features: Number of top features for dependence plots (default: 5)
+        top_features: Number of top features for dependence plots (Optional - all features if None)
         n_jobs: Number of parallel workers (None = auto)
         verbose: Enable verbose logging
         
