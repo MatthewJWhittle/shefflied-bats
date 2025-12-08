@@ -1,0 +1,14 @@
+variables:
+- climate_stats_prec_ann_avg
+- os_distance_distance_to_buildings
+- os_distance_distance_to_minor_roads
+- bgs_coast_distance_to_coast
+- ceh_landcover_arable
+- vom_vegetation_height_std
+- ceh_landcover_suburban
+- os_cover_buildings
+- os_cover_water
+- os_cover_water_1000m
+- ceh_landcover_improved_grassland_1000m
+- ceh_landcover_arable_1500m
+- os_cover_water_1500m

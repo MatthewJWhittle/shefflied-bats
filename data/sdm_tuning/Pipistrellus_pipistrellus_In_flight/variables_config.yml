@@ -1,0 +1,17 @@
+variables:
+- ceh_landcover_wetland
+- climate_bioclim_bio_9
+- terrain_stats_roughness
+- climate_stats_wind_ann_avg
+- vom_vegetation_height_std
+- ceh_landcover_suburban
+- os_cover_water
+- ceh_landcover_coniferous_woodland
+- ceh_landcover_urban
+- terrain_stats_aspect_northness_slope
+- ceh_landcover_suburban_500m
+- ceh_landcover_urban_500m
+- ceh_landcover_broadleaved_woodland_1000m
+- ceh_landcover_improved_grassland_1000m
+- os_cover_water_1500m
+- ceh_landcover_coniferous_woodland_1500m

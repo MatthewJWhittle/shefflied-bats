@@ -191,10 +191,6 @@ def train(
         Path(PROJECT_CONFIG.paths.occurence_data),
         help="Path to bat occurrence data.",
     ),
-    background_file: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.background_points),
-        help="Path to background points data.",
-    ),
     ev_file: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.ev_tiff),
         help="Path to environmental variables raster.",
@@ -207,29 +203,76 @@ def train(
         Path(PROJECT_CONFIG.paths.model_config_path),
         help="Path to model/training configuration YAML.",
     ),
-    variables_config_path: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.variables_config_path),
-        help="Path to variables configuration YAML.",
+    variables_config_path: Optional[Path] = typer.Option(
+        None,
+        help="Path to variables configuration YAML (defaults to config).",
+    ),
+    tuning_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.tuning_dir),
+        help="Directory containing per-species-activity tuning configs (optional). If provided, configs are loaded from {tuning_dir}/{latin_name}_{activity_type}/ with fallback to base configs.",
     ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
+    min_presence: Optional[int] = typer.Option(
+        None,
+        help="Minimum number of presence records required (defaults to config).",
+    ),
+    n_jobs: Optional[int] = typer.Option(
+        None,
+        help="Number of parallel jobs (defaults to auto).",
+    ),
+    max_threads_per_model: int = typer.Option(
+        2,
+        help="Maximum threads per model.",
+    ),
+    # Species-specific processing parameters
+    grid_size_m: float = typer.Option(
+        1000,
+        help="Grid cell size for spatial sampling (meters).",
+    ),
+    d_min: float = typer.Option(
+        500,
+        help="Minimum distance from presence for background (meters).",
+    ),
+    d_max: Optional[float] = typer.Option(
+        None,
+        help="Maximum distance from presence for background (meters, None = no limit).",
+    ),
+    sample_weight_n_neighbors: int = typer.Option(
+        10,
+        help="Number of neighbors for sample weighting.",
+    ),
     verbose: bool = False,
 ) -> None:
-    """Train SDM models."""
+    """Train SDM models using the new modular approach.
+    
+    Background point generation parameters are loaded from model_config.yml.
+    """
     from sdm.commands.modelling.train_sdm_models import train_sdm_models
+    import numpy as np
     
     setup_logging(verbose=verbose)
+    
+    # Convert d_max: None means np.inf
+    d_max_value = d_max if d_max is not None else np.inf
     
     train_sdm_models(
         model_config_path=model_config_path,
         variables_config_path=variables_config_path,
+        tuning_dir=tuning_dir,
         bats_file=bats_file,
-        background_file=background_file,
         ev_file=ev_file,
         output_dir=output_dir,
+        min_presence=min_presence,
+        n_jobs=n_jobs,
+        max_threads_per_model=max_threads_per_model,
         species=species,
         activity_types=activity_types,
         verbose=verbose,
+        grid_size_m=grid_size_m,
+        d_min=d_min,
+        d_max=d_max_value,
+        sample_weight_n_neighbors=sample_weight_n_neighbors,
     )
     
     logging.info("Model training complete!")
@@ -248,8 +291,17 @@ def predict(
         Path(PROJECT_CONFIG.paths.predictions),
         help="Directory to write prediction rasters.",
     ),
+    boundary_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.boundary),
+        help="Path to boundary file for clipping output raster.",
+    ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
+    split_files: bool = typer.Option(
+        True,
+        "--split-files/--no-split-files",
+        help="If True, write each model prediction as a separate file. If False, write all predictions in one combined file.",
+    ),
     verbose: bool = False,
 ) -> None:
     """Generate model predictions."""
@@ -261,8 +313,10 @@ def predict(
         ev_path=ev_path,
         models_dir=models_dir,
         output_dir=output_dir,
+        boundary_path=boundary_path,
         species=species,
         activity_types=activity_types,
+        split_files=split_files,
         verbose=verbose,
     )
     
@@ -303,18 +357,87 @@ def visualize(
     logging.info("Visualizations generated!")
 
 @app.command()
+def explain(
+    ev_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.ev_tiff),
+        help="Path to environmental variables raster.",
+    ),
+    models_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.models),
+        help="Directory containing trained models.",
+    ),
+    output_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.predictions) / "visualization" / "shap",
+        help="Directory to write SHAP plots.",
+    ),
+    species: Optional[List[str]] = None,
+    activity_types: Optional[List[str]] = None,
+    n_explain: int = typer.Option(
+        200,
+        help="Number of points to explain (default: 200).",
+    ),
+    n_background: int = typer.Option(
+        200,
+        help="Number of background samples for SHAP (default: 100).",
+    ),
+    top_features: Optional[int] = typer.Option(
+        None,
+        help="Number of top features for dependence plots (None = all features, default: all).",
+    ),
+    n_jobs: int = typer.Option(
+        -1,
+        help="Number of parallel workers (default: all available cores).",
+    ),
+    verbose: bool = False,
+) -> None:
+    """Calculate SHAP values for SDM models and generate interpretability plots.
+    
+    This command loads trained SDM models, samples points from the environmental
+    variables dataset, and computes SHAP values in parallel for each model.
+    Generates feature importance bar plots and dependence plots for top features.
+    """
+    from sdm.commands.modelling.explain_sdm_models import explain_sdm_models
+    
+    setup_logging(verbose=verbose)
+    
+    explain_sdm_models(
+        ev_path=ev_path,
+        models_dir=models_dir,
+        output_dir=output_dir,
+        species=species,
+        activity_types=activity_types,
+        n_explain=n_explain,
+        n_background=n_background,
+        top_features=top_features,
+        n_jobs=n_jobs,
+        verbose=verbose,
+    )
+    
+    logging.info("SHAP explanation complete!")
+
+@app.command()
 def pipeline(
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
+    generate_background: bool = typer.Option(
+        False,
+        help="Generate background points file (optional, training generates them on-the-fly).",
+    ),
     verbose: bool = False
 ) -> None:
-    """Run the complete SDM pipeline."""
+    """Run the complete SDM pipeline.
+    
+    Note: Background points are now generated on-the-fly during training,
+    so the background step is optional unless you need the background points file
+    for other purposes.
+    """
     setup_logging(verbose=verbose)
     
     logging.info("Starting complete SDM pipeline...")
     
     # Run all steps
-    background(verbose=verbose)
+    if generate_background:
+        background(verbose=verbose)
     data(verbose=verbose)
     train(species=species, activity_types=activity_types, verbose=verbose)
     predict(species=species, activity_types=activity_types, verbose=verbose)
@@ -387,8 +510,8 @@ def split_raster(
         ...,
         help="Path to the input multi-band raster file.",
     ),
-    output_dir: Path = typer.Option(
-        ...,
+    output_dir: Optional[Path] = typer.Option(
+        None,
         help="Directory to write output single-band rasters.",
     ),
     output_prefix: Optional[str] = typer.Option(
@@ -410,6 +533,8 @@ def split_raster(
     
     setup_logging(verbose=verbose)
     
+    output_dir = output_dir or input_raster.parent
+    
     output_paths = split_raster_by_band(
         input_raster=input_raster,
         output_dir=output_dir,
@@ -426,16 +551,12 @@ def tune(
         Path(PROJECT_CONFIG.paths.occurence_data),
         help="Path to bat occurrence data.",
     ),
-    background_file: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.background_points),
-        help="Path to background points data.",
-    ),
     ev_file: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.ev_tiff),
         help="Path to environmental variables raster.",
     ),
     output_dir: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.models) / "tuning",
+        Path(PROJECT_CONFIG.paths.tuning_dir),
         help="Directory to write tuning results and best configs.",
     ),
     model_config_path: Path = typer.Option(
@@ -446,17 +567,9 @@ def tune(
         Path(PROJECT_CONFIG.paths.variables_config_path),
         help="Path to base variables configuration YAML.",
     ),
-    grid_points_file: Optional[Path] = typer.Option(
-        None,
-        help="Path to grid points file (optional).",
-    ),
     n_trials: int = typer.Option(
         50,
         help="Number of Optuna trials to run.",
-    ),
-    subset_occurrence: int = typer.Option(
-        300,
-        help="Number of occurrence records to use for tuning (for speed).",
     ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
@@ -468,40 +581,41 @@ def tune(
         None,
         help="Optuna storage URL for distributed tuning (optional).",
     ),
-    n_jobs: int = typer.Option(
-        1,
-        help="Number of parallel jobs for running trials. Use >1 for parallel execution (faster but uses more CPU/memory).",
-    ),
-    n_cv_folds: int = typer.Option(
-        2,
-        help="Number of CV folds for tuning (default: 2, faster than 3). Use 3 for more reliable estimates.",
-    ),
     verbose: bool = False,
+    n_cv_folds: int = typer.Option(
+        3,
+        help="Number of CV folds for evaluation (reduced from 3 for faster tuning).",
+    ),
+    n_jobs: int = typer.Option(
+        -1,
+        help="Number of parallel trials (None = sequential, >1 = parallel).",
+    ),
 ) -> None:
-    """Tune hyperparameters for SDM models using Optuna."""
+    """Tune hyperparameters for SDM models using Optuna.
+    
+    Uses the new modular approach where expensive operations (EV conversion,
+    annotation, background generation) are done once before tuning. Only model
+    parameters and feature selection are tuned (background points are fixed).
+    """
     from sdm.commands.modelling.tune_hyperparameters import tune_hyperparameters
     
     setup_logging(verbose=verbose)
     
-    study = tune_hyperparameters(
+    tune_hyperparameters(
         project_config_path=Path("config.yml"),
         model_config_path=model_config_path,
         variables_config_path=variables_config_path,
         bats_file=bats_file,
-        background_file=background_file,
         ev_file=ev_file,
         output_dir=output_dir,
-        grid_points_file=grid_points_file,
         n_trials=n_trials,
-        subset_occurrence=subset_occurrence,
         species=species,
         activity_types=activity_types,
         study_name=study_name,
         storage=storage,
-        n_jobs=n_jobs,
-        n_cv_folds=n_cv_folds,
         verbose=verbose,
+        n_cv_folds=n_cv_folds,
+        n_jobs=n_jobs,
     )
     
-    logging.info(f"Tuning complete! Best mean CV AUC: {study.best_value:.4f}")
-    logging.info(f"Best configs written to {output_dir}")
+    logging.info(f"Tuning complete! Best configs written to {output_dir}")

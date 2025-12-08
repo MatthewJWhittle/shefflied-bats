@@ -5,7 +5,7 @@ import logging
 
 from pathlib import Path
 import json
-from typing import Union, Tuple, Dict, Any
+from typing import Union, Tuple, Dict, Any, Optional, List
 import geopandas as gpd
 from affine import Affine
 import pickle
@@ -107,7 +107,7 @@ def load_model_config(config_path: Union[str, Path] = MODEL_CONFIG_PATH) -> Mode
     if model_section is None:
         raise KeyError(f"No 'model' section found in {config_path}")
 
-    return ModelConfig(**model_section)
+    return ModelConfig.model_validate(model_section)
 
 
 def load_variables_config(
@@ -123,12 +123,143 @@ def load_variables_config(
 
     with open(config_path, "r") as f:
         raw = yaml.safe_load(f) or {}
+    
+    return VariablesConfig.model_validate(raw)
 
-    variables_section = raw.get("variables")
-    if variables_section is None:
-        raise KeyError(f"No 'variables' section found in {config_path}")
 
-    return VariablesConfig(**variables_section)
+def get_tuning_config_path(
+    base_dir: Union[str, Path], model_id: str
+) -> Path:
+    """Get the path to config directory for a species-activity combination.
+    
+    This function provides a consistent way to determine config paths for both
+    writing (during tuning) and reading (during training).
+    
+    Args:
+        base_dir: Base directory containing tuning results
+        latin_name: Species latin name (e.g., "Myotis mystacinus")
+        activity_type: Activity type (e.g., "In flight")
+        
+    Returns:
+        Path to the species-activity specific config directory
+    """
+    base_dir = Path(base_dir)
+    return base_dir / model_id
+
+
+def load_tuning_variables_config(
+    config_path: Union[str, Path],
+) -> List[str]:
+    """Load variables config from tuning directory (simple list format).
+    
+    Args:
+        config_path: Path to variables_config.yml file
+        
+    Returns:
+        List of variable names
+        
+    Raises:
+        FileNotFoundError: If config file is not found
+        KeyError: If 'variables' key is not found
+    """
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Variables config file not found at {config_path}"
+        )
+    
+    with open(config_path, "r") as f:
+        raw = yaml.safe_load(f) or {}
+    
+    variables = raw.get("variables")
+    if variables is None:
+        raise KeyError(f"No 'variables' key found in {config_path}")
+    
+    # Handle both list format and dict format (for backward compatibility)
+    if isinstance(variables, list):
+        return variables
+    elif isinstance(variables, dict):
+        # If it's a dict, try to extract from activity_feature_sets
+        # This handles old format with activity_feature_sets
+        if "activity_feature_sets" in variables:
+            # Return first activity's features (or could raise error)
+            activity_sets = variables["activity_feature_sets"]
+            if activity_sets:
+                return list(activity_sets.values())[0]
+        raise ValueError(f"Unexpected variables config format in {config_path}")
+    else:
+        raise ValueError(f"Variables must be a list, got {type(variables)}")
+
+
+def load_tuning_model_config(
+    config_path: Union[str, Path],
+) -> ModelConfig:
+    """Load model config from tuning directory (only maxent section).
+    
+    If base_model_config is provided, merges the tuning config with it.
+    Otherwise, expects a full model config.
+    
+    Args:
+        config_path: Path to model_config.yml file
+        base_model_config: Optional base config to merge with
+        
+    Returns:
+        ModelConfig object
+    """
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Model config file not found at {config_path}"
+        )
+    
+    with open(config_path, "r") as f:
+        raw = yaml.safe_load(f) or {}
+    
+    model_section = raw.get("model")
+    if model_section is None:
+        raise KeyError(f"No 'model' section found in {config_path}")
+    
+    return ModelConfig(**model_section)
+
+
+
+def load_tuning_configs(
+    tuning_dir: Union[str, Path],
+    model_id: str,
+) -> Tuple[ModelConfig, List[str]]:
+    """Load species-activity specific configs from a tuning directory.
+    
+    Args:
+        tuning_dir: Base directory containing tuning results
+        model_id: Model identifier (e.g., "Myotis_mystacinus_In_flight")
+        
+    Returns:
+        Tuple of (ModelConfig, List[str]) where List[str] is the selected features
+        
+    Raises:
+        FileNotFoundError: If config files are not found
+    """
+    config_dir = get_tuning_config_path(tuning_dir, model_id)
+    
+    model_config_path = config_dir / "model_config.yml"
+    variables_config_path = config_dir / "variables_config.yml"
+    
+    if not model_config_path.exists():
+        raise FileNotFoundError(
+            f"Model config not found at {model_config_path}. "
+            f"Expected tuning configs in {config_dir}"
+        )
+    
+    if not variables_config_path.exists():
+        raise FileNotFoundError(
+            f"Variables config not found at {variables_config_path}. "
+            f"Expected tuning configs in {config_dir}"
+        )
+    
+    model_config = load_tuning_model_config(model_config_path)
+    selected_features = load_tuning_variables_config(variables_config_path)
+    
+    return model_config, selected_features
 
 def load_boundary_and_transform(
         boundary_path: Union[str, Path],

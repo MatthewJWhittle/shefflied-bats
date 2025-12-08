@@ -1,0 +1,16 @@
+variables:
+- terrain_stats_roughness
+- vom_vegetation_height_max
+- ceh_landcover_suburban
+- terrain_stats_twi
+- terrain_stats_aspect_northness_slope
+- ceh_landcover_wetland_500m
+- ceh_landcover_upland_heathland_500m
+- ceh_landcover_broadleaved_woodland_500m
+- ceh_landcover_suburban_500m
+- os_cover_water_500m
+- ceh_landcover_wetland_1000m
+- ceh_landcover_arable_1000m
+- ceh_landcover_improved_grassland_1000m
+- ceh_landcover_arable_1500m
+- ceh_landcover_suburban_1500m

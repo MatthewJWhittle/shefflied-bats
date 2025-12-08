@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.base import BaseEstimator, clone
 import rasterio as rio # For rio.enums and types used in apply_model_to_rasters
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler, QuantileTransformer
 from sklearn.compose import ColumnTransformer
 
 
@@ -33,6 +33,7 @@ from elapid.utils import (
 from elapid.geo import apply_model_to_array # Core raster prediction function from elapid
 from elapid.models import MaxentConfig
 from sdm.models.core.feature_subsetter import FeatureSubsetter
+from sdm.types import VariablesConfig, ModelConfig
 
 
 tqdm = get_tqdm()
@@ -58,15 +59,15 @@ class DefaultMaxentConfig(MaxentConfig):
             beta_categorical: float = 1.0,
             n_hinge_features: int = 10,
             n_threshold_features: int = 10,
-            clamp: bool = True,
+            clamp: bool = True,  
             convergence_tolerance: float = 1e-5,
             use_lambdas: str = "best",
             n_lambdas: int = 100,
             class_weights: Union[str, float] = 100,
             n_cpus: int = 1,
             use_sklearn: bool = True,
-            tau: float = 0.5,
-            transform: str = "cloglog",
+            tau: float = 0.5,  # Fixed to 0.5 for consistency with tuning
+            transform: str = "cloglog",  # Fixed to "cloglog" for consistency with tuning
     ):
         super().__init__()
         self.feature_types = feature_types
@@ -86,6 +87,27 @@ class DefaultMaxentConfig(MaxentConfig):
         self.use_sklearn=use_sklearn
         self.tau=tau
         self.transform=transform
+    @classmethod
+    def from_config(cls, config: ModelConfig) -> "DefaultMaxentConfig":
+        """
+        Create a DefaultMaxentConfig from a ModelConfig object.
+        """
+        return cls(
+            feature_types=config.maxent.feature_types,
+            beta_multiplier=config.maxent.beta_multiplier,
+            beta_lqp=config.maxent.beta_lqp,
+            beta_hinge=config.maxent.beta_hinge,
+            beta_threshold=config.maxent.beta_threshold,
+            beta_categorical=config.maxent.beta_categorical,
+            n_hinge_features=config.maxent.n_hinge_features,
+            n_threshold_features=config.maxent.n_threshold_features,
+            convergence_tolerance=config.maxent.convergence_tolerance,
+            use_lambdas=config.maxent.use_lambdas,
+            n_lambdas=config.maxent.n_lambdas,
+            class_weights=config.maxent.class_weights,
+            tau=config.maxent.tau,
+            transform=config.maxent.transform,
+        )
 
 # add a from_config classmethod to MaxentConfig
 class MaxentModel(BaseMaxentModel):
@@ -436,7 +458,7 @@ def create_maxent_pipeline(
     Returns:
         A scikit-learn Pipeline instance.
     """
-    logger.info(f"Creating MaxEnt pipeline for features: {feature_names}")
+    logger.debug(f"Creating MaxEnt pipeline for features: {feature_names}")
     
     # Feature selector: uses custom FeatureSubsetter to select only the desired features
     feature_selector = FeatureSubsetter(feature_names=feature_names)
@@ -453,7 +475,6 @@ def create_maxent_pipeline(
         ("maxent", maxent_estimator)
     ])
     
-    logger.info("MaxEnt pipeline created successfully.")
     return pipeline
 
 # Enum for activity types, useful for get_feature_config
@@ -462,27 +483,9 @@ class ActivityType(StrEnum):
     IN_FLIGHT = "In flight"
 
 
-def get_feature_config(
-    activity_feature_sets: Optional[Dict[str, List[str]]] = None,
-) -> Dict[ActivityType, List[str]]:
-    """
-    Gets the list of feature names to include in the model for different activity types.
-    Allows overriding via a configuration mapping keyed by activity name.
-    """
-    if activity_feature_sets:
-        resolved: Dict[ActivityType, List[str]] = {}
-        for activity_name, features in activity_feature_sets.items():
-            try:
-                activity_enum = ActivityType(activity_name)
-                resolved[activity_enum] = features
-            except ValueError:
-                logger.warning("Unknown activity type '%s' in variables config", activity_name)
-        if resolved:
-            return resolved
-
-    # Fallback defaults
-    return {
-        ActivityType.IN_FLIGHT: [
+DEFAULT_CONFIG : Dict[ActivityType, VariablesConfig] = {
+    ActivityType.IN_FLIGHT: VariablesConfig(
+        variables=[
             "ceh_landcover_improved_grassland",
             "ceh_landcover_suburban",
             "bgs_coast_distance_to_coast",
@@ -506,8 +509,9 @@ def get_feature_config(
             "os_distance_distance_to_buildings",
             "ceh_landcover_urban_500m",
             "climate_stats_wind_ann_avg",
-        ],
-        ActivityType.ROOST: [
+            ]),
+    ActivityType.ROOST: VariablesConfig(
+        variables=[
             "ceh_landcover_suburban",
             "vom_vegetation_height_max",
             "os_distance_distance_to_buildings",
@@ -524,10 +528,17 @@ def get_feature_config(
             "ceh_landcover_improved_grassland_500m",
             "ceh_landcover_grassland",
             "climate_stats_temp_ann_avg",
-        ],
-    }
+        ]),
+}
 
-
+def get_feature_config(
+    activity_type: ActivityType,
+) -> VariablesConfig:
+    """
+    Gets the variables config for a given activity type.
+    """
+    assert activity_type in DEFAULT_CONFIG, f"Unknown activity type: {activity_type}"
+    return DEFAULT_CONFIG[activity_type]
 
 def apply_model_to_rasters(
     model: BaseEstimator,

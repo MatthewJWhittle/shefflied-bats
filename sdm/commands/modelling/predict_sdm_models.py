@@ -7,15 +7,22 @@ predictions across the study area using the new modular structure.
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Union
 import pickle
 
 import pandas as pd
+import numpy as np
+import rasterio as rio
+from rasterio.features import geometry_mask
+import geopandas as gpd
 
 from sdm.utils.logging_utils import setup_logging
+from sdm.utils.io import load_boundary
 from sdm.raster.io import load_environmental_variables
 from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.feature_subsetter import FeatureSubsetter
+from sdm.commands.data_preparation.raster.split_raster_by_band import split_raster_by_band
+from sdm.commands.modelling.utils import get_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +59,104 @@ def load_model(model_path: Path) -> Any:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise
 
+def mask_raster_to_boundary(
+    raster_path: Union[str, Path],
+    boundary_geom: Union[gpd.GeoDataFrame, Any],
+    output_path: Optional[Union[str, Path]] = None,
+    all_touched: bool = True,
+) -> None:
+    """Mask a raster to a boundary geometry using rasterio.
+    
+    Sets all pixels outside the boundary geometry to nodata while preserving
+    the original raster transform, CRS, and profile.
+    
+    Args:
+        raster_path: Path to input raster file
+        boundary_geom: Boundary geometry (GeoDataFrame or shapely geometry)
+        output_path: Optional output path (defaults to overwriting input)
+        all_touched: If True, include pixels touched by boundary (default: True)
+    """
+    raster_path = Path(raster_path)
+    if output_path is None:
+        output_path = raster_path
+    else:
+        output_path = Path(output_path)
+    
+    # Get boundary geometry
+    if isinstance(boundary_geom, gpd.GeoDataFrame):
+        if hasattr(boundary_geom, 'union_all'):
+            geom = boundary_geom.union_all()
+        else:
+            geom = boundary_geom.geometry.unary_union
+    else:
+        geom = boundary_geom
+    
+    # Read raster and create mask
+    with rio.open(raster_path, 'r') as src:
+        # Ensure boundary is in same CRS as raster
+        if isinstance(boundary_geom, gpd.GeoDataFrame) and boundary_geom.crs != src.crs:
+            boundary_gdf = boundary_geom.to_crs(src.crs)
+            if hasattr(boundary_gdf, 'union_all'):
+                geom = boundary_gdf.union_all()
+            else:
+                geom = boundary_gdf.geometry.unary_union
+        
+        # Create mask: True where geometry covers pixel
+        mask = geometry_mask(
+            [geom],
+            out_shape=(src.height, src.width),
+            transform=src.transform,
+            invert=True,  # True where geometry covers pixel
+            all_touched=all_touched
+        )
+        
+        # Read all bands
+        data = src.read()
+        nodata = src.nodata
+        descriptions = src.descriptions  # Store before closing
+        
+        # If nodata is None, use a default based on dtype
+        if nodata is None:
+            if np.issubdtype(data.dtype, np.floating):
+                nodata = np.nan
+            else:
+                nodata = 0
+        
+        # Apply mask: set pixels outside boundary to nodata
+        # mask is True inside boundary, False outside
+        # We want to set False (outside) to nodata
+        for band_idx in range(src.count):
+            band_data = data[band_idx, :, :].copy()
+            # Set values outside mask to nodata
+            if np.isnan(nodata):
+                band_data[~mask] = np.nan
+            else:
+                band_data[~mask] = nodata
+            data[band_idx, :, :] = band_data
+        
+        # Copy profile and update nodata
+        profile = src.profile.copy()
+        profile.update({
+            'nodata': nodata,
+        })
+    
+    # Write masked data
+    with rio.open(output_path, 'w', **profile) as dst:
+        dst.write(data)
+        # Copy band descriptions if they exist
+        if descriptions:
+            dst.descriptions = descriptions
+    
+    logger.debug(f"Masked raster {raster_path} to boundary, saved to {output_path}")
+
 def make_predictions(
     filtered_index: pd.DataFrame,
     models_dir: Path,
     ev_raster: Path,
     output_dir: Path,
-) -> pd.DataFrame:
+    boundary_path: Optional[Path] = None,
+    split_files: bool = True,
+) -> None:
     """Apply trained models to make predictions."""
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -70,7 +169,7 @@ def make_predictions(
         model_path = Path(row.model_path)
         latin_name = row.latin_name
         activity_type = row.activity_type
-        model_id = f"{latin_name}_{activity_type}"
+        model_id = get_model_id([latin_name, activity_type])
         
         try:
             # Load model
@@ -105,42 +204,66 @@ def make_predictions(
         )
         logger.debug(f"Successfully generated predictions for {len(models)} models")
         
-        # Update results with success status
-        filtered_index["success"] = True
-        filtered_index["prediction_path"] = str(output_path)
+        # Mask to boundary if provided
+        if boundary_path and boundary_path.exists():
+            logger.info(f"Masking predictions to boundary: {boundary_path}")
+            try:
+                # Load boundary
+                boundary_gdf = load_boundary(boundary_path, buffer_distance=0)
+                
+                # Mask raster to boundary (preserves transform and profile)
+                mask_raster_to_boundary(
+                    raster_path=output_path,
+                    boundary_geom=boundary_gdf,
+                    output_path=output_path,
+                    all_touched=True
+                )
+                logger.info(f"Masked predictions saved to: {output_path}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to mask predictions to boundary: {e}. Output saved without masking.")
+        
+        # Split into separate files if requested
+        if split_files:
+            logger.info("Splitting predictions into separate files...")
+            try:
+                split_raster_by_band(
+                    input_raster=output_path,
+                    output_dir=output_dir,
+                    output_prefix="prediction",
+                    use_band_names=True,
+                    window_size=128,
+                )
+                logger.info("Successfully split predictions into separate files")
+                
+            except Exception as e:
+                logger.warning(f"Failed to split predictions into separate files: {e}. Combined file available at {output_path}")
         
     except Exception as e:
         logger.error(f"Failed to generate predictions: {e}")
-        filtered_index["success"] = False
-        filtered_index["error"] = str(e)
-    
-    # Save results summary
-    results_path = output_dir / "prediction_results.csv"
-    filtered_index.to_csv(results_path, index=False)
-    logger.debug(f"Prediction results saved to {results_path}")
-    
-    return filtered_index
+        raise
 
 def predict_sdm_models(
     ev_path: Path = Path("data/evs/evs-to-model.tif"),
     models_dir: Path = Path("data/sdm_models"),
     output_dir: Path = Path("data/sdm_predictions"),
+    boundary_path: Optional[Path] = None,
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
+    split_files: bool = True,
     verbose: bool = False
-) -> pd.DataFrame:
+) -> None:
     """Run the model inference pipeline.
 
     Args:
         ev_path: Path to environmental variables raster.
         models_dir: Directory containing trained models.
         output_dir: Directory for output prediction files.
+        boundary_path: Optional path to boundary file for clipping output raster.
         species: Optional: Specific species to generate predictions for (Latin names).
         activity_types: Optional: Specific activity types to generate predictions for.
+        split_files: If True, write each model prediction as a separate file. If False, write all predictions in one combined file.
         verbose: Enable verbose logging.
-
-    Returns:
-        DataFrame containing prediction results.
 
     Raises:
         FileNotFoundError: If model index or input files are not found.
@@ -168,12 +291,13 @@ def predict_sdm_models(
     _, ev_raster = load_environmental_variables(ev_path)
     
     # Generate predictions
-    results_df = make_predictions(
+    make_predictions(
         filtered_index,
         models_dir,
         ev_raster,
-        output_dir
+        output_dir,
+        boundary_path=boundary_path,
+        split_files=split_files,
     )
     
-    logger.info("✓ Prediction pipeline complete")
-    return results_df 
+    logger.info("✓ Prediction pipeline complete") 
