@@ -354,6 +354,7 @@ def grid_sample_points(
     stratify_cols: Optional[List[str]] = None,
     grid_size_x: float = 100,
     grid_size_y: float = 100,
+    random_state: int = 42,
 ) -> gpd.GeoDataFrame:
     """
     Sample one point per grid cell, optionally stratified by columns.
@@ -363,6 +364,7 @@ def grid_sample_points(
         stratify_cols: Columns to stratify by (one point per cell per combination)
         grid_size_x: Grid cell size in x direction
         grid_size_y: Grid cell size in y direction
+        random_state: Random seed for reproducibility
         
     Returns:
         Sampled GeoDataFrame
@@ -380,7 +382,7 @@ def grid_sample_points(
         stratify_cols = []
     
     sampled = gdf.groupby(stratify_cols + ["_x_bin", "_y_bin"], group_keys=False).apply(
-        lambda x: x.sample(1)
+        lambda x: x.sample(1, random_state=random_state)
     )
     sampled.drop(columns=["_x_bin", "_y_bin"], inplace=True)
     
@@ -421,6 +423,7 @@ def prepare_species_training_data(
     n_max_background: Optional[int] = None,
     sort_density: bool = False,
     sample_weight_n_neighbors: int = 10,
+    random_state: int = 42,
 ) -> gpd.GeoDataFrame:
     """
     Prepare training data for a single species-activity combination.
@@ -445,6 +448,7 @@ def prepare_species_training_data(
         n_max_background: Maximum number of background points (defaults to 10x presence)
         sort_density: Whether to sort background by density before sampling
         sample_weight_n_neighbors: Number of neighbors for sample weighting
+        random_state: Random seed for reproducibility in sampling operations
         
     Returns:
         Combined training data GeoDataFrame with class, sample_weight, and EV columns
@@ -469,10 +473,10 @@ def prepare_species_training_data(
     
     # Grid sample
     species_presence = grid_sample_points(
-        species_presence, grid_size_x=grid_size_m, grid_size_y=grid_size_m
+        species_presence, grid_size_x=grid_size_m, grid_size_y=grid_size_m, random_state=random_state
     )
     species_absence = grid_sample_points(
-        species_absence, grid_size_x=grid_size_m, grid_size_y=grid_size_m
+        species_absence, grid_size_x=grid_size_m, grid_size_y=grid_size_m, random_state=random_state
     )
     
     # Limit background points
@@ -485,7 +489,7 @@ def prepare_species_training_data(
         ).head(n_max_background)
     else:
         species_absence = species_absence.sample(
-            n=min(len(species_absence), n_max_background), replace=False
+            n=min(len(species_absence), n_max_background), replace=False, random_state=random_state
         )
     
     # Apply sample weights
@@ -579,7 +583,7 @@ def train_single_model(
         logger.info(f"Model features: {model_features}")
         # do 2 folds if n_presence < 15, 3 folds otherwise
         n_presence = len(data.occurrence[data.occurrence["class"] == 1])
-        if n_presence < min_presence:
+        if (n_presence // n_cv_folds) < min_presence:
             n_cv_folds = 2
             logger.info(f"Using 2 folds for {latin_name} - {activity_type.value} because n_presence < {min_presence}")
         final_model, cv_models, cv_scores = evaluate_and_train_maxent_model(
@@ -635,7 +639,7 @@ def train_single_model(
 
 def train_models_parallel(
     training_data: List[TrainingData],
-    max_threads_per_model: int = 2,
+    max_threads_per_model: int = 1,
     n_jobs: Optional[int] = None,
 ) -> List[TrainingResults]:
     """Train MaxEnt models in parallel for each set of training data.
@@ -643,7 +647,7 @@ def train_models_parallel(
     Args:
         training_data: List of TrainingData objects, one per species-activity combination.
             Each TrainingData must include maxent_config and model_features.
-        max_threads_per_model: Maximum threads per model
+        max_threads_per_model: Maximum threads per model (default 1, parallelization handled at higher level)
         n_jobs: Number of parallel jobs (None = auto)
         
     Returns:
@@ -960,7 +964,7 @@ def train_sdm_models(
     output_dir: Optional[Path] = None,
     min_presence: Optional[int] = None,
     n_jobs: Optional[int] = None,
-    max_threads_per_model: int = 2,
+    max_threads_per_model: int = 1,  # Use 1 thread per model (parallelization handled at higher level)
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     verbose: bool = False,
@@ -1117,6 +1121,7 @@ def train_sdm_models(
             d_min=d_min,
             d_max=d_max,
             sample_weight_n_neighbors=sample_weight_n_neighbors,
+            random_state=42,
         )
         
         # Check if training data was generated

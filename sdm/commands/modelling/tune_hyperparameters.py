@@ -84,7 +84,6 @@ class TuningResult(BaseModel):
     n_cv_folds: int
 
     grid_size_m: float
-    subset_grid_size_m: float
     n_background_points: int
     background_method: str
     transform_method: str
@@ -109,21 +108,26 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
     Returns:
         Dictionary of suggested hyperparameters
     """
-    # Feature types - categorical choice
-    feature_type_options = [
-        "linear",
-        "hinge",
-        "threshold",
-        "linear,hinge",
-        "linear,quadratic",
-        "linear,hinge,quadratic",
-        "linear,hinge,threshold",
-    ]
-    feature_types_str = trial.suggest_categorical("feature_types", feature_type_options)
+    # Feature types - individual categorical selection for each type
+    # Similar to pick_features, suggest each feature type individually
+    available_feature_types = ["linear", "quadratic", "hinge", "threshold"]
+    selected_feature_types = []
     
-    # Check if hinge/threshold are in the feature types string
-    has_hinge = "hinge" in feature_types_str
-    has_threshold = "threshold" in feature_types_str
+    for feature_type in available_feature_types:
+        include = trial.suggest_categorical(
+            f"feature_type_{feature_type}",
+            [True, False]
+        )
+        if include:
+            selected_feature_types.append(feature_type)
+    
+    # Ensure at least linear is included (most basic feature type)
+    if "linear" not in selected_feature_types:
+        selected_feature_types.append("linear")
+    
+    # Check if hinge/threshold are in the selected feature types
+    has_hinge = "hinge" in selected_feature_types
+    has_threshold = "threshold" in selected_feature_types
     
     # Beta multiplier - log uniform distribution
     beta_multiplier = trial.suggest_float("beta_multiplier", 0.1, 10.0, log=True)
@@ -147,8 +151,8 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
     else:
         n_threshold_features = 0
     
-    # Convert back to list
-    feature_types = feature_types_str.split(",") if "," in feature_types_str else [feature_types_str]
+    # Use the selected feature types list (already a list)
+    feature_types = sorted(selected_feature_types)  # Sort for consistency
     
     # Fixed parameters for consistency across species (for comparable suitability maps)
     clamp = True  # Fixed: restrict suitability to training range
@@ -228,63 +232,64 @@ def calculate_feature_correlation_penalty(
     precomputed_corr_matrix: Optional[pd.DataFrame],
 ) -> float:
     """Calculate mean absolute correlation penalty for selected features.
-    
+
     Uses a precomputed correlation matrix to extract the relevant subset
     for the selected features and returns mean absolute correlation
     (excluding diagonal) as a penalty metric.
-    
+
     Args:
         selected_features: List of selected feature names
         precomputed_corr_matrix: Precomputed correlation matrix for all features
-        
+
     Returns:
         Mean absolute correlation value (0.0 to 1.0), or 0.0 if calculation fails
     """
     # Edge case: single feature or no features - no correlation to calculate
     if len(selected_features) < 2:
         return 0.0
-    
+
     # If no precomputed matrix, return 0 (shouldn't happen, but handle gracefully)
     if precomputed_corr_matrix is None:
         return 0.0
-    
+
     try:
         # Filter to only selected features that exist in the correlation matrix
-        available_in_matrix = [f for f in selected_features if f in precomputed_corr_matrix.columns]
-        
+        available_in_matrix = [
+            f for f in selected_features
+            if f in precomputed_corr_matrix.columns
+        ]
+
         if len(available_in_matrix) < 2:
             return 0.0
-        
+
         # Extract submatrix for selected features
-        corr_submatrix = precomputed_corr_matrix.loc[available_in_matrix, available_in_matrix]
-        
+        corr_submatrix = precomputed_corr_matrix.loc[
+            available_in_matrix, available_in_matrix
+        ]
+
         # Extract upper triangle (excluding diagonal) and calculate mean absolute correlation
-        mask = np.triu(np.ones_like(corr_submatrix, dtype=bool), k=1)
-        upper_triangle = corr_submatrix.where(mask)
-        abs_correlations = upper_triangle.abs()
-        
-        # Calculate mean, skipping NaN values
-        mean_abs_corr = abs_correlations.mean(skipna=True)
-        
-        # Convert to scalar if needed (handle both Series and scalar results)
-        if isinstance(mean_abs_corr, (pd.Series, np.ndarray)):
-            # If it's still a Series/array, get the first value or mean
-            mean_abs_corr = float(mean_abs_corr.iloc[0] if hasattr(mean_abs_corr, 'iloc') else mean_abs_corr.flat[0])
-        else:
-            mean_abs_corr = float(mean_abs_corr)
-        
-        # Handle NaN or invalid values
+        abs_correlations = corr_submatrix.abs()
+        upper_tri_vals = abs_correlations.to_numpy()[
+            np.triu_indices_from(abs_correlations, k=1)
+        ]
+
+        if upper_tri_vals.size == 0:
+            return 0.0
+
+        mean_abs_corr = float(np.nanmean(upper_tri_vals))
+
         if np.isnan(mean_abs_corr) or np.isinf(mean_abs_corr):
             return 0.0
-        
+
         return mean_abs_corr
-        
+
     except Exception as e:
         logger.warning(
             f"Error calculating feature correlation penalty: {e}, "
             f"returning penalty 0.0"
         )
         return 0.0
+
 
 
 def get_default_trial_params(
@@ -307,9 +312,12 @@ def get_default_trial_params(
     for feature in available_features:
         params[f"feature_{feature}"] = True
     
-    # Default MaxEnt hyperparameters (based on DefaultMaxentConfig)
-    # Using "linear,hinge,quadratic" as closest match to default ["linear", "hinge", "product"]
-    params["feature_types"] = "linear,hinge,quadratic"
+    # Feature type toggles to match suggest_maxent_hyperparameters
+    params["feature_type_linear"] = True
+    params["feature_type_quadratic"] = True
+    params["feature_type_hinge"] = True
+    params["feature_type_threshold"] = False  # to mimic your default
+
     params["beta_multiplier"] = 1.5  # Default from DefaultMaxentConfig
     params["beta_lqp"] = 1.0  # Default
     params["beta_hinge"] = 1.0  # Default
@@ -353,26 +361,13 @@ def pick_features(
         if include:
             selected.append(feature)
     
-    # Ensure minimum number of features (at least 5)
-    if len(selected) < 5:
-        remaining = [f for f in available_features if f not in selected]
-        n_needed = 5 - len(selected)
-        if len(remaining) >= n_needed:
-            trial_seed = hash((trial.number, "min_features")) % (2**32)
-            rng = np.random.default_rng(trial_seed)
-            additional_indices = rng.choice(
-                len(remaining), size=n_needed, replace=False
-            )
-            additional = [remaining[i] for i in sorted(additional_indices)]
-            selected.extend(additional)
-    
     return sorted(selected)
 
 
 def eval_model(
     data: TrainingData,
-    max_threads_per_model: int = 2,
-    n_cv_folds: int = 2,  # Reduced from 3 for faster tuning
+    max_threads_per_model: int = 1,
+    n_cv_folds: int = 3,
 ) -> Tuple[float, float]:
     """Evaluate a model and return CV scores and stability for tuning."""
     # Create model
@@ -418,9 +413,10 @@ def objective_train_model(
     latin_name: str,
     activity_type: str,
     min_presence: int,
-    n_cv_folds: int = 2,
+    n_cv_folds: int = 3,
     stability_penalty: float = 0.05,
-    feature_penalty: float = 0.005,
+    feature_penalty: float = 0.0005,
+    target_features : int = 15,
     correlation_penalty: float = 0.02,
     precomputed_corr_matrix: Optional[pd.DataFrame] = None,
 ) -> float:
@@ -515,7 +511,8 @@ def objective_train_model(
     
     # Calculate feature penalty
     n_features = len(selected_features)
-    feature_penalty_score = feature_penalty * n_features
+    excess = max(0, n_features - target_features)
+    feature_penalty_score = (n_features * feature_penalty) + (feature_penalty * excess ** 2)
     
     # Calculate correlation penalty using precomputed matrix
     mean_abs_correlation = calculate_feature_correlation_penalty(
@@ -528,8 +525,6 @@ def objective_train_model(
     stability_penalty_score = stability_penalty * std_auc  # Penalize high std (instability)
     objective_value = mean_auc - stability_penalty_score - feature_penalty_score - correlation_penalty_score
     
-    # Ensure non-negative
-    objective_value = max(0.0, objective_value)
     
     # Store metrics and metadata as user attributes for logging / analysis
     trial.set_user_attr("mean_auc", mean_auc)
@@ -582,9 +577,20 @@ def write_best_config(
     if mean_auc is not None:
         logger.info(f"Corresponding mean CV AUC: {mean_auc:.4f}")
     
-    # Extract best parameters
-    feature_types_str = best_trial.params["feature_types"]
-    feature_types = feature_types_str.split(",") if "," in feature_types_str else [feature_types_str]
+    # Extract best parameters - reconstruct feature types from individual boolean parameters
+    available_feature_types = ["linear", "quadratic", "hinge", "threshold"]
+    selected_feature_types = []
+    
+    for feature_type in available_feature_types:
+        param_name = f"feature_type_{feature_type}"
+        if best_trial.params.get(param_name, False):
+            selected_feature_types.append(feature_type)
+    
+    # Ensure at least linear is included (should always be True, but handle edge case)
+    if "linear" not in selected_feature_types:
+        selected_feature_types.append("linear")
+    
+    feature_types = sorted(selected_feature_types)  # Sort for consistency
     
     # Get n_hinge_features and n_threshold_features only if they were suggested
     n_hinge_features = best_trial.params.get("n_hinge_features", 0)
@@ -660,9 +666,10 @@ def tune_hyperparameters(
     ev_file: Path,
     output_dir: Path,
     n_trials: int = 50,
-    stability_penalty: float = 0.05,
-    feature_penalty: float = 0.0075,
-    correlation_penalty: float = 0.01,
+    stability_penalty: float = 0.25,
+    feature_penalty: float = 0.0005,
+    target_features: int = 10,
+    correlation_penalty: float = 0.05,
     correlation_sample_size: int = 10_000,
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
@@ -680,10 +687,8 @@ def tune_hyperparameters(
     d_min: float = 500,
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,
-    # Grid sampling for subsetting data
-    subset_grid_size_m: float = 2000,  # Larger grid for subsetting
     # Tuning optimization parameters
-    n_cv_folds: int = 2,  # Number of CV folds (reduced from 3 for faster tuning)
+    n_cv_folds: int = 3,  # Number of CV folds (aligned with training)
     n_jobs: Optional[int] = None,  # Parallel trials (None = sequential)
 ) -> Optional[optuna.Study]:
     """Run hyperparameter tuning using Optuna with the new modular approach.
@@ -719,8 +724,7 @@ def tune_hyperparameters(
         d_min: Minimum distance for background filtering (fixed)
         d_max: Maximum distance for background filtering (fixed)
         sample_weight_n_neighbors: Number of neighbors for sample weighting (fixed)
-        subset_grid_size_m: Grid size for subsetting data (larger = fewer points)
-        n_cv_folds: Number of CV folds for evaluation (reduced for faster tuning)
+        n_cv_folds: Number of CV folds for evaluation (aligned with training)
         n_jobs: Number of parallel trials (None = sequential, 1 = sequential, >1 = parallel)
         
     Returns:
@@ -824,7 +828,6 @@ def tune_hyperparameters(
         # Log tuning configuration
         mlflow.log_params({
             "tuning_n_trials": n_trials,
-            "tuning_subset_grid_size_m": subset_grid_size_m,
             "tuning_approach": "per_species_activity",
         })
         if species:
@@ -871,6 +874,7 @@ def tune_hyperparameters(
                 d_min=d_min,
                 d_max=d_max,
                 sample_weight_n_neighbors=sample_weight_n_neighbors,
+                random_state=42,
             )
 
             # Basic sanity checks before starting tuning for this combination
@@ -932,6 +936,7 @@ def tune_hyperparameters(
                     n_cv_folds=n_cv_folds,
                     stability_penalty=stability_penalty,
                     feature_penalty=feature_penalty,
+                    target_features=target_features,
                     correlation_penalty=correlation_penalty,
                     precomputed_corr_matrix=precomputed_corr_matrix,
                 )
@@ -1004,7 +1009,6 @@ def tune_hyperparameters(
                         min_presence=base_model_config.sampling.min_presence,
                         n_cv_folds=n_cv_folds,
                         grid_size_m=grid_size_m,
-                        subset_grid_size_m=subset_grid_size_m,
                         n_background_points=n_background_points,
                         background_method=background_method.value,
                         transform_method=transform_method.value,

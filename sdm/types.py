@@ -116,6 +116,7 @@ class SamplingConfig(BaseModel):
     order_by_density_for_subset: bool = True
     sample_weight_n_neighbors: int = 5
     background: SamplingBackgroundConfig = SamplingBackgroundConfig()
+    grid_size_m: float = 2000
 
 
 class ModelConfig(BaseModel):

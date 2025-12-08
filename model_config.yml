@@ -26,6 +26,7 @@ model:
     subset_background: false
     order_by_density_for_subset: true
     sample_weight_n_neighbors: 5
+    grid_size_m: 2000
     background:
       factor: 10
       min_bg: 1000

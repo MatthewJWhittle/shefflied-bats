@@ -583,7 +583,7 @@ def tune(
     ),
     verbose: bool = False,
     n_cv_folds: int = typer.Option(
-        2,
+        3,
         help="Number of CV folds for evaluation (reduced from 3 for faster tuning).",
     ),
     n_jobs: int = typer.Option(
