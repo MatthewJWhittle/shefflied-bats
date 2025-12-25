@@ -18,6 +18,7 @@ class PathsConfig(BaseModel):
     model_config_path: str = Field(alias="model_config")
     variables_config_path: str = Field(alias="variables_config")
     tuning_dir: str
+    config_dir: str
     occurence_data: str
     background_points: str
     boundary: str

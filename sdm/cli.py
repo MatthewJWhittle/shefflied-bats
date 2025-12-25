@@ -207,9 +207,9 @@ def train(
         None,
         help="Path to variables configuration YAML (defaults to config).",
     ),
-    tuning_dir: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.tuning_dir),
-        help="Directory containing per-species-activity tuning configs (optional). If provided, configs are loaded from {tuning_dir}/{latin_name}_{activity_type}/ with fallback to base configs.",
+    config_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.config_dir),
+        help="Directory containing per-species-activity model + feature configs (optional). If provided, configs are loaded from {tuning_dir}/{latin_name}_{activity_type}/ with fallback to base configs.",
     ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
@@ -259,7 +259,7 @@ def train(
     train_sdm_models(
         model_config_path=model_config_path,
         variables_config_path=variables_config_path,
-        tuning_dir=tuning_dir,
+        config_dir=config_dir,
         bats_file=bats_file,
         ev_file=ev_file,
         output_dir=output_dir,
@@ -503,47 +503,6 @@ def config(
     print("Current Configuration:")
     print("=" * 50)
     print(yaml.dump(config, default_flow_style=False, sort_keys=False))
-
-@app.command()
-def split_raster(
-    input_raster: Path = typer.Argument(
-        ...,
-        help="Path to the input multi-band raster file.",
-    ),
-    output_dir: Optional[Path] = typer.Option(
-        None,
-        help="Directory to write output single-band rasters.",
-    ),
-    output_prefix: Optional[str] = typer.Option(
-        None,
-        help="Prefix for output filenames. If not provided, uses input filename stem.",
-    ),
-    use_band_names: bool = typer.Option(
-        True,
-        help="Use band descriptions/names in output filenames. If False, use band numbers.",
-    ),
-    window_size: int = typer.Option(
-        1024,
-        help="Size of processing windows for efficient I/O.",
-    ),
-    verbose: bool = False,
-) -> None:
-    """Split a multi-band raster into separate single-band rasters."""
-    from sdm.commands.data_preparation.raster.split_raster_by_band import split_raster_by_band
-    
-    setup_logging(verbose=verbose)
-    
-    output_dir = output_dir or input_raster.parent
-    
-    output_paths = split_raster_by_band(
-        input_raster=input_raster,
-        output_dir=output_dir,
-        output_prefix=output_prefix,
-        use_band_names=use_band_names,
-        window_size=window_size,
-    )
-    
-    logging.info(f"Split raster into {len(output_paths)} files in {output_dir}")
 
 @app.command()
 def tune(

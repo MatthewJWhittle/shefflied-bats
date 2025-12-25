@@ -1,0 +1,18 @@
+latin_name,activity_type,study_name,best_objective,mean_cv_auc,std_cv_auc,n_features,n_features_available,best_trial_number,n_trials,n_trials_pruned,n_trials_complete,stability_penalty,feature_penalty,correlation_penalty,min_presence,n_cv_folds,grid_size_m,subset_grid_size_m,n_background_points,background_method,transform_method
+Nyctalus noctula,In flight,sdm_tuning_Nyctalus_noctula_In_flight,0.7560389810930292,0.8175343804065307,0.02990798627003005,8,50,497,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Pipistrellus pipistrellus,In flight,sdm_tuning_Pipistrellus_pipistrellus_In_flight,0.7422181210641067,0.8418326386032515,0.042290350782895725,13,50,359,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Pipistrellus pygmaeus,In flight,sdm_tuning_Pipistrellus_pygmaeus_In_flight,0.7549539119862568,0.824578577206281,0.04249330440048421,9,50,469,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Myotis daubentonii,In flight,sdm_tuning_Myotis_daubentonii_In_flight,0.7824364666752777,0.9117262109786651,0.03579488606774839,17,50,290,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Plecotus auritus,In flight,sdm_tuning_Plecotus_auritus_In_flight,0.7338740048022241,0.8412974731153676,0.04846936626287068,14,50,499,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Myotis nattereri,In flight,sdm_tuning_Myotis_nattereri_In_flight,0.7174772414203947,0.8169156237087747,0.03876764576759817,13,50,467,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Nyctalus leisleri,In flight,sdm_tuning_Nyctalus_leisleri_In_flight,0.7825818999347248,0.8592978580938615,0.0343191631827342,10,50,304,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Myotis mystacinus,In flight,sdm_tuning_Myotis_mystacinus_In_flight,0.7195095859549272,0.8630490525208061,0.02078933131757782,19,50,162,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Pipistrellus pipistrellus,Roost,sdm_tuning_Pipistrellus_pipistrellus_Roost,0.8231169332484073,0.9063876771190579,0.01541487741301062,11,50,453,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Nyctalus noctula,Roost,sdm_tuning_Nyctalus_noctula_Roost,0.7495734790230486,0.8263678260462408,0.035886940463844885,10,50,464,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Pipistrellus pygmaeus,Roost,sdm_tuning_Pipistrellus_pygmaeus_Roost,0.8480922688403146,0.9017321346980929,0.022797317155564878,7,50,418,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Myotis mystacinus,Roost,sdm_tuning_Myotis_mystacinus_Roost,0.810898728119033,0.9168112634463874,0.01825070654708938,14,50,416,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Myotis daubentonii,Roost,sdm_tuning_Myotis_daubentonii_Roost,0.7813448154832403,0.8416993634402596,0.007090959140385433,8,50,395,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Myotis nattereri,Roost,sdm_tuning_Myotis_nattereri_Roost,0.8217709651898027,0.897009417492071,0.00476904604536621,10,50,455,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Plecotus auritus,Roost,sdm_tuning_Plecotus_auritus_Roost,0.7966262770748416,0.9019943346359437,0.007361151222042617,14,50,309,500,0,500,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Myotis brandtii,Roost,sdm_tuning_Myotis_brandtii_Roost,0.8728571428571429,0.9553571428571429,0.0,11,50,420,500,12,488,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence
+Nyctalus leisleri,Roost,sdm_tuning_Nyctalus_leisleri_Roost,0.7828840022505625,0.9003657164291072,0.09963428357089271,15,50,466,500,420,80,0.05,0.0075,0.01,15,2,2000.0,2000.0,8000,contrast,presence

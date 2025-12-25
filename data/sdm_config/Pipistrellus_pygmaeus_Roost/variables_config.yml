@@ -1,0 +1,10 @@
+variables:
+- climate_bioclim_bio_9
+- os_distance_distance_to_buildings
+- vom_vegetation_height_mean_500m
+- vom_vegetation_height_std
+- terrain_stats_twi
+- ceh_landcover_grassland_500m
+- ceh_landcover_suburban
+- ceh_landcover_suburban_1500m
+- ceh_landcover_arable_1500m

@@ -1,0 +1,22 @@
+variables:
+- climate_stats_prec_ann_avg
+- climate_bioclim_bio_3
+- os_distance_distance_to_buildings
+- terrain_stats_twi
+- ceh_landcover_improved_grassland
+- vom_vegetation_height_max
+- os_cover_water
+- terrain_stats_tpi
+- os_distance_distance_to_major_roads
+- ceh_landcover_grassland
+- ceh_landcover_urban
+- ceh_landcover_coniferous_woodland
+- vom_vegetation_height_max_500m
+- os_cover_water_500m
+- ceh_landcover_wetland_500m
+- ceh_landcover_urban_500m
+- ceh_landcover_coniferous_woodland_500m
+- bgs_coast_distance_to_coast
+- climate_bioclim_bio_8
+- terrain_stats_roughness
+- ceh_landcover_broadleaved_woodland

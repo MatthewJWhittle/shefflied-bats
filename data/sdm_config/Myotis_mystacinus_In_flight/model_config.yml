@@ -1,0 +1,19 @@
+model:
+  maxent:
+    feature_types:
+    - linear
+    - hinge
+    beta_multiplier: 10
+    beta_lqp: 4.2
+    beta_hinge: 4.3
+    beta_threshold: 0.17
+    beta_categorical: 1.4
+    n_hinge_features: 18
+    n_threshold_features: 0
+    clamp: true
+    tau: 0.5
+    transform: cloglog
+    convergence_tolerance: 1.0e-05
+    use_lambdas: best
+    n_lambdas: 100
+    class_weights: balanced

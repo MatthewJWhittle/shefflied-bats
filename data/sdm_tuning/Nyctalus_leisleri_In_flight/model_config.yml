@@ -3,13 +3,12 @@ model:
     feature_types:
     - hinge
     - linear
-    - quadratic
-    beta_multiplier: 0.9131579581631132
-    beta_lqp: 0.7444487435292544
-    beta_hinge: 0.1424113611824884
-    beta_threshold: 2.608505513376316
-    beta_categorical: 3.033433142926842
-    n_hinge_features: 9
+    beta_multiplier: 3.4000000000000004
+    beta_lqp: 1.2000000000000002
+    beta_hinge: 1.1
+    beta_threshold: 2.6
+    beta_categorical: 0.9
+    n_hinge_features: 13
     n_threshold_features: 0
     clamp: true
     tau: 0.5

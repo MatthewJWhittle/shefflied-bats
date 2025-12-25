@@ -109,3 +109,4 @@ def split_raster_by_band(
     logger.info(f"Successfully split raster into {len(output_paths)} files")
     return output_paths
 
+

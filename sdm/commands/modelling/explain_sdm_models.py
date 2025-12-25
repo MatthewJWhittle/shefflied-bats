@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, List, Tuple, Any, Dict
 import pickle
 import shutil
+import yaml
 
 import numpy as np
 import pandas as pd
@@ -374,6 +375,46 @@ def generate_shap_plots(
     return plot_paths
 
 
+def write_shap_scores_yaml(
+    shap_values: shap.Explanation,
+    feature_names: List[str],
+    output_path: Path
+) -> None:
+    """
+    Write SHAP scores to a YAML file in variables_config.yml format.
+    
+    Calculates mean absolute SHAP values per feature, sorts them in descending order,
+    and writes to YAML file with 4 decimal places.
+    
+    Args:
+        shap_values: SHAP Explanation object containing SHAP values
+        feature_names: List of feature names (must match SHAP values order)
+        output_path: Path where YAML file should be written
+    """
+    # Calculate mean absolute SHAP value per feature
+    mean_abs_shap = np.abs(shap_values.values).mean(axis=0)
+    
+    # Create dictionary mapping feature names to SHAP scores
+    shap_scores_dict = {
+        feature_name: float(round(score, 4))
+        for feature_name, score in zip(feature_names, mean_abs_shap)
+    }
+    
+    # Sort by SHAP score in descending order
+    sorted_scores = dict(sorted(shap_scores_dict.items(), key=lambda x: x[1], reverse=True))
+    
+    # Create YAML structure
+    yaml_data = {
+        'variables': sorted_scores
+    }
+    
+    # Write to file
+    with open(output_path, 'w') as f:
+        yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+    
+    logger.debug(f"Wrote SHAP scores YAML to {output_path}")
+
+
 def process_single_model(
     row: pd.Series,
     models_dir: Path,
@@ -471,6 +512,18 @@ def process_single_model(
             shutil.rmtree(model_output_dir)
         model_output_dir.mkdir(parents=True, exist_ok=True)
         
+        # Get feature names from SHAP values (in correct order)
+        shap_feature_names = shap_values.feature_names if hasattr(shap_values, 'feature_names') else available_features
+        
+        # Write SHAP scores to YAML file
+        yaml_path = model_output_dir / "variables_with_shap_scores.yml"
+        write_shap_scores_yaml(
+            shap_values=shap_values,
+            feature_names=shap_feature_names,
+            output_path=yaml_path
+        )
+        logger.info(f"Wrote SHAP scores YAML to {yaml_path}")
+        
         # Generate plots (pass top_features directly - None means all features)
         plot_paths = generate_shap_plots(
             model_id=model_id,
@@ -492,6 +545,7 @@ def process_single_model(
             'n_features': len(feature_names),
             'n_explain': len(X_explain),
             'plot_paths': plot_paths,
+            'yaml_path': str(yaml_path),
             'error': None
         }
         

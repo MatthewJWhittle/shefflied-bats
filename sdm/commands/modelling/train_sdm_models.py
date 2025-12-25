@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from itertools import product
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TypeVar, cast
+from typing import Dict, List, Optional, Tuple, TypeVar, cast, Any, Any
 from concurrent.futures import ProcessPoolExecutor
 
 import geopandas as gpd
@@ -33,6 +33,7 @@ from sdm.data.loaders.vector import load_bat_data
 from sdm.models.maxent.maxent_model import (
     ActivityType,
     DefaultMaxentConfig,
+    MaxentConfig,
     create_maxent_pipeline,
     evaluate_and_train_maxent_model,
 )
@@ -201,54 +202,6 @@ def prepare_training_data(
     )
 
     return presence_with_evs_gdf, background_with_evs_gdf, ev_columns
-
-
-def generate_background_points_for_activity(
-    occurrence_data: gpd.GeoDataFrame,
-    boundary: gpd.GeoDataFrame,
-    activity_type: str,
-    n_background_points: int = 4000,
-    background_method: BackgroundMethod = BackgroundMethod.CONTRAST,
-    background_value: float = 0.00,
-    sigma: float = 6.5,
-    transform_method: TransformMethod = TransformMethod.PRESENCE,
-    clip_to_boundary: bool = True,
-) -> Tuple[gpd.GeoDataFrame, xr.DataArray]:
-    """
-    Generate background points for a specific activity type.
-    
-    Args:
-        occurrence_data: All occurrence data
-        boundary: Study area boundary
-        activity_type: Activity type to filter by
-        n_background_points: Number of background points to generate
-        background_method: Method for background point generation
-        background_value: Value for background method
-        sigma: Gaussian smoothing sigma
-        transform_method: Transform method for density
-        clip_to_boundary: Whether to clip points to boundary
-        
-    Returns:
-        Tuple of (background points GeoDataFrame, density array)
-    """
-    activity_occurrences = occurrence_data[
-        occurrence_data.activity_type == activity_type
-    ]
-    
-    background_points, density_array = generate_background_points_from_data(
-        occurrence_data=activity_occurrences,
-        boundary=boundary,
-        n_background_points=n_background_points,
-        background_method=background_method,
-        background_value=background_value,
-        sigma=sigma,
-        transform_method=transform_method,
-        clip_to_boundary=clip_to_boundary,
-    )
-    
-    background_points.rename(columns={"presence": "class"}, inplace=True)
-    
-    return background_points, density_array
 
 
 # ============================================================================
@@ -483,6 +436,8 @@ def prepare_species_training_data(
     # Limit background points
     if n_max_background is None:
         n_max_background = len(species_presence) * 10
+    
+
     
     if sort_density and "density" in species_absence.columns:
         species_absence = species_absence.sort_values(
@@ -955,6 +910,21 @@ def log_models_to_mlflow(
 # ============================================================================
 
 
+@dataclass
+class TrainingSetup:
+    """Container for shared training data setup."""
+    project_config: ProjectConfig
+    annotated_bats: gpd.GeoDataFrame
+    annotated_background: gpd.GeoDataFrame
+    background_density: Any  # xr.DataArray
+    grid_points: Optional[gpd.GeoDataFrame]
+    ev_columns: List[str]
+    all_ev_columns: List[str]
+    ev_raster_path: Path
+    latin_names: List[str]
+    activity_types: List[str]
+
+
 def setup_training_data(
     project_config_path: Path,
     variables_config_path: Optional[Path],
@@ -1173,7 +1143,7 @@ def train_sdm_models(
     project_config_path: Path = CONFIG_PATH,
     model_config_path: Path = MODEL_CONFIG_PATH,
     variables_config_path: Optional[Path] = None,
-    tuning_dir: Optional[Path] = None,
+    config_dir: Optional[Path] = None,
     bats_file: Optional[Path] = None,
     ev_file: Optional[Path] = None,
     output_dir: Optional[Path] = None,
@@ -1195,14 +1165,14 @@ def train_sdm_models(
     - Background points are generated once and shared across all species-activity combinations
     - Environmental variables are converted to GeoDataFrame and joined using spatial joins
     - Each species-activity combination is processed independently
-    - Per-species-activity configs are loaded from tuning_dir if provided, with fallback to base configs
+    - Per-species-activity configs are loaded from config_dir if provided, with fallback to base configs
     
     Args:
         project_config_path: Path to project-level config (paths, spatial, etc.)
         model_config_path: Path to base model hyperparameter config (used as fallback)
         variables_config_path: Path to base variables config (used as fallback)
-        tuning_dir: Optional directory containing per-species-activity tuning configs
-            (if provided, configs are loaded from {tuning_dir}/{latin_name}_{activity_type}/)
+        config_dir: Optional directory containing per-species-activity tuning configs
+            (if provided, configs are loaded from {config_dir}/{latin_name}_{activity_type}/)
         bats_file: Path to bat data file
         ev_file: Path to environmental variables file
         output_dir: Output directory for models and results
@@ -1361,17 +1331,17 @@ def train_sdm_models(
             )
             continue
         
-        # Load per-species-activity configs from tuning_dir if provided
+        # Load per-species-activity configs from config_dir if provided
         identifier = get_model_id([latin_name, activity_type])
 
         # this can be optional as we will just use all available features if not provided
         model_features_config : VariablesConfig = VariablesConfig(variables=ev_columns)
         maxent_model_config : DefaultMaxentConfig = default_model_config
-        if tuning_dir is not None:
-            tuning_dir_path = Path(tuning_dir)
-            if tuning_dir_path.exists():
+        if config_dir is not None:
+            config_dir_path = Path(config_dir)
+            if config_dir_path.exists():
                 try:
-                    model_config_path = tuning_dir_path / identifier / "model_config.yml"
+                    model_config_path = config_dir_path / identifier / "model_config.yml"
                     model_config = load_model_config(model_config_path)
                     # Convert ModelConfig to DefaultMaxentConfig
                     maxent_model_config = DefaultMaxentConfig.from_config(
@@ -1387,7 +1357,7 @@ def train_sdm_models(
                     raise Exception(f"Error loading model config for {identifier}: {e}")
                 
                 try:
-                    variables_config_path = tuning_dir_path / identifier / "variables_config.yml"
+                    variables_config_path = config_dir_path / identifier / "variables_config.yml"
                     variables_config = load_variables_config(variables_config_path)
                     # This will raise an error if the variables config contains features that are not in the data
                     model_features_config = variables_config.validate_features(ev_columns)
@@ -1401,9 +1371,9 @@ def train_sdm_models(
                 except Exception as e:
                     raise Exception(f"Error loading variables config for {identifier}: {e}")
             else:
-                raise FileNotFoundError(f"Tuning directory {tuning_dir_path} does not exist")
+                raise FileNotFoundError(f"Tuning directory {config_dir_path} does not exist")
         else:
-            logger.debug(f"No tuning_dir provided, using default configs for {identifier}")
+            logger.debug(f"No config_dir provided, using default configs for {identifier}")
         
         # Create TrainingData with config and features included
         training_data.append(

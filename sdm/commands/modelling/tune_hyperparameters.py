@@ -8,17 +8,18 @@ This module implements hyperparameter optimization for MaxEnt models, including:
 Uses the new modular approach with efficient one-time data preparation.
 """
 
-import json
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 
+import geopandas as gpd
+import matplotlib.pyplot as plt
 import mlflow
 import numpy as np
 import optuna
+import optuna.visualization as vis
 import yaml
-import numpy as np
 import pandas as pd
 from optuna.samplers import TPESampler
 from optuna.pruners import MedianPruner
@@ -41,13 +42,11 @@ from sdm.models.maxent.maxent_model import (
 from sdm.occurrence.sampling import (
     BackgroundMethod,
     TransformMethod,
-    generate_background_points_from_data,
 )
 from sdm.raster.io import load_environmental_variables
 from sdm.utils.io import (
     load_model_config,
     load_project_config,
-    load_variables_config,
     load_boundary,
     get_tuning_config_path,
 )
@@ -94,14 +93,14 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
     """Suggest MaxEnt hyperparameters from Optuna trial.
     
     Fixed parameters (for consistency across species):
-    - clamp: true (allows extrapolation)
+    - clamp: True (restrict suitability to training range)
     - tau: 0.5 (regularization strength)
     - transform: "cloglog" (output transform for consistent map interpretation)
     
     Tuned parameters:
-    - feature_types: Model feature complexity
+    - feature_types: Selection from ["linear", "hinge", "product", "quadratic"] (at least linear must be included)
     - beta_multiplier, beta_lqp, beta_hinge, beta_threshold, beta_categorical: Regularization
-    - n_hinge_features, n_threshold_features: Number of special features (conditional)
+    - n_hinge_features: Number of hinge features (only if hinge is selected)
     
     Args:
         trial: Optuna trial object
@@ -109,9 +108,8 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
     Returns:
         Dictionary of suggested hyperparameters
     """
-    # Feature types - individual categorical selection for each type
-    # Similar to pick_features, suggest each feature type individually
-    available_feature_types = ["linear", "quadratic", "hinge", "threshold"]
+    # Feature types - individual selection from ["linear", "hinge", "product", "quadratic"]
+    available_feature_types = ["linear", "hinge", "product", "quadratic"]
     selected_feature_types = []
     
     for feature_type in available_feature_types:
@@ -122,38 +120,30 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
         if include:
             selected_feature_types.append(feature_type)
     
-    # Ensure at least linear is included (most basic feature type)
+    # Ensure at least linear is included (most basic feature type, required)
     if "linear" not in selected_feature_types:
         selected_feature_types.append("linear")
     
-    # Check if hinge/threshold are in the selected feature types
-    has_hinge = "hinge" in selected_feature_types
-    has_threshold = "threshold" in selected_feature_types
+    feature_types = sorted(selected_feature_types)  # Sort for consistency
     
     # Beta multiplier - log uniform distribution
-    beta_multiplier = trial.suggest_float("beta_multiplier", 0.1, 10.0, log=True)
+    beta_multiplier = trial.suggest_float("beta_multiplier", 1, 5.0, step=0.1)
     
     # Beta values for specific feature types
-    beta_lqp = trial.suggest_float("beta_lqp", 0.1, 5.0, log=True)
-    beta_hinge = trial.suggest_float("beta_hinge", 0.1, 5.0, log=True)
-    beta_threshold = trial.suggest_float("beta_threshold", 0.1, 5.0, log=True)
-    beta_categorical = trial.suggest_float("beta_categorical", 0.1, 5.0, log=True)
+    beta_lqp = trial.suggest_float("beta_lqp", 0.5, 3.0, step=0.1)
+    beta_hinge = trial.suggest_float("beta_hinge", 1, 4.0, step=0.1)
+    beta_threshold = trial.suggest_float("beta_threshold", 1, 3.0, step=0.1)
+    beta_categorical = trial.suggest_float("beta_categorical", 0.5, 3.0, step=0.1)
     
-    # Number of hinge/threshold features
-    # If hinge/threshold are in feature_types, need at least 2 features (elapid requirement)
-    # Otherwise can be 0
+    # Number of hinge features (only if hinge is in selected feature types)
+    has_hinge = "hinge" in selected_feature_types
     if has_hinge:
-        n_hinge_features = trial.suggest_int("n_hinge_features", 2, 20)
+        n_hinge_features = trial.suggest_int("n_hinge_features", 10, 15)
     else:
         n_hinge_features = 0
     
-    if has_threshold:
-        n_threshold_features = trial.suggest_int("n_threshold_features", 2, 20)
-    else:
-        n_threshold_features = 0
-    
-    # Use the selected feature types list (already a list)
-    feature_types = sorted(selected_feature_types)  # Sort for consistency
+    # Threshold not in available feature types
+    n_threshold_features = 0
     
     # Fixed parameters for consistency across species (for comparable suitability maps)
     clamp = True  # Fixed: restrict suitability to training range
@@ -290,44 +280,6 @@ def calculate_feature_correlation_penalty(
             f"returning penalty 0.0"
         )
         return 0.0
-
-
-
-def get_default_trial_params(
-    available_features: List[str],
-) -> Dict[str, Any]:
-    """Generate default trial parameters for the first trial.
-    
-    Uses all available features and default MaxEnt hyperparameters
-    based on DefaultMaxentConfig defaults.
-    
-    Args:
-        available_features: List of available feature names
-        
-    Returns:
-        Dictionary of trial parameters ready for enqueue_trial
-    """
-    params = {}
-    
-    # Select all features (True for each)
-    for feature in available_features:
-        params[f"feature_{feature}"] = True
-    
-    # Feature type toggles to match suggest_maxent_hyperparameters
-    params["feature_type_linear"] = True
-    params["feature_type_quadratic"] = True
-    params["feature_type_hinge"] = True
-    params["feature_type_threshold"] = False  # to mimic your default
-
-    params["beta_multiplier"] = 1.5  # Default from DefaultMaxentConfig
-    params["beta_lqp"] = 1.0  # Default
-    params["beta_hinge"] = 1.0  # Default
-    params["beta_threshold"] = 1.0  # Default
-    params["beta_categorical"] = 1.0  # Default
-    params["n_hinge_features"] = 10  # Default (hinge is in feature_types)
-    params["n_threshold_features"] = 0  # Not in default feature types
-    
-    return params
 
 
 def pick_features(
@@ -578,8 +530,8 @@ def write_best_config(
     if mean_auc is not None:
         logger.info(f"Corresponding mean CV AUC: {mean_auc:.4f}")
     
-    # Extract best parameters - reconstruct feature types from individual boolean parameters
-    available_feature_types = ["linear", "quadratic", "hinge", "threshold"]
+    # Extract feature types from trial parameters
+    available_feature_types = ["linear", "hinge", "product", "quadratic"]
     selected_feature_types = []
     
     for feature_type in available_feature_types:
@@ -593,9 +545,15 @@ def write_best_config(
     
     feature_types = sorted(selected_feature_types)  # Sort for consistency
     
-    # Get n_hinge_features and n_threshold_features only if they were suggested
-    n_hinge_features = best_trial.params.get("n_hinge_features", 0)
-    n_threshold_features = best_trial.params.get("n_threshold_features", 0)
+    # Get n_hinge_features (only if hinge was selected)
+    has_hinge = "hinge" in feature_types
+    if has_hinge:
+        n_hinge_features = best_trial.params.get("n_hinge_features", 10)
+    else:
+        n_hinge_features = 0
+    
+    # Threshold not in available feature types
+    n_threshold_features = 0
     
     # Fixed parameters (not tuned, consistent across all models)
     clamp = True
@@ -658,6 +616,277 @@ def write_best_config(
     logger.info(f"Best configs written for {latin_name} - {activity_type}")
 
 
+def save_tuning_plots(
+    study: optuna.Study,
+    output_dir: Path,
+    latin_name: str,
+    activity_type: str,
+    precomputed_corr_matrix: Optional[pd.DataFrame] = None,
+) -> None:
+    """Save optimization plots for a completed study.
+    
+    Saves:
+    - Objective function over trials
+    - Mean CV AUC over trials (from user_attrs)
+    - Feature selection heatmap (features on/off per trial, organized by correlation)
+    
+    Args:
+        study: Completed Optuna study
+        output_dir: Directory to save plots
+        latin_name: Species latin name
+        activity_type: Activity type
+        precomputed_corr_matrix: Optional precomputed correlation matrix for organizing features
+    """
+    completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    
+    if len(completed_trials) == 0:
+        logger.warning(
+            f"No completed trials for {latin_name} - {activity_type}, skipping plots"
+        )
+        return
+    
+    try:
+        # Plot 1: Optimization history (objective function)
+        # Try using Optuna's native visualization first
+        try:
+            fig = vis.plot_optimization_history(study)
+            fig.update_layout(
+                title=f"Optimization History - {latin_name} - {activity_type}",
+                xaxis_title="Trial Number",
+                yaxis_title="Objective Value",
+            )
+            objective_plot_path = output_dir / "optimization_history.png"
+            fig.write_image(str(objective_plot_path), width=800, height=600, scale=2)
+            logger.debug(f"Saved optimization history plot to {objective_plot_path}")
+        except Exception as e:
+            # Fallback to matplotlib if plotly/kaleido is not available
+            logger.debug(f"Plotly not available, using matplotlib for objective plot: {e}")
+            trial_numbers = [t.number for t in completed_trials]
+            objective_values = [t.value for t in completed_trials if t.value is not None]
+            trial_nums_with_values = [
+                t.number for t in completed_trials if t.value is not None
+            ]
+            
+            if len(objective_values) > 0:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.plot(trial_nums_with_values, objective_values, 'g-o', markersize=4, linewidth=1.5)
+                ax.set_xlabel("Trial Number")
+                ax.set_ylabel("Objective Value")
+                ax.set_title(f"Optimization History - {latin_name} - {activity_type}")
+                ax.grid(True, alpha=0.3)
+                
+                objective_plot_path = output_dir / "optimization_history.png"
+                fig.savefig(objective_plot_path, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+                logger.debug(f"Saved optimization history plot to {objective_plot_path}")
+        
+        # Plot 2: Mean CV AUC over trials
+        trial_numbers = [t.number for t in completed_trials]
+        mean_aucs = [
+            t.user_attrs.get("mean_auc", np.nan) 
+            for t in completed_trials
+        ]
+        
+        # Filter out NaN values
+        valid_data = [
+            (num, auc) 
+            for num, auc in zip(trial_numbers, mean_aucs) 
+            if not np.isnan(auc)
+        ]
+        
+        if len(valid_data) > 0:
+            valid_nums, valid_aucs = zip(*valid_data)
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot(valid_nums, valid_aucs, 'b-o', markersize=4, linewidth=1.5)
+            ax.set_xlabel("Trial Number")
+            ax.set_ylabel("Mean CV AUC")
+            ax.set_title(f"Mean CV AUC Over Trials - {latin_name} - {activity_type}")
+            ax.grid(True, alpha=0.3)
+            ax.set_ylim((0, 1))
+            
+            auc_plot_path = output_dir / "mean_auc_history.png"
+            fig.savefig(auc_plot_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            logger.debug(f"Saved mean AUC history plot to {auc_plot_path}")
+        else:
+            logger.warning(
+                f"No valid mean_auc values found for {latin_name} - {activity_type}"
+            )
+        
+        # Plot 3: Feature selection heatmap
+        # Extract feature selections from all completed trials
+        feature_selections = {}  # feature_name -> list of (trial_number, is_selected)
+        trial_numbers = sorted([t.number for t in completed_trials])
+        
+        # Collect all feature selections
+        for trial in completed_trials:
+            for param_name, param_value in trial.params.items():
+                if param_name.startswith("feature_"):
+                    feature_name = param_name.replace("feature_", "")
+                    if feature_name not in feature_selections:
+                        feature_selections[feature_name] = {}
+                    feature_selections[feature_name][trial.number] = bool(param_value)
+        
+        # Filter to only features selected in at least one trial
+        features_with_selections = {
+            feat: selections 
+            for feat, selections in feature_selections.items()
+            if any(selections.values())
+        }
+        
+        if len(features_with_selections) > 0:
+            # Determine sorting method - use correlation-based clustering if available
+            used_correlation_sorting = False
+            if precomputed_corr_matrix is not None and len(features_with_selections) > 2:
+                # Organize by correlation using hierarchical clustering
+                try:
+                    from scipy.cluster.hierarchy import linkage, leaves_list
+                    from scipy.spatial.distance import squareform
+                    
+                    # Get features that appear in both selections and correlation matrix
+                    available_features = list(features_with_selections.keys())
+                    features_in_corr = [
+                        f for f in available_features 
+                        if f in precomputed_corr_matrix.columns
+                    ]
+                    
+                    if len(features_in_corr) >= 2:
+                        # Extract correlation submatrix for selected features
+                        corr_submatrix = precomputed_corr_matrix.loc[features_in_corr, features_in_corr]
+                        
+                        # Convert correlation to distance (1 - |correlation|)
+                        # Higher correlation = lower distance
+                        distance_matrix = 1 - np.abs(corr_submatrix.values)
+                        
+                        # Convert to condensed distance matrix for linkage
+                        condensed_distances = squareform(distance_matrix, checks=False)
+                        
+                        # Perform hierarchical clustering
+                        linkage_matrix = linkage(condensed_distances, method='ward')
+                        
+                        # Get feature order from dendrogram (leaves)
+                        leaf_order = leaves_list(linkage_matrix)
+                        sorted_features_by_corr = [features_in_corr[i] for i in leaf_order]
+                        
+                        # Add any features not in correlation matrix at the end
+                        features_not_in_corr = [f for f in available_features if f not in features_in_corr]
+                        sorted_features = sorted_features_by_corr + features_not_in_corr
+                        used_correlation_sorting = True
+                        
+                        logger.debug(f"Organized {len(features_in_corr)} features by correlation")
+                    else:
+                        # Fall back to frequency sorting if not enough features in correlation matrix
+                        feature_selection_counts = {
+                            feat: sum(1 for selected in selections.values() if selected)
+                            for feat, selections in features_with_selections.items()
+                        }
+                        sorted_features = sorted(
+                            features_with_selections.keys(),
+                            key=lambda f: feature_selection_counts[f],
+                            reverse=True
+                        )
+                except ImportError:
+                    logger.debug("scipy not available, falling back to frequency sorting")
+                    # Fall back to frequency sorting
+                    feature_selection_counts = {
+                        feat: sum(1 for selected in selections.values() if selected)
+                        for feat, selections in features_with_selections.items()
+                    }
+                    sorted_features = sorted(
+                        features_with_selections.keys(),
+                        key=lambda f: feature_selection_counts[f],
+                        reverse=True
+                    )
+                except Exception as e:
+                    logger.debug(f"Error in correlation-based sorting: {e}, falling back to frequency sorting")
+                    # Fall back to frequency sorting
+                    feature_selection_counts = {
+                        feat: sum(1 for selected in selections.values() if selected)
+                        for feat, selections in features_with_selections.items()
+                    }
+                    sorted_features = sorted(
+                        features_with_selections.keys(),
+                        key=lambda f: feature_selection_counts[f],
+                        reverse=True
+                    )
+            else:
+                # Sort features by selection frequency (most common at top)
+                feature_selection_counts = {
+                    feat: sum(1 for selected in selections.values() if selected)
+                    for feat, selections in features_with_selections.items()
+                }
+                sorted_features = sorted(
+                    features_with_selections.keys(),
+                    key=lambda f: feature_selection_counts[f],
+                    reverse=True
+                )
+            
+            # Limit to top 50 features to keep plot readable
+            max_features = 50
+            if len(sorted_features) > max_features:
+                sorted_features = sorted_features[:max_features]
+                logger.debug(
+                    f"Limiting feature selection plot to top {max_features} most selected features "
+                    f"(out of {len(feature_selections)} total)"
+                )
+            
+            # Build matrix: rows are features, columns are trials
+            matrix = []
+            for feature in sorted_features:
+                row = [
+                    features_with_selections[feature].get(trial_num, False)
+                    for trial_num in trial_numbers
+                ]
+                matrix.append(row)
+            
+            # Create heatmap
+            # Use fixed width for readability, height scales with number of features
+            fig_width = 14  # Fixed width for consistent readability
+            fig_height = max(8, len(sorted_features) * 0.4)  # Height scales with features, minimum 8
+            fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+            
+            # Convert boolean matrix to int (True=1, False=0) for imshow
+            matrix_array = np.array(matrix, dtype=int)
+            
+            # Create heatmap: 1 = selected (filled), 0 = not selected (empty)
+            im = ax.imshow(matrix_array, aspect='auto', cmap='YlOrRd', vmin=0, vmax=1, interpolation='nearest')
+            
+            # Set ticks
+            ax.set_xticks(range(len(trial_numbers)))
+            ax.set_xticklabels([str(n) for n in trial_numbers], rotation=45, ha='right')
+            ax.set_yticks(range(len(sorted_features)))
+            ax.set_yticklabels(sorted_features)
+            
+            # Labels
+            ax.set_xlabel("Trial Number")
+            ax.set_ylabel("Feature")
+            title_suffix = "organized by correlation" if used_correlation_sorting else "sorted by selection frequency"
+            ax.set_title(f"Feature Selection Heatmap - {latin_name} - {activity_type}\n"
+                        f"(Features {title_suffix}, showing top {len(sorted_features)} most selected)")
+            
+            # Add colorbar
+            cbar = plt.colorbar(im, ax=ax, ticks=[0, 1])
+            cbar.set_ticklabels(['Not Selected', 'Selected'])
+            
+            # Adjust layout
+            plt.tight_layout()
+            
+            feature_plot_path = output_dir / "feature_selection_heatmap.png"
+            fig.savefig(feature_plot_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            logger.debug(f"Saved feature selection heatmap to {feature_plot_path}")
+        else:
+            logger.warning(
+                f"No feature selections found for {latin_name} - {activity_type}"
+            )
+            
+    except Exception as e:
+        logger.warning(
+            f"Error saving plots for {latin_name} - {activity_type}: {e}. "
+            f"Continuing without plots."
+        )
+
 
 def tune_hyperparameters(
     project_config_path: Path,
@@ -668,7 +897,7 @@ def tune_hyperparameters(
     output_dir: Path,
     n_trials: int = 50,
     stability_penalty: float = 0.25,
-    feature_penalty: float = 0.0005,
+    feature_penalty: float = 0.001,
     target_features: int = 10,
     correlation_penalty: float = 0.05,
     correlation_sample_size: int = 10_000,
@@ -676,8 +905,8 @@ def tune_hyperparameters(
     activity_types: Optional[List[str]] = None,
     study_name: Optional[str] = None,
     storage: Optional[str] = None,
-    n_jobs: int = 1,
-    n_cv_folds: int = 2,
+    n_jobs: int = -1,
+    n_cv_folds: int = 3,
     verbose: bool = False,
     # Background point generation parameters (fixed, not tuned)
     n_background_points: int = 4000,
@@ -690,9 +919,6 @@ def tune_hyperparameters(
     d_min: float = 500,
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,
-    # Tuning optimization parameters
-    n_cv_folds: int = 3,  # Number of CV folds (aligned with training)
-    n_jobs: Optional[int] = None,  # Parallel trials (None = sequential)
 ) -> Optional[optuna.Study]:
     """Run hyperparameter tuning using Optuna with the new modular approach.
     
@@ -909,7 +1135,7 @@ def tune_hyperparameters(
             # Create study name for this combination
             study_name_combination = f"{study_name or 'sdm_tuning'}_{latin_name}_{activity_type}".replace(" ", "_")
             sampler = TPESampler(seed=42)
-            pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=10)
+            pruner = MedianPruner(n_startup_trials=10, n_warmup_steps=10)
             
             study = optuna.create_study(
                 study_name=study_name_combination,
@@ -946,15 +1172,7 @@ def tune_hyperparameters(
                     precomputed_corr_matrix=precomputed_corr_matrix,
                 )
             
-            # Enqueue default trial with all features and sensible MaxEnt config
-            default_params = get_default_trial_params(available_features)
-            study.enqueue_trial(default_params)
-            logger.info(
-                f"Enqueued default trial with all {len(available_features)} features "
-                f"and default MaxEnt hyperparameters"
-            )
-            
-            # Run optimization
+            # Run optimization (Optuna will handle initialization with random trials)
             n_jobs_optuna = n_jobs if n_jobs is not None else 1
             logger.info(f"Starting optimization with {n_trials} trials (n_jobs={n_jobs_optuna}, n_cv_folds={n_cv_folds})...")
             study.optimize(
@@ -984,6 +1202,15 @@ def tune_hyperparameters(
                     variables_config_path,
                     latin_name,
                     activity_type,
+                )
+                
+                # Save tuning plots
+                save_tuning_plots(
+                    study,
+                    combination_dir,
+                    latin_name,
+                    activity_type,
+                    precomputed_corr_matrix=precomputed_corr_matrix,
                 )
                 
                 # Store results for this study
