@@ -226,10 +226,6 @@ def train(
         help="Maximum threads per model.",
     ),
     # Species-specific processing parameters
-    grid_size_m: float = typer.Option(
-        1000,
-        help="Grid cell size for spatial sampling (meters).",
-    ),
     d_min: float = typer.Option(
         500,
         help="Minimum distance from presence for background (meters).",
@@ -269,7 +265,6 @@ def train(
         species=species,
         activity_types=activity_types,
         verbose=verbose,
-        grid_size_m=grid_size_m,
         d_min=d_min,
         d_max=d_max_value,
         sample_weight_n_neighbors=sample_weight_n_neighbors,

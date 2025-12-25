@@ -53,7 +53,7 @@ from sdm.utils.io import (
     MODEL_CONFIG_PATH,
 )
 from sdm.utils.logging_utils import setup_logging
-from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig
+from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
 from sdm.commands.modelling.utils import get_model_id
 logger = logging.getLogger(__name__)
 
@@ -1154,7 +1154,6 @@ def train_sdm_models(
     activity_types: Optional[List[str]] = None,
     verbose: bool = False,
     # Species-specific processing parameters
-    grid_size_m: float = 2000,
     d_min: float = 500,
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,
@@ -1182,7 +1181,6 @@ def train_sdm_models(
         species: List of species to model
         activity_types: List of activity types to model
         verbose: Enable verbose logging
-        grid_size_m: Grid cell size for spatial sampling (meters)
         d_min: Minimum distance from presence for background (meters)
         d_max: Maximum distance from presence for background (meters)
         sample_weight_n_neighbors: Number of neighbors for sample weighting
@@ -1216,6 +1214,11 @@ def train_sdm_models(
         f"value={background_config.background_value}, sigma={background_config.sigma}, "
         f"transform={background_config.transform_method.value}"
     )
+    
+    # Get sampling config from model config (with defaults if not present)
+    sampling_config = base_model_cfg.sampling or SamplingConfig()
+    grid_size_m = sampling_config.grid_size_m
+    logger.info(f"Sampling config: grid_size_m={grid_size_m}")
     
     # Configure MLflow
     _configure_mlflow_from_config(project_config)
