@@ -1,4 +1,5 @@
 variables:
+- climate_stats_prec_ann_var
 - climate_stats_temp_ann_avg
 - os_distance_distance_to_buildings
 - climate_bioclim_bio_9
@@ -8,4 +9,3 @@ variables:
 - ceh_landcover_upland_heathland_500m
 - ceh_landcover_arable_500m
 - ceh_landcover_broadleaved_woodland_500m
-- ceh_landcover_urban_1500m

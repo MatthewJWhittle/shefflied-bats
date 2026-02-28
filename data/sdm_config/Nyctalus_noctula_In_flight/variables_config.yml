@@ -3,9 +3,8 @@ variables:
 - climate_stats_temp_mat_avg
 - vom_vegetation_height_std
 - os_distance_distance_to_buildings
-- ceh_landcover_upland_heathland
 - ceh_landcover_suburban
 - os_distance_distance_to_water
-- ceh_landcover_urban_1500m
+
 - ceh_landcover_wetland_1500m
 - ceh_landcover_suburban_1000m

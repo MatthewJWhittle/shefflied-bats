@@ -6,7 +6,4 @@ variables:
 - os_distance_distance_to_buildings
 - os_cover_water
 - ceh_landcover_arable
-- ceh_landcover_urban_500m
-- ceh_landcover_improved_grassland_500m
 - vom_vegetation_height_std_500m
-- vom_vegetation_height_mean_1000m

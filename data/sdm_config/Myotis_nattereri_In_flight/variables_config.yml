@@ -9,6 +9,5 @@ variables:
 - terrain_stats_aspect_eastness_slope
 - ceh_landcover_arable_500m
 - ceh_landcover_broadleaved_woodland_1000m
-- ceh_landcover_coniferous_woodland_1500m
 - ceh_landcover_urban_500m
 - ceh_landcover_suburban_1000m

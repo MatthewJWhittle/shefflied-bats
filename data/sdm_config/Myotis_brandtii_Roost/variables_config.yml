@@ -1,7 +1,6 @@
 variables:
 - os_distance_distance_to_buildings
 - climate_bioclim_bio_9
-- bgs_coast_distance_to_coast
 - climate_stats_wind_ann_avg
 - vom_vegetation_height_std_500m
 - ceh_landcover_urban_1500m

@@ -367,13 +367,17 @@ def explain(
     ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
+    n_ev_pool: int = typer.Option(
+        10_000,
+        help="Number of points to sample from EV raster as SHAP pool.",
+    ),
     n_explain: int = typer.Option(
         200,
-        help="Number of points to explain (default: 200).",
+        help="Number of points to explain (more points = more detailed plots).",
     ),
     n_background: int = typer.Option(
-        200,
-        help="Number of background samples for SHAP (default: 100).",
+        1000,
+        help="Number of background samples for the SHAP explainer.",
     ),
     top_features: Optional[int] = typer.Option(
         None,
@@ -401,6 +405,7 @@ def explain(
         output_dir=output_dir,
         species=species,
         activity_types=activity_types,
+        n_ev_pool=n_ev_pool,
         n_explain=n_explain,
         n_background=n_background,
         top_features=top_features,

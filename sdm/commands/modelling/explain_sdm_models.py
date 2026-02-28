@@ -1,8 +1,8 @@
 """
 SHAP-based model interpretability for SDM models.
 
-This module calculates SHAP values for trained SDM models and generates
-interpretability plots including feature importance and dependence plots.
+Calculates SHAP values for trained SDM models and generates interpretability
+plots (feature importance bar plots and dependence plots).
 """
 
 import logging
@@ -183,9 +183,7 @@ def compute_shap_for_model(
 ) -> Tuple[shap.Explainer, shap.Explanation, pd.DataFrame]:
     """
     Compute SHAP values for a single model.
-    
-    Based on the notebook's compute_shap_for_pipeline function.
-    
+
     Args:
         model: Fitted sklearn Pipeline with predict_proba
         X: DataFrame of input features
@@ -252,9 +250,7 @@ def plot_filtered_shap_dependence(
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
     SHAP dependence plot filtered to percentile range.
-    
-    Based on the notebook's plot_filtered_shap_dependence function.
-    
+
     Args:
         feature_name: Feature to plot
         X_df: Input features DataFrame
@@ -569,27 +565,34 @@ def explain_sdm_models(
     output_dir: Path = Path("data/sdm_predictions"),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
+    n_ev_pool: int = 10_000,
     n_explain: int = 200,
-    n_background: int = 100,
+    n_background: int = 1000,
     top_features: Optional[int] = None,
     n_jobs: Optional[int] = None,
     verbose: bool = False
 ) -> pd.DataFrame:
     """
     Calculate SHAP values for SDM models and generate interpretability plots.
-    
+
+    Samples a pool of points from the EV raster, then for each model samples
+    background and explain sets from that pool (same process regardless of
+    pool or sample sizes).
+
     Args:
         ev_path: Path to environmental variables raster
         models_dir: Directory containing trained models
         output_dir: Directory for output plots
         species: Optional list of species to explain (Latin names)
         activity_types: Optional list of activity types to explain
-        n_explain: Number of points to explain (default: 200)
-        n_background: Number of background samples for SHAP (default: 100)
-        top_features: Number of top features for dependence plots (Optional - all features if None)
+        n_ev_pool: Number of points to sample from the EV raster (shared pool
+            for all models).
+        n_explain: Number of points to explain
+        n_background: Number of background samples for the SHAP explainer
+        top_features: Number of top features for dependence plots (None = all)
         n_jobs: Number of parallel workers (None = auto)
         verbose: Enable verbose logging
-        
+
     Returns:
         DataFrame containing explanation results
     """
@@ -614,11 +617,12 @@ def explain_sdm_models(
     logger.debug("Loading environmental variables...")
     evs_dataset, _ = load_environmental_variables(ev_path)
     
-    # Sample points from xarray Dataset efficiently (once for all models)
-    logger.info(f"Sampling {n_explain + n_background} points from EV dataset...")
+    # Sample a pool from the EV raster (once for all models); each model
+    # samples its background and explain sets from this pool.
+    logger.info(f"Sampling up to {n_ev_pool} points from EV dataset (pool for SHAP)...")
     ev_df = sample_points_from_xarray_dataset(
         evs_dataset=evs_dataset,
-        n_samples=n_explain + n_background,  # Sample enough for both explain and background
+        n_samples=n_ev_pool,
         random_state=42
     )
     logger.info(f"Sampled {len(ev_df)} valid points from EV dataset")
