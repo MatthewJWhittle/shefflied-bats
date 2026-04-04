@@ -1,10 +1,12 @@
 """
 SHAP-based model interpretability for SDM models.
 
-Calculates SHAP values for trained SDM models and generates interpretability
-plots (feature importance bar plots and dependence plots).
+Calculates SHAP values and generates plots. The explain command also saves
+explainer.pkl and feature_names.json per model; use load_explainer_artifacts()
+in a notebook to explain arbitrary points without re-running the pipeline.
 """
 
+import json
 import logging
 from pathlib import Path
 from typing import Optional, List, Tuple, Any, Dict
@@ -16,8 +18,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import shap
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 
@@ -180,21 +180,12 @@ def compute_shap_for_model(
     n_explain: int = 200,
     random_state: int = 42,
     positive_class: int = 1
-) -> Tuple[shap.Explainer, shap.Explanation, pd.DataFrame]:
+) -> Tuple[shap.Explainer, shap.Explanation, pd.DataFrame, pd.DataFrame]:
     """
     Compute SHAP values for a single model.
 
-    Args:
-        model: Fitted sklearn Pipeline with predict_proba
-        X: DataFrame of input features
-        feature_names: List of feature names used by the model
-        n_background: Number of background samples for SHAP explainer
-        n_explain: Number of points to explain
-        random_state: Random seed
-        positive_class: Index of positive class in predict_proba output
-        
     Returns:
-        Tuple of (explainer, shap_values, X_explain)
+        (explainer, shap_values, X_explain, background)
     """
     # Ensure we only use the requested features, in a consistent order
     # Verify all requested features exist in X
@@ -230,11 +221,8 @@ def compute_shap_for_model(
     n_explain = min(n_explain, len(X))
     X_explain = X.sample(n=n_explain, random_state=random_state + 1)
     
-    # Calculate SHAP values
     shap_values = explainer(X_explain)
-    
-    
-    return explainer, shap_values, X_explain
+    return explainer, shap_values, X_explain, background
 
 
 def plot_filtered_shap_dependence(
@@ -411,6 +399,51 @@ def write_shap_scores_yaml(
     logger.debug(f"Wrote SHAP scores YAML to {output_path}")
 
 
+def save_explainer_artifacts(
+    model_output_dir: Path,
+    model_path: Path,
+    background: pd.DataFrame,
+    feature_names: List[str],
+) -> None:
+    """Save model path and background so explainer can be reconstructed on load (not picklable)."""
+    model_output_dir = Path(model_output_dir)
+    model_output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_path = Path(model_path).resolve()
+    meta = {"model_path": str(resolved_path), "feature_names": feature_names}
+    with open(model_output_dir / "meta.json", "w") as f:
+        json.dump(meta, f)
+    with open(model_output_dir / "feature_names.json", "w") as f:
+        json.dump(feature_names, f)
+    background.to_parquet(model_output_dir / "background.parquet", index=False)
+    logger.debug(f"Saved explainer artifacts to {model_output_dir}")
+
+
+def load_explainer_artifacts(model_output_dir: Path) -> Dict[str, Any]:
+    """
+    Load model and background, reconstruct explainer. Returns dict: explainer, feature_names.
+    """
+    model_output_dir = Path(model_output_dir)
+    if not model_output_dir.is_dir():
+        raise FileNotFoundError(f"Explainer artifacts directory not found: {model_output_dir}")
+    with open(model_output_dir / "meta.json") as f:
+        meta = json.load(f)
+    model_path = Path(meta["model_path"])
+    feature_names = meta["feature_names"]
+    model = load_model(model_path)
+    background = pd.read_parquet(model_output_dir / "background.parquet")
+
+    def predict_fn(data):
+        return model.predict_proba(data)[:, 1]
+
+    explainer = shap.Explainer(
+        predict_fn,
+        background,
+        algorithm="permutation",
+        model_output="probability",
+    )
+    return {"explainer": explainer, "feature_names": feature_names}
+
+
 def process_single_model(
     row: pd.Series,
     models_dir: Path,
@@ -481,7 +514,7 @@ def process_single_model(
             f"EV subset columns don't match model features! Got {set(ev_df_subset.columns)}, expected {set(available_features)}"
         
         # Compute SHAP values (only for model's features)
-        explainer, shap_values, X_explain = compute_shap_for_model(
+        explainer, shap_values, X_explain, background = compute_shap_for_model(
             model=model,
             X=ev_df_subset,
             feature_names=available_features,
@@ -530,6 +563,8 @@ def process_single_model(
             model_output_dir=model_output_dir,
             top_features=top_features  # None = all features, int = top N features
         )
+
+        save_explainer_artifacts(model_output_dir, model_path, background, shap_feature_names)
         
         logger.info(f"✓ Completed {model_id}")
         

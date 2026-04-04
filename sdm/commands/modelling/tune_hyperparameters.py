@@ -888,6 +888,69 @@ def save_tuning_plots(
         )
 
 
+def save_trial_data_csv(
+    study: optuna.Study,
+    output_dir: Path,
+    latin_name: str,
+    activity_type: str,
+    stability_penalty: float,
+    feature_penalty: float,
+    target_features: int,
+    correlation_penalty: float,
+) -> None:
+    """Write a CSV of trial data (identifiers + objective and its components) for plotting.
+
+    Uses existing trial.value and user_attrs; derives stability_penalty_score,
+    excess_features, and feature_penalty_score from constants. No MaxEnt hyperparameters.
+    """
+    rows = []
+    for t in study.trials:
+        mean_auc = t.user_attrs.get("mean_auc")
+        std_auc = t.user_attrs.get("std_auc")
+        n_features = t.user_attrs.get("n_features")
+        mean_abs_corr = t.user_attrs.get("mean_abs_correlation")
+        corr_penalty_score = t.user_attrs.get("correlation_penalty_score")
+
+        if std_auc is not None and not (np.isnan(std_auc)):
+            stability_penalty_score = stability_penalty * std_auc
+        else:
+            stability_penalty_score = None
+
+        if n_features is not None:
+            excess_features = max(0, n_features - target_features)
+            feature_penalty_score = (n_features * feature_penalty) + (
+                feature_penalty * excess_features**2
+            )
+        else:
+            excess_features = None
+            feature_penalty_score = None
+
+        rows.append({
+            "latin_name": latin_name,
+            "activity_type": activity_type,
+            "study_name": study.study_name,
+            "trial_number": t.number,
+            "state": t.state.name,
+            "objective_value": t.value,
+            "mean_auc": mean_auc,
+            "std_auc": std_auc,
+            "stability_penalty": stability_penalty,
+            "stability_penalty_score": stability_penalty_score,
+            "feature_penalty": feature_penalty,
+            "target_features": target_features,
+            "n_features": n_features,
+            "excess_features": excess_features,
+            "feature_penalty_score": feature_penalty_score,
+            "mean_abs_correlation": mean_abs_corr,
+            "correlation_penalty": correlation_penalty,
+            "correlation_penalty_score": corr_penalty_score,
+        })
+    df = pd.DataFrame(rows)
+    csv_path = output_dir / "trial_data.csv"
+    df.to_csv(csv_path, index=False)
+    logger.debug(f"Saved trial data CSV to {csv_path}")
+
+
 def tune_hyperparameters(
     project_config_path: Path,
     model_config_path: Path,
@@ -1212,7 +1275,16 @@ def tune_hyperparameters(
                     activity_type,
                     precomputed_corr_matrix=precomputed_corr_matrix,
                 )
-                
+                save_trial_data_csv(
+                    study,
+                    combination_dir,
+                    latin_name,
+                    activity_type,
+                    stability_penalty=stability_penalty,
+                    feature_penalty=feature_penalty,
+                    target_features=target_features,
+                    correlation_penalty=correlation_penalty,
+                )
                 # Store results for this study
                 best_trial = study.best_trial
                 mean_cv_auc = best_trial.user_attrs.get("mean_auc")
