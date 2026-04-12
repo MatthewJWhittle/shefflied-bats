@@ -176,7 +176,7 @@ Source copy for editing: `temp/all-evs-band-display-names.json` (base layers); f
 | Suitability (GeoTIFF, 27700) | `data/sdm_predictions/prediction_<model_id>.tif` |
 | Suitability (upload — 3857 **COG**) | Produce with warp + `translate_to_cog` (see §4). |
 | Pickled pipeline | `data/sdm_models/<model_id>/model.pkl` (see `model_results.csv` → `model_path`; same row has `model_package_dir` and `package.json` for API metadata). |
-| **`feature_band_names` order** | `data/sdm_predictions/visualization/shap/<Latin_underscored>/<Activity_underscored>/feature_names.json` — use the JSON **array as-is** (same order as the estimator). |
+| **`feature_band_names` order** | Prefer `package.json` → `feature_names` (same directory as `model.pkl`). Alternatively SHAP `data/sdm_predictions/visualization/shap/<Latin_underscored>/<Activity_underscored>/feature_names.json` — JSON **array as-is**. |
 
 ### 6.2 Check if the model already exists
 
@@ -185,8 +185,8 @@ curl -sS "${BASE_URL}/models" -H "Authorization: Bearer ${TOKEN}" \
   | jq '.[] | select(.species=="Nyctalus noctula" and .activity=="Roost")'
 ```
 
-- **No row** → `POST /models` (include `file` unless the API allows deferred COG).
-- **Row exists** → `PUT /models/{model_id}` to replace COG and/or metadata/pickle.
+- **No row** → `POST /models` — OpenAPI marks **`file`** (suitability COG) as **required**; you cannot create a catalog model without uploading a raster.
+- **Row exists** → `PUT /models/{model_id}` to replace the COG, **and/or** send **`metadata`** and/or **`serialized_model_file`** only (all parts optional on `PUT`).
 
 ### 6.3 Metadata JSON (multipart string)
 
@@ -220,7 +220,51 @@ curl -sS -X PUT "${BASE_URL}/models/${MODEL_ID}" \
   -F "serialized_model_file=@data/sdm_models/nyctalus_noctula_roost/model.pkl"
 ```
 
-### 6.5 Point inspection (map click)
+### 6.5 Pickle + metadata only (training `package.json`, no new COG)
+
+When the model row already has a suitability COG on the server, **`PUT /models/{model_id}`** can refresh **only** the pickled pipeline and **`ModelMetadata`** — omit **`file`**.
+
+1. Build API metadata from the training package (maps `feature_names` → `analysis.feature_band_names`, copies CV metrics into `card`, embeds full training JSON into string **`extras.*`** fields for traceability):
+
+   ```bash
+   META="$(python scripts/build_model_metadata_from_package.py \
+     data/sdm_models/myotis_daubentonii_in_flight/package.json)"
+   ```
+
+2. Resolve the catalog UUID (example: *Myotis daubentonii* — *In flight*):
+
+   ```bash
+   curl -sS "${BASE_URL}/models" | jq -r '.[] | select(.species=="Myotis daubentonii" and .activity=="In flight") | .id'
+   ```
+
+3. **PUT** (admin Bearer token required):
+
+   ```bash
+   export MODEL_ID="2d788abb-bcbf-4585-b2c9-a9590bb5f33e"   # example from GET /models
+   curl -sS -X PUT "${BASE_URL}/models/${MODEL_ID}" \
+     -H "Authorization: Bearer ${TOKEN}" \
+     --form-string "metadata=${META}" \
+     -F "serialized_model_file=@data/sdm_models/myotis_daubentonii_in_flight/model.pkl"
+   ```
+
+**Checks before running:** every `feature_band_names` entry must exist on the parent project’s `environmental_band_definitions` (same names as training). Quick Python check:
+
+```bash
+python3 - <<'PY'
+import json, sys, urllib.request
+base, pid = "http://127.0.0.1:8000", "YOUR_PROJECT_UUID"
+pkg = json.load(open("data/sdm_models/myotis_daubentonii_in_flight/package.json"))
+proj = json.load(urllib.request.urlopen(f"{base}/projects/{pid}"))
+names = {b["name"] for b in (proj.get("environmental_band_definitions") or [])}
+missing = [f for f in pkg["feature_names"] if f not in names]
+print("missing:", missing)
+sys.exit(1 if missing else 0)
+PY
+```
+
+**Unauthenticated test:** omitting `Authorization` returns **`401`** with `{"detail":"Missing bearer token"}` — the multipart shape above is accepted by the server.
+
+### 6.6 Point inspection (map click)
 
 ```http
 GET {BASE_URL}/models/{MODEL_ID}/point?lng={WGS84_LON}&lat={WGS84_LAT}
@@ -251,8 +295,8 @@ Use coordinates **inside** the suitability raster extent (transform raster bound
 3. Ensure **environmental** COG is **3857 + COG**; **`PUT /projects`** with `infer_band_definitions=true` (or explicit definitions).
 4. Optionally **`PATCH …/labels`** using `data/evs/environmental_band_labels_patch.json` (regenerate if band set changes).
 5. Run **`sdm predict`** → **`prediction_<model_id>.tif`** → **warp + COG** for suitability.
-6. Build **`metadata`** with **`feature_band_names`** from SHAP `feature_names.json`.
-7. **`POST` or `PUT` `/models`** with multipart: `project_id`, `species`, `activity`, `file`, `metadata`, `serialized_model_file`.
+6. Build **`metadata`** with **`feature_band_names`** from training **`package.json`** (see `scripts/build_model_metadata_from_package.py`) or from SHAP `feature_names.json`.
+7. **`POST /models`** (new row): multipart must include **`file`** (COG) plus `project_id`, `species`, `activity`, and usually `metadata` / `serialized_model_file`. **`PUT /models/{id}`** (existing row): any subset of `file`, `metadata`, `serialized_model_file`.
 8. Verify with **`GET /models/{id}`** and **`GET …/point`** inside raster bounds.
 
 ---
@@ -268,6 +312,7 @@ Use coordinates **inside** the suitability raster extent (transform raster bound
 | `sdm/raster/io.py` | `translate_to_cog` helper. |
 | `sdm/commands/modelling/predict_sdm_models.py` | Prediction paths and `get_model_id` usage. |
 | `sdm/commands/modelling/utils.py` | `get_model_id` implementation. |
+| `scripts/build_model_metadata_from_package.py` | Build API `ModelMetadata` JSON from `data/sdm_models/<model_id>/package.json`. |
 
 ---
 
@@ -279,4 +324,4 @@ Use coordinates **inside** the suitability raster extent (transform raster bound
 - **`feature_band_names`** on a model must match the **project** manifest (full EV stack with focal bands fixed earlier mismatches).
 - **`PUT /models`** with **3857 suitability COG**, **metadata**, and **pickle** returned **200**; **`/point`** explainability may still require **runtime alignment** for pickle loading.
 
-When the API changes, refresh this guide from **`{BASE_URL}/openapi.json`** and adjust examples accordingly.
+When the API changes, refresh this guide from **`{BASE_URL}/openapi.json`** (e.g. `POST /models` **required** fields vs `PUT /models/{model_id}` optional parts, `ModelMetadata` / `ModelAnalysis` descriptions) and adjust examples accordingly.
