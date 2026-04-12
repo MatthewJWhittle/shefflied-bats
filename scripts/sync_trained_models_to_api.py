@@ -1,34 +1,72 @@
 #!/usr/bin/env python3
 """
-Upload every local training package (package.json + model.pkl) to the HSM Visualiser API.
+Upload each local training package to the HSM Visualiser API.
 
-For each ``{models_dir}/{model_id}/`` with ``package.json`` and ``model.pkl``, finds the
-catalog row with matching ``latin_name`` / ``activity_type`` and ``PUT``s metadata + pickle.
+Scans ``{models_dir}/*/`` for ``package.json`` + ``model.pkl``, matches
+``latin_name`` / ``activity_type`` to ``GET /models``, then ``PUT``s
+``metadata`` + ``serialized_model_file``.
 
-Credentials: ``HSM_EMAIL`` / ``HSM_PASSWORD`` or ``--email`` / ``--password``.
+Auth: ``HSM_EMAIL`` / ``HSM_PASSWORD`` or ``--email`` / ``--password``.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
 
 import requests
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+_spec = importlib.util.spec_from_file_location(
+    "_hsm_build_model_metadata",
+    _SCRIPTS_DIR / "build_model_metadata_from_package.py",
+)
+assert _spec and _spec.loader
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+model_metadata_from_package = _mod.model_metadata_from_package
+
+
+def _training_packages(models_dir: Path) -> Iterator[Tuple[Path, Path, Dict[str, Any]]]:
+    """Yield ``(package_json, model_pkl, package_dict)`` for each valid bundle."""
+    for pkg_json in sorted(models_dir.glob("*/package.json")):
+        pkl = pkg_json.parent / "model.pkl"
+        if not pkl.is_file():
+            continue
+        pkg = json.loads(pkg_json.read_text(encoding="utf-8"))
+        yield pkg_json, pkl, pkg
+
+
+def _catalog_index(models: List[Dict[str, Any]]) -> Dict[Tuple[str, str], str]:
+    return {(row["species"], row["activity"]): row["id"] for row in models}
+
+
+def _authenticated_session(base_url: str, email: str, password: str) -> requests.Session:
+    s = requests.Session()
+    r = s.post(
+        f"{base_url}/auth/token",
+        json={"email": email, "password": password, "admin_only": True},
+        timeout=60,
+    )
+    r.raise_for_status()
+    token = r.json()["id_token"]
+    s.headers["Authorization"] = f"Bearer {token}"
+    return s
+
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default=os.environ.get("HSM_BASE_URL", "http://127.0.0.1:8000"))
-    parser.add_argument("--models-dir", type=Path, default=Path("data/sdm_models"))
-    parser.add_argument("--email", default=os.environ.get("HSM_EMAIL", ""))
-    parser.add_argument("--password", default=os.environ.get("HSM_PASSWORD", ""))
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--base-url", default=os.environ.get("HSM_BASE_URL", "http://127.0.0.1:8000"))
+    p.add_argument("--models-dir", type=Path, default=Path("data/sdm_models"))
+    p.add_argument("--email", default=os.environ.get("HSM_EMAIL", ""))
+    p.add_argument("--password", default=os.environ.get("HSM_PASSWORD", ""))
+    p.add_argument("--dry-run", action="store_true")
+    args = p.parse_args()
 
     email = args.email or os.environ.get("HSM_EMAIL", "")
     password = args.password or os.environ.get("HSM_PASSWORD", "")
@@ -37,89 +75,65 @@ def main() -> int:
         return 2
 
     base = args.base_url.rstrip("/")
-    r = requests.post(
-        f"{base}/auth/token",
-        json={"email": email, "password": password, "admin_only": True},
-        timeout=60,
-    )
-    if r.status_code != 200:
-        print(f"Auth failed HTTP {r.status_code}: {r.text}", file=sys.stderr)
-        return 1
-    token = r.json()["id_token"]
-    headers = {"Authorization": f"Bearer {token}"}
+    models_dir = args.models_dir.resolve()
 
-    r = requests.get(f"{base}/models", headers=headers, timeout=60)
+    try:
+        session = _authenticated_session(base, email, password)
+    except requests.HTTPError as e:
+        print(f"Auth failed: {e.response.status_code} {e.response.text}", file=sys.stderr)
+        return 1
+
+    r = session.get(f"{base}/models", timeout=60)
     if r.status_code != 200:
         print(f"GET /models failed HTTP {r.status_code}: {r.text}", file=sys.stderr)
         return 1
-    models = r.json()
-    key_to_id: Dict[Tuple[str, str], str] = {}
-    for row in models:
-        key_to_id[(row["species"], row["activity"])] = row["id"]
 
-    models_dir = args.models_dir.resolve()
-    script = Path(__file__).resolve().parent / "build_model_metadata_from_package.py"
-    ok, missing, failed = 0, [], []
+    catalog = _catalog_index(r.json())
+    missing: List[Tuple[str, str, str]] = []
+    failed: List[Tuple[str, str]] = []
+    n_ok = 0
 
-    for pkg_json in sorted(models_dir.glob("*/package.json")):
-        pkg_dir = pkg_json.parent
-        pkl = pkg_dir / "model.pkl"
-        if not pkl.is_file():
-            print(f"skip (no model.pkl): {pkg_dir.name}", file=sys.stderr)
-            continue
-        pkg = json.loads(pkg_json.read_text(encoding="utf-8"))
+    for _pkg_json, pkl, pkg in _training_packages(models_dir):
         latin = pkg.get("latin_name") or ""
         activity = pkg.get("activity_type") or ""
-        mid = key_to_id.get((latin, activity))
-        if not mid:
-            missing.append((pkg_dir.name, latin, activity))
+        slug = pkg.get("model_id") or pkl.parent.name
+        model_id = catalog.get((latin, activity))
+        if not model_id:
+            missing.append((slug, latin, activity))
             continue
 
-        proc = subprocess.run(
-            [sys.executable, str(script), str(pkg_json)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode != 0:
-            failed.append((pkg_dir.name, proc.stderr.strip() or proc.stdout))
-            continue
-        meta_str = proc.stdout.strip()
+        meta = model_metadata_from_package(pkg)
 
         if args.dry_run:
-            print(f"DRY-RUN PUT {mid} <- {pkg_dir.name}")
-            ok += 1
+            print(f"DRY-RUN PUT {model_id} <- {slug}")
+            n_ok += 1
             continue
 
-        try:
-            meta_obj = json.loads(meta_str)
-        except json.JSONDecodeError as e:
-            failed.append((pkg_dir.name, str(e)))
-            continue
-
-        files = {
-            "serialized_model_file": ("model.pkl", pkl.read_bytes(), "application/octet-stream"),
-        }
-        data = {"metadata": json.dumps(meta_obj)}
-        pr = requests.put(
-            f"{base}/models/{mid}",
-            headers=headers,
-            data=data,
-            files=files,
+        pr = session.put(
+            f"{base}/models/{model_id}",
+            data={"metadata": json.dumps(meta)},
+            files={
+                "serialized_model_file": (
+                    "model.pkl",
+                    pkl.read_bytes(),
+                    "application/octet-stream",
+                ),
+            },
             timeout=300,
         )
         if pr.status_code != 200:
-            failed.append((pkg_dir.name, f"HTTP {pr.status_code} {pr.text[:800]}"))
+            failed.append((slug, f"HTTP {pr.status_code} {pr.text[:800]}"))
             continue
-        print(f"OK {latin} — {activity} -> {mid}")
-        ok += 1
 
-    for name, latin, activity in missing:
-        print(f"MISSING API ROW {name} ({latin!r}, {activity!r})", file=sys.stderr)
-    for name, err in failed:
-        print(f"FAILED {name}: {err}", file=sys.stderr)
+        print(f"OK {latin} — {activity} -> {model_id}")
+        n_ok += 1
 
-    print(f"Done: {ok} uploaded, {len(missing)} no API match, {len(failed)} errors")
+    for slug, latin, activity in missing:
+        print(f"MISSING API ROW {slug} ({latin!r}, {activity!r})", file=sys.stderr)
+    for slug, err in failed:
+        print(f"FAILED {slug}: {err}", file=sys.stderr)
+
+    print(f"Done: {n_ok} uploaded, {len(missing)} no API match, {len(failed)} errors")
     return 1 if failed else 0
 
 

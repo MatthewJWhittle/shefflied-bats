@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Build HSM Visualiser ``ModelMetadata`` JSON from a training ``package.json``.
+"""Build HSM Visualiser ``ModelMetadata`` from a training ``package.json``.
 
-Usage:
-  python scripts/build_model_metadata_from_package.py path/to/package.json
+CLI: ``python scripts/build_model_metadata_from_package.py path/to/package.json``
+prints one line of JSON for ``curl --form-string metadata=...``.
 
-Prints a single-line JSON suitable for ``curl --form-string metadata=...``.
-``analysis.feature_band_names`` is taken from ``feature_names`` in the package.
-``card`` is filled from ``metrics`` and species/activity; ``extras`` holds string
-blobs for ``maxent_config`` and full ``training_package`` for traceability.
+Library: import via ``importlib`` (see ``sync_trained_models_to_api.py``) or add ``scripts/``
+to ``sys.path`` and ``from build_model_metadata_from_package import model_metadata_from_package``.
 """
 
 from __future__ import annotations
@@ -16,25 +14,17 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any, Dict
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "package_json",
-        type=Path,
-        help="Path to package.json next to model.pkl",
-    )
-    args = parser.parse_args()
-    pkg = json.loads(args.package_json.read_text(encoding="utf-8"))
-
+def model_metadata_from_package(pkg: Dict[str, Any]) -> Dict[str, Any]:
+    """Map training ``package.json`` body to API ``ModelMetadata``."""
     latin = pkg.get("latin_name", "")
     activity = pkg.get("activity_type", "")
     metrics = pkg.get("metrics") or {}
     mean_auc = metrics.get("mean_cv_auc")
-    std_auc = metrics.get("std_cv_auc")
 
-    meta: dict = {
+    return {
         "analysis": {
             "feature_band_names": list(pkg.get("feature_names") or []),
         },
@@ -55,7 +45,17 @@ def main() -> None:
         },
     }
 
-    json.dump(meta, sys.stdout, separators=(",", ":"))
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "package_json",
+        type=Path,
+        help="Path to package.json next to model.pkl",
+    )
+    args = parser.parse_args()
+    pkg = json.loads(args.package_json.read_text(encoding="utf-8"))
+    json.dump(model_metadata_from_package(pkg), sys.stdout, separators=(",", ":"))
     sys.stdout.write("\n")
 
 
