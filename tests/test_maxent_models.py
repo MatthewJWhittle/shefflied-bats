@@ -2,20 +2,25 @@
 Tests for MaxEnt model functionality, including feature selection and model persistence.
 
 These tests verify that:
-1. FeatureSubsetter correctly stores and uses only the specified subset of features
-2. Models created with a feature subset retain that subset after training and pickling
+1. FeatureSubsetter (legacy helper) still behaves for older pickles
+2. MaxEnt pipelines use ColumnTransformer + retain the configured column subset after fit/pickle
 3. extract_split_data correctly filters columns when feature_columns is specified
 
 These tests help isolate a bug where saved models have all features (e.g., 43) in the
-FeatureSubsetter instead of the subset from the tuning config (e.g., 20 features).
+selector instead of the subset from the tuning config (e.g., 20 features).
 """
+import json
+
 import pytest
 import numpy as np
 import geopandas as gpd
 import pickle
 from shapely.geometry import Point
+from sklearn.compose import ColumnTransformer
+from elapid.models import MaxentModel as ElapidMaxentModel
 
 from sdm.models.core.feature_subsetter import FeatureSubsetter
+from sdm.models.core.pipeline_features import pipeline_selected_feature_names
 from sdm.models.maxent.maxent_model import (
     create_maxent_pipeline,
     extract_split_data,
@@ -108,17 +113,16 @@ class TestCreateMaxentPipeline:
             model_config=DefaultMaxentConfig(),
         )
         
-        # Check that pipeline has FeatureSubsetter step
         assert "feature_selection" in pipeline.named_steps
-        
-        # Check that FeatureSubsetter has the correct feature names
-        feature_subsetter = pipeline.named_steps["feature_selection"]
-        assert isinstance(feature_subsetter, FeatureSubsetter)
-        assert feature_subsetter.feature_names == subset_feature_names
-        assert len(feature_subsetter.feature_names) == 5
+        selector = pipeline.named_steps["feature_selection"]
+        assert isinstance(selector, ColumnTransformer)
+        assert pipeline_selected_feature_names(pipeline) == subset_feature_names
+        assert len(pipeline_selected_feature_names(pipeline)) == 5
+
+        assert isinstance(pipeline.named_steps["maxent"], ElapidMaxentModel)
     
     def test_pipeline_feature_names_preserved_after_clone(self, subset_feature_names):
-        """Test that pipeline FeatureSubsetter feature_names are preserved after cloning."""
+        """Test that pipeline feature list is preserved after cloning."""
         from sklearn.base import clone
         
         pipeline = create_maxent_pipeline(
@@ -127,13 +131,9 @@ class TestCreateMaxentPipeline:
             model_config=DefaultMaxentConfig(),
         )
         
-        # Clone the pipeline (like what happens during cross-validation)
         cloned_pipeline = clone(pipeline)
-        
-        # Check that cloned pipeline has correct feature names
-        cloned_feature_subsetter = cloned_pipeline.named_steps["feature_selection"]
-        assert cloned_feature_subsetter.feature_names == subset_feature_names
-        assert len(cloned_feature_subsetter.feature_names) == 5
+        assert pipeline_selected_feature_names(cloned_pipeline) == subset_feature_names
+        assert len(pipeline_selected_feature_names(cloned_pipeline)) == 5
 
 
 class TestExtractSplitData:
@@ -175,7 +175,7 @@ class TestModelFeatureConsistency:
     def test_pipeline_feature_names_after_training_with_subset(
         self, sample_training_data, subset_feature_names, all_feature_names
     ):
-        """Test that pipeline FeatureSubsetter retains subset after training with filtered data."""
+        """Test that pipeline retains configured subset after training with filtered data."""
         # Create pipeline with subset of features
         pipeline = create_maxent_pipeline(
             feature_names=subset_feature_names,
@@ -194,13 +194,12 @@ class TestModelFeatureConsistency:
         # Fit the pipeline with the filtered data
         pipeline.fit(X_train, y_train, maxent__sample_weight=w_train)
         
-        # After fitting, FeatureSubsetter should still have only the subset
-        feature_subsetter = pipeline.named_steps["feature_selection"]
-        assert feature_subsetter.feature_names == subset_feature_names
-        assert len(feature_subsetter.feature_names) == 5
+        names = pipeline_selected_feature_names(pipeline)
+        assert names == subset_feature_names
+        assert len(names) == 5
         
         # Verify it doesn't have all features
-        assert len(feature_subsetter.feature_names) != len(all_feature_names)
+        assert len(names) != len(all_feature_names)
     
     def test_model_pickle_preserves_feature_subset(
         self, sample_training_data, subset_feature_names
@@ -226,10 +225,8 @@ class TestModelFeatureConsistency:
         pickled_model = pickle.dumps(pipeline)
         unpickled_model = pickle.loads(pickled_model)
         
-        # After unpickling, should still have only the subset
-        feature_subsetter = unpickled_model.named_steps["feature_selection"]
-        assert feature_subsetter.feature_names == subset_feature_names
-        assert len(feature_subsetter.feature_names) == 5
+        assert pipeline_selected_feature_names(unpickled_model) == subset_feature_names
+        assert len(pipeline_selected_feature_names(unpickled_model)) == 5
     
     def test_train_final_model_preserves_feature_subset(
         self, sample_training_data, subset_feature_names, all_feature_names
@@ -249,11 +246,10 @@ class TestModelFeatureConsistency:
             feature_columns=subset_feature_names,
         )
         
-        # Final model should still have only the subset
-        feature_subsetter = final_model.named_steps["feature_selection"]
-        assert feature_subsetter.feature_names == subset_feature_names
-        assert len(feature_subsetter.feature_names) == 5
-        assert len(feature_subsetter.feature_names) != len(all_feature_names)
+        names = pipeline_selected_feature_names(final_model)
+        assert names == subset_feature_names
+        assert len(names) == 5
+        assert len(names) != len(all_feature_names)
     
     def test_model_with_all_columns_but_subset_features(
         self, sample_training_data, subset_feature_names, all_feature_names
@@ -261,7 +257,7 @@ class TestModelFeatureConsistency:
         """Test scenario: DataFrame has all columns, but we filter and use only subset.
         
         This simulates the real-world scenario where training data contains all features,
-        but we want to use only a subset. The FeatureSubsetter should still only have
+        but we want to use only a subset. The column selector should still only list
         the subset of features, not all of them.
         """
         # Create pipeline with subset (simulating tuned features)
@@ -271,10 +267,9 @@ class TestModelFeatureConsistency:
             model_config=DefaultMaxentConfig(),
         )
         
-        # Verify pipeline was created with subset
-        feature_subsetter = pipeline.named_steps["feature_selection"]
-        assert len(feature_subsetter.feature_names) == 5
-        assert set(feature_subsetter.feature_names) == set(subset_feature_names)
+        names_pre = pipeline_selected_feature_names(pipeline)
+        assert len(names_pre) == 5
+        assert set(names_pre) == set(subset_feature_names)
         
         # Now extract data using only the subset (simulating extract_split_data with feature_columns)
         indices = np.arange(len(sample_training_data))
@@ -290,22 +285,20 @@ class TestModelFeatureConsistency:
         # Fit the model
         pipeline.fit(X_train, y_train, maxent__sample_weight=w_train)
         
-        # After fitting, FeatureSubsetter should STILL only have subset
-        feature_subsetter_after_fit = pipeline.named_steps["feature_selection"]
-        assert len(feature_subsetter_after_fit.feature_names) == 5
-        assert set(feature_subsetter_after_fit.feature_names) == set(subset_feature_names)
+        names_after_fit = pipeline_selected_feature_names(pipeline)
+        assert len(names_after_fit) == 5
+        assert set(names_after_fit) == set(subset_feature_names)
         
         # Pickle and unpickle to simulate saving/loading
         pickled = pickle.dumps(pipeline)
         loaded = pickle.loads(pickled)
         
-        # After loading, should STILL only have subset
-        loaded_feature_subsetter = loaded.named_steps["feature_selection"]
-        assert len(loaded_feature_subsetter.feature_names) == 5
-        assert set(loaded_feature_subsetter.feature_names) == set(subset_feature_names)
+        loaded_names = pipeline_selected_feature_names(loaded)
+        assert len(loaded_names) == 5
+        assert set(loaded_names) == set(subset_feature_names)
         
         # CRITICAL: Should NOT have all features
-        assert len(loaded_feature_subsetter.feature_names) != len(all_feature_names)
+        assert len(loaded_names) != len(all_feature_names)
 
 
 class TestFullTrainingWorkflow:
@@ -355,9 +348,7 @@ class TestFullTrainingWorkflow:
         # Verify the final_model was created
         assert result.final_model is not None
         
-        # Check FeatureSubsetter in the trained model BEFORE saving
-        feature_subsetter_before_save = result.final_model.named_steps["feature_selection"]
-        features_before = feature_subsetter_before_save.feature_names
+        features_before = pipeline_selected_feature_names(result.final_model)
         assert len(features_before) == 5, \
             f"Before save: Expected 5 features, got {len(features_before)}: {features_before}"
         assert set(features_before) == set(subset_feature_names)
@@ -366,18 +357,20 @@ class TestFullTrainingWorkflow:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)
             models = [result]
-            model_paths = save_models(models, output_dir)
-            
-            # Load the saved model
+            model_paths = save_models(models, [training_data], output_dir)
+
             model_path = model_paths[result.identifier()]
             assert model_path.exists()
+            assert model_path.name == "model.pkl"
+            pkg = json.loads((model_path.parent / "package.json").read_text(encoding="utf-8"))
+            assert pkg["schema_version"] == 1
+            assert set(pkg["feature_names"]) == set(subset_feature_names)
+            assert "mean_cv_auc" in pkg["metrics"]
             
             with open(model_path, "rb") as f:
                 loaded_model = pickle.load(f)
             
-            # Check FeatureSubsetter in the loaded model
-            loaded_feature_subsetter = loaded_model.named_steps["feature_selection"]
-            loaded_features = loaded_feature_subsetter.feature_names
+            loaded_features = pipeline_selected_feature_names(loaded_model)
             
             # CRITICAL ASSERTION: Should have subset, not all features
             assert len(loaded_features) == 5, \
@@ -429,9 +422,7 @@ class TestFullTrainingWorkflow:
         if not result.success:
             pytest.skip(f"Model training failed: {result.error}")
         
-        # Before saving: check the model
-        feature_subsetter = result.final_model.named_steps["feature_selection"]
-        features_before_save = feature_subsetter.feature_names
+        features_before_save = pipeline_selected_feature_names(result.final_model)
         
         print(f"\nFeatures BEFORE save: {len(features_before_save)}")
         print(f"Expected subset: {subset_feature_names}")
@@ -441,15 +432,13 @@ class TestFullTrainingWorkflow:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)
             models = [result]
-            model_paths = save_models(models, output_dir)
-            
+            model_paths = save_models(models, [training_data], output_dir)
+
             model_path = model_paths[result.identifier()]
             with open(model_path, "rb") as f:
                 loaded_model = pickle.load(f)
             
-            # Check after loading
-            loaded_feature_subsetter = loaded_model.named_steps["feature_selection"]
-            features_after_load = loaded_feature_subsetter.feature_names
+            features_after_load = pipeline_selected_feature_names(loaded_model)
             
             print(f"\nFeatures AFTER load: {len(features_after_load)}")
             print(f"Actual: {features_after_load}")
@@ -477,17 +466,18 @@ class TestTuningConfigLoading:
     
     def test_tuning_config_path_resolution(self):
         """Test that path resolution works correctly for tuning configs."""
-        from sdm.utils.io import get_tuning_config_path
         from pathlib import Path
-        
+
+        from sdm.commands.modelling.utils import get_model_id
+        from sdm.utils.io import get_tuning_config_path
+
         latin_name = "Nyctalus noctula"
         activity_type = "In flight"
         tuning_dir = Path("data/sdm_tuning")
-        
-        expected_path = get_tuning_config_path(tuning_dir, latin_name, activity_type)
-        actual_path = Path("data/sdm_tuning/Nyctalus_noctula_In_flight")
-        
-        assert expected_path == actual_path
+        model_id = get_model_id([latin_name, activity_type])
+
+        expected_path = get_tuning_config_path(tuning_dir, model_id)
+        assert expected_path == tuning_dir / model_id
     
     def test_feature_filtering_logic(self):
         """Test the feature filtering logic used when loading tuning configs."""

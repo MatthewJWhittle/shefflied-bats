@@ -309,21 +309,46 @@ def load_model_run_summary(summary_csv_path: Union[str, Path]) -> pd.DataFrame:
         # logger.error(f"Error reading summary CSV {summary_path}: {e}", exc_info=True)
         raise ValueError(f"Error reading summary CSV {summary_path}: {e}")
 
+def resolve_trained_model_path(model_path: Union[str, Path]) -> Path:
+    """Resolve ``model_path`` from ``model_results.csv`` to the pipeline pickle file.
+
+    Supports:
+
+    - **Package layout** (current training): ``…/{model_id}/model.pkl`` (path may be
+      relative or absolute).
+    - **Package directory only**: ``…/{model_id}/`` → loads ``model.pkl`` inside it
+      (e.g. ``model_package_dir`` column).
+
+    Legacy single-file pickles at ``…/<identifier>.pkl`` still work when that file exists.
+    """
+    p = Path(model_path).expanduser()
+    if p.is_file():
+        return p
+    if p.is_dir():
+        inner = p / "model.pkl"
+        if inner.is_file():
+            return inner.resolve()
+    p_res = p.resolve()
+    if p_res.is_file():
+        return p_res
+    if p_res.is_dir():
+        inner = p_res / "model.pkl"
+        if inner.is_file():
+            return inner
+    raise FileNotFoundError(
+        f"Trained model not found at {model_path!s}. "
+        "Expected a pickle file, or a package directory containing model.pkl."
+    )
+
+
 def load_pickled_model(model_path_str: Union[str, Path]) -> Any:
-    """Loads a pickled model object from a given path string."""
-    model_path = Path(model_path_str)
-    if not model_path.exists():
-        # logger.error(f"Model file not found: {model_path}")
-        # Raise an error or return None, depending on desired handling by caller
-        raise FileNotFoundError(f"Model file not found: {model_path}")
+    """Load a pickled sklearn / MaxEnt pipeline (handles packaged ``model.pkl`` paths)."""
+    model_path = resolve_trained_model_path(model_path_str)
     try:
         with open(model_path, "rb") as f:
-            model = pickle.load(f)
-        return model
+            return pickle.load(f)
     except Exception as e:
-        # logger.error(f"Error loading model from {model_path}: {e}", exc_info=True)
-        # Raise a custom error or return None
-        raise IOError(f"Error loading model from {model_path}: {e}")
+        raise IOError(f"Error loading model from {model_path}: {e}") from e
 
 def csv_to_parquet(input_file: Union[str, Path], output_file: Union[str, Path]):
     """Converts a CSV file to a Parquet file."""

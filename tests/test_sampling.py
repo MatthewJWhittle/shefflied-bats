@@ -465,6 +465,8 @@ def mock_project_config():
             predictions="data/predictions",
             model_config_path="model_config.yml",
             variables_config_path="variables_config.yml",
+            tuning_dir="data/sdm_tuning",
+            config_dir="data/sdm_config",
             occurence_data="data/processed/bats-tidy.geojson",
             background_points="data/processed/background-points.geojson",
             boundary="data/processed/boundary.geojson",
@@ -592,7 +594,8 @@ def test_train_models_with_setup(
     
     # Mock training data and results
     from sdm.types import TrainingData, TrainingResults
-    
+
+    model_config = DefaultMaxentConfig()
     mock_training_data = [
         TrainingData(
             latin_name="Myotis daubentonii",
@@ -601,9 +604,11 @@ def test_train_models_with_setup(
                 {"class": [1, 0], "geometry": [Point(0, 0), Point(1, 1)]},
                 crs="EPSG:27700",
             ),
+            maxent_config=model_config,
+            model_features=["ev1", "ev2"],
         )
     ]
-    
+
     mock_results = [
         TrainingResults(
             latin_name="Myotis daubentonii",
@@ -615,12 +620,11 @@ def test_train_models_with_setup(
             error=None,
         )
     ]
-    
+
     mock_generate_training.return_value = mock_training_data
     mock_train_parallel.return_value = mock_results
-    
+
     # Call training function
-    model_config = DefaultMaxentConfig()
     feature_selection = {ActivityType.IN_FLIGHT: ["ev1", "ev2"]}
     sampling_params = {
         "subset_occurrence": None,

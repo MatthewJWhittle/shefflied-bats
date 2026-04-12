@@ -6,7 +6,9 @@ in the Sheffield area, including data preparation, model training, and evaluatio
 Uses a modular approach where each function does one thing and can be easily composed.
 """
 
+import json
 import logging
+import math
 import os
 import pickle
 from contextlib import nullcontext
@@ -29,7 +31,8 @@ import elapid as ela
 from shapely import distance
 import topojson as tp
 
-from sdm.data.loaders.vector import load_bat_data
+from sdm.data.loaders.vector import load_bat_data, load_background_points
+from sdm.data.processing.core import annotate_points
 from sdm.models.maxent.maxent_model import (
     ActivityType,
     DefaultMaxentConfig,
@@ -86,6 +89,11 @@ def convert_evs_to_geodataframe(evs_dataset: xr.Dataset) -> gpd.GeoDataFrame:
     ev_gdf.dropna(inplace=True)
     
     return ev_gdf
+
+
+def extract_grid_points(evs_dataset: xr.Dataset) -> gpd.GeoDataFrame:
+    """Point GeoDataFrame over the EV raster grid (for distance / neighbourhood features)."""
+    return convert_evs_to_geodataframe(evs_dataset)
 
 
 def annotate_points_with_evs(
@@ -466,6 +474,79 @@ def prepare_species_training_data(
     return species_data
 
 
+def generate_training_data(
+    bats_ant: gpd.GeoDataFrame,
+    background_points_gdf: gpd.GeoDataFrame,
+    background_density_series: Any,
+    grid_points: Optional[gpd.GeoDataFrame],
+    latin_names: List[str],
+    activity_types: List[str],
+    ev_columns: List[str],
+    min_presence: int,
+    subset: Optional[int],
+    subset_background: bool,
+    order_by_density_for_subset: bool,
+    sample_weight_n_neighbors: int,
+    background_min_bg: int,
+    background_max_bg: int,
+    background_factor: int,
+    model_config: MaxentConfig,
+    feature_selection: Dict[ActivityType, List[str]],
+    grid_size_m: float = 2000,
+) -> List[TrainingData]:
+    """Build ``TrainingData`` rows for each species × activity (shared annotated tables)."""
+    _ = grid_points, subset, subset_background, background_density_series  # reserved / future use
+
+    def _model_features_for(activity_str: str) -> List[str]:
+        for act, feats in feature_selection.items():
+            if act.value == activity_str:
+                use = [f for f in feats if f in ev_columns]
+                return use if use else list(ev_columns)
+        return list(ev_columns)
+
+    training_data: List[TrainingData] = []
+    for latin_name, activity_type in product(latin_names, activity_types):
+        n_presence_est = len(
+            bats_ant[
+                (bats_ant["latin_name"] == latin_name)
+                & (bats_ant["activity_type"] == activity_type)
+            ]
+        )
+        n_max_background = min(
+            background_max_bg,
+            max(background_min_bg, n_presence_est * background_factor),
+        )
+        species_data = prepare_species_training_data(
+            presence_data=bats_ant,
+            background_data=background_points_gdf,
+            latin_name=latin_name,
+            activity_type=activity_type,
+            ev_columns=ev_columns,
+            grid_size_m=grid_size_m,
+            d_min=500,
+            d_max=np.inf,
+            n_max_background=n_max_background,
+            sort_density=order_by_density_for_subset,
+            sample_weight_n_neighbors=sample_weight_n_neighbors,
+            random_state=42,
+        )
+        if len(species_data) == 0 or "class" not in species_data.columns:
+            continue
+        n_presence = len(species_data[species_data["class"] == 1])
+        if n_presence < min_presence:
+            continue
+        training_data.append(
+            TrainingData(
+                latin_name=latin_name,
+                activity_type=activity_type,
+                occurrence=species_data,
+                maxent_config=model_config,
+                model_features=_model_features_for(activity_type),
+            )
+        )
+    return training_data
+
+
 # ============================================================================
 # Model training functions
 # ============================================================================
@@ -703,6 +784,66 @@ def train_models_parallel(
     return successful_results
 
 
+def _finite_float_or_none(x: Any) -> Any:
+    """JSON-friendly float: map NaN/inf to None."""
+    try:
+        xf = float(x)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(xf) or math.isinf(xf):
+        return None
+    return xf
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert values for JSON serialization (numpy scalars, etc.)."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return float(value) if isinstance(value, np.floating) else int(value)
+    return value
+
+
+_MAXENT_CONFIG_KEYS = (
+    "feature_types",
+    "tau",
+    "transform",
+    "clamp",
+    "scorer",
+    "beta_multiplier",
+    "beta_lqp",
+    "beta_hinge",
+    "beta_threshold",
+    "beta_categorical",
+    "n_hinge_features",
+    "n_threshold_features",
+    "convergence_tolerance",
+    "tolerance",
+    "use_lambdas",
+    "n_lambdas",
+    "class_weights",
+    "n_cpus",
+    "use_sklearn",
+)
+
+
+def _maxent_config_to_dict(cfg: Any) -> Dict[str, Any]:
+    """Serialize MaxEnt / elapid config objects to plain dicts for ``package.json``."""
+    out: Dict[str, Any] = {}
+    for key in _MAXENT_CONFIG_KEYS:
+        if not hasattr(cfg, key):
+            continue
+        val = getattr(cfg, key)
+        if callable(val):
+            continue
+        out[key] = _json_safe(val)
+    return out
+
+
 def prepare_results_dataframe(
     models: List[TrainingResults],
     training_data: List[TrainingData],
@@ -755,26 +896,74 @@ def save_training_data(
 
 def save_models(
     models: List[TrainingResults],
+    training_data: List[TrainingData],
     output_dir: Path,
 ) -> Dict[str, Path]:
     """
-    Save trained models to disk.
-    
+    Save each successful model as a small on-disk package for training outputs and API upload.
+
+    Layout per species–activity (filesystem-safe ``model_id`` from ``get_model_id``)::
+
+        {output_dir}/{model_id}/model.pkl      — fitted sklearn pipeline
+        {output_dir}/{model_id}/package.json — feature list, MaxEnt params, CV metrics, counts
+
     Args:
-        models: List of TrainingResults
-        output_dir: Path to output directory
-        
+        models: Training results (only entries with ``final_model`` are written).
+        training_data: Parallel list of training data (matched by ``identifier()``).
+        output_dir: Root directory for all model packages.
+
     Returns:
-        Dictionary of model identifier to path to saved model
+        Map from ``TrainingResults.identifier()`` to path of ``model.pkl`` inside the package
+        directory (suitable for existing loaders that open the pickle path).
     """
+    data_by_id = {d.identifier(): d for d in training_data}
     model_paths: Dict[str, Path] = {}
     for model in models:
-        model_path = output_dir / f"{model.identifier()}.pkl"
-        model_paths[model.identifier()] = model_path
-        # Save final model
+        mid = model.identifier()
+        if model.final_model is None:
+            logger.warning("Skipping save for %s (no final_model)", mid)
+            continue
+        data = data_by_id.get(mid)
+        if data is None:
+            logger.warning(
+                "Skipping save for %s (no matching TrainingData for identifier)", mid
+            )
+            continue
+
+        pkg_dir = output_dir / get_model_id([model.latin_name, model.activity_type])
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        model_path = pkg_dir / "model.pkl"
         with open(model_path, "wb") as f:
             pickle.dump(model.final_model, f)
-    
+
+        mean_cv, std_cv, n_valid, n_total = _summarize_cv_scores(model.cv_scores)
+        n_presence = int(len(data.occurrence[data.occurrence["class"] == 1]))
+        n_background = int(len(data.occurrence[data.occurrence["class"] == 0]))
+        package = {
+            "schema_version": 1,
+            "identifier": mid,
+            "model_id": get_model_id([model.latin_name, model.activity_type]),
+            "latin_name": model.latin_name,
+            "activity_type": model.activity_type,
+            "feature_names": list(data.model_features),
+            "maxent_config": _maxent_config_to_dict(data.maxent_config),
+            "metrics": {
+                "mean_cv_auc": _finite_float_or_none(mean_cv),
+                "std_cv_auc": _finite_float_or_none(std_cv),
+                "n_cv_folds_valid": n_valid,
+                "n_cv_folds_total": n_total,
+                "n_presence": n_presence,
+                "n_background": n_background,
+                "training_success": model.success,
+            },
+            "artifacts": {"model_pickle": "model.pkl"},
+        }
+        with open(pkg_dir / "package.json", "w", encoding="utf-8") as jf:
+            json.dump(package, jf, indent=2, allow_nan=False)
+
+        model_paths[mid] = model_path
+        logger.info("Saved model package for %s under %s", mid, pkg_dir)
+
     return model_paths
 
 
@@ -1092,7 +1281,19 @@ def train_models_with_setup(
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
     logger.debug("=== Training models with shared setup ===")
     
-    # Generate training data
+    # Filter feature selection to only include available features
+    filtered_feature_selection: Dict[ActivityType, List[str]] = {}
+    for activity, features in feature_selection.items():
+        filtered = [feat for feat in features if feat in setup.ev_columns]
+        if not filtered:
+            logger.warning(
+                "No valid features remain for %s; defaulting to %d available variables",
+                activity.value,
+                len(setup.ev_columns),
+            )
+            filtered = setup.ev_columns
+        filtered_feature_selection[activity] = filtered
+
     logger.debug("Generating training data...")
     training_data = generate_training_data(
         bats_ant=cast(gpd.GeoDataFrame, setup.annotated_bats),
@@ -1110,30 +1311,16 @@ def train_models_with_setup(
         background_min_bg=sampling_params.get("background_min_bg", 1000),
         background_max_bg=sampling_params.get("background_max_bg", 10000),
         background_factor=sampling_params.get("background_factor", 10),
+        model_config=model_config,
+        feature_selection=filtered_feature_selection,
+        grid_size_m=float(sampling_params.get("grid_size_m", 2000)),
     )
-    
-    # Filter feature selection to only include available features
-    filtered_feature_selection: Dict[ActivityType, List[str]] = {}
-    for activity, features in feature_selection.items():
-        filtered = [feat for feat in features if feat in setup.ev_columns]
-        if not filtered:
-            logger.warning(
-                "No valid features remain for %s; defaulting to %d available variables",
-                activity.value,
-                len(setup.ev_columns),
-            )
-            filtered = setup.ev_columns
-        filtered_feature_selection[activity] = filtered
-    
-    # Train models
-    logger.debug(f"Training {len(training_data)} models...")
+
+    logger.debug("Training %d models...", len(training_data))
     models = train_models_parallel(
         training_data,
-        filtered_feature_selection,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
-        model_config=model_config,
-        n_cv_folds=n_cv_folds,
     )
     
     return models, training_data
@@ -1405,11 +1592,15 @@ def train_sdm_models(
     # Prepare and save results
     logger.info("Saving results...")
     results_df = prepare_results_dataframe(models, training_data)
-    model_paths = save_models(models, models_output_dir)
-    
-    # Add model paths to results
+    model_paths = save_models(models, training_data, models_output_dir)
+
     results_df["model_path"] = [
-        str(model_paths[identifier]) for identifier in results_df["identifier"]
+        str(model_paths[identifier]) if identifier in model_paths else ""
+        for identifier in results_df["identifier"]
+    ]
+    results_df["model_package_dir"] = [
+        str(Path(p).parent.resolve()) if p else ""
+        for p in results_df["model_path"]
     ]
     
     # Save results and training data

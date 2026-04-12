@@ -8,7 +8,6 @@ predictions across the study area using the new modular structure.
 import logging
 from pathlib import Path
 from typing import Optional, List, Any, Dict, Union
-import pickle
 
 import pandas as pd
 import numpy as np
@@ -17,10 +16,10 @@ from rasterio.features import geometry_mask
 import geopandas as gpd
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.utils.io import load_boundary
+from sdm.utils.io import load_boundary, load_pickled_model
 from sdm.raster.io import load_environmental_variables
 from sdm.models.maxent.maxent_model import apply_models_to_raster
-from sdm.models.core.feature_subsetter import FeatureSubsetter
+from sdm.models.core.pipeline_features import pipeline_selected_feature_names
 from sdm.commands.data_preparation.raster.split_raster_by_band import split_raster_by_band
 from sdm.commands.modelling.utils import get_model_id
 
@@ -51,10 +50,9 @@ def filter_models(
     return filtered
 
 def load_model(model_path: Path) -> Any:
-    """Load a pickled model from disk."""
+    """Load a pickled model from disk (supports ``model_results.csv`` package paths)."""
     try:
-        with open(model_path, 'rb') as f:
-            return pickle.load(f)
+        return load_pickled_model(model_path)
     except Exception as e:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise
@@ -175,11 +173,9 @@ def make_predictions(
             # Load model
             model = load_model(model_path)
             
-            # Get feature names from the first model's FeatureSubsetter
-            if feature_names is None and hasattr(model, 'steps'):
-                feature_subsetter = next((step[1] for step in model.steps if isinstance(step[1], FeatureSubsetter)), None)
-                if feature_subsetter:
-                    feature_names = feature_subsetter.feature_names
+            if feature_names is None and hasattr(model, "named_steps"):
+                if "feature_selection" in model.named_steps:
+                    feature_names = pipeline_selected_feature_names(model)
                     logger.debug(f"Using feature subset: {feature_names}")
             
             models[model_id] = model

@@ -4,6 +4,8 @@ Unit tests for the NBN Atlas occurrence client.
 
 from __future__ import annotations
 
+import re
+
 import geopandas as gpd
 import pandas as pd
 import pytest
@@ -79,8 +81,8 @@ class TestBuildQuery:
             polygon=poly,
         )
         assert "wkt" in params
-        # Should match shapely's WKT representation
-        assert params["wkt"].startswith("POLYGON((")
+        # Shapely 2 may emit "POLYGON ((" with a space after the keyword
+        assert re.match(r"^POLYGON\s*\(\(\s*", params["wkt"], re.IGNORECASE)
 
 
 class TestFetchOccurrencesFromNbn:

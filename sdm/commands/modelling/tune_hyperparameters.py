@@ -165,6 +165,28 @@ def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
     }
 
 
+def get_default_trial_params(features: List[str]) -> Dict[str, Any]:
+    """Flat Optuna-style parameter dict for baseline / smoke trials and tests.
+
+    Keys align with ``pick_features`` (``feature_<name>``) and legacy
+    ``feature_type_*`` toggles used alongside ``suggest_maxent_hyperparameters``.
+    """
+    params: Dict[str, Any] = {}
+    for name in features:
+        params[f"feature_{name}"] = True
+    params["feature_type_linear"] = True
+    params["feature_type_quadratic"] = True
+    params["feature_type_hinge"] = True
+    params["feature_type_threshold"] = False
+    params["beta_multiplier"] = 1.5
+    params["beta_lqp"] = 1.0
+    params["beta_hinge"] = 1.0
+    params["beta_threshold"] = 1.0
+    params["beta_categorical"] = 1.0
+    params["n_hinge_features"] = 10
+    params["n_threshold_features"] = 0
+    return params
+
 
 def precompute_correlation_matrix(
     training_gdf: gpd.GeoDataFrame,

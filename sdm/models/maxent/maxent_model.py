@@ -20,6 +20,7 @@ from sklearn.compose import ColumnTransformer
 
 import elapid as ela
 from elapid.models import MaxentModel as BaseMaxentModel
+from elapid.models import MaxentModel as ElapidMaxentModel
 from elapid.types import to_iterable # Used by elapid internals, good to be aware of
 from elapid.utils import (
     NoDataException,
@@ -32,7 +33,6 @@ from elapid.utils import (
 )
 from elapid.geo import apply_model_to_array # Core raster prediction function from elapid
 from elapid.models import MaxentConfig
-from sdm.models.core.feature_subsetter import FeatureSubsetter
 from sdm.types import VariablesConfig, ModelConfig
 
 
@@ -441,6 +441,34 @@ def predict_rasters_with_elapid_model(
     logger.info("Prediction map saved successfully.")
 
 
+def elapid_maxent_from_config(config: MaxentConfig, n_cpus: int = 1) -> ElapidMaxentModel:
+    """Build ``elapid.models.MaxentModel`` from a MaxentConfig (no ``sdm`` subclass).
+
+    Mirrors ``MaxentModel.from_config`` on the local wrapper class so pickles reference
+    only ``elapid`` + ``sklearn`` for the estimator step.
+    """
+    return ElapidMaxentModel(
+        feature_types=config.feature_types,
+        tau=config.tau,
+        transform=config.transform,  # type: ignore[arg-type]
+        clamp=config.clamp,
+        scorer=config.scorer,
+        beta_multiplier=config.beta_multiplier,
+        beta_lqp=config.beta_lqp,
+        beta_hinge=config.beta_hinge,
+        beta_threshold=config.beta_lqp,
+        beta_categorical=config.beta_categorical,
+        n_hinge_features=config.n_hinge_features,
+        n_threshold_features=config.n_threshold_features,
+        convergence_tolerance=config.tolerance,
+        use_lambdas=config.use_lambdas,
+        n_lambdas=config.n_lambdas,
+        class_weights=config.class_weights,
+        n_cpus=n_cpus,
+        use_sklearn=True,
+    )
+
+
 def create_maxent_pipeline(
     feature_names: List[str], 
     maxent_n_jobs: int = 1, # Threads for MaxentModel itself
@@ -448,34 +476,37 @@ def create_maxent_pipeline(
     # Add other MaxentModel params as needed
 ) -> Pipeline:
     """Creates a scikit-learn Pipeline for MaxEnt modeling.
-    Includes feature selection (custom FeatureSubsetter), scaling, and the Elapid MaxentModel.
+
+    Uses ``sklearn.compose.ColumnTransformer`` (passthrough of ``feature_names``) and
+    ``elapid.models.MaxentModel`` so the fitted pipeline can be pickled without ``sdm``
+    imports on load (only ``sklearn`` + ``elapid`` + numpy/pandas as dependencies).
 
     Args:
-        feature_names: List of feature names to be selected by FeatureSubsetter.
-        maxent_beta_multiplier: Beta multiplier for the Maxent model.
+        feature_names: Columns to keep, in order, for the model input matrix.
         maxent_n_jobs: Number of threads for the MaxentModel.
+        model_config: Elapid-compatible MaxEnt configuration.
 
     Returns:
-        A scikit-learn Pipeline instance.
+        A scikit-learn ``Pipeline`` instance.
     """
     logger.debug(f"Creating MaxEnt pipeline for features: {feature_names}")
-    
-    # Feature selector: uses custom FeatureSubsetter to select only the desired features
-    feature_selector = FeatureSubsetter(feature_names=feature_names)
-    
-    # Scaler: Standardizes features by removing the mean and scaling to unit variance.
+
+    column_selector = ColumnTransformer(
+        [("features", "passthrough", feature_names)],
+        remainder="drop",
+        sparse_threshold=0,
+    )
+    if hasattr(column_selector, "set_output"):
+        column_selector.set_output(transform="pandas")
+
     scaler = StandardScaler()
+    maxent_estimator = elapid_maxent_from_config(model_config, n_cpus=maxent_n_jobs)
 
-    # Maxent Model from Elapid
-    maxent_estimator = MaxentModel.from_config(model_config, n_cpus=maxent_n_jobs)
-
-    pipeline = Pipeline([
-        ("feature_selection", feature_selector),
+    return Pipeline([
+        ("feature_selection", column_selector),
         ("scaling", scaler),
-        ("maxent", maxent_estimator)
+        ("maxent", maxent_estimator),
     ])
-    
-    return pipeline
 
 # Enum for activity types, useful for get_feature_config
 class ActivityType(StrEnum):

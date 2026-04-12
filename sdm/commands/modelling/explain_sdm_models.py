@@ -10,7 +10,6 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional, List, Tuple, Any, Dict
-import pickle
 import shutil
 import yaml
 
@@ -22,8 +21,15 @@ import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 
 from sdm.utils.logging_utils import setup_logging
+from sdm.utils.io import load_pickled_model
 from sdm.raster.io import load_environmental_variables
+from sklearn.compose import ColumnTransformer
+
 from sdm.models.core.feature_subsetter import FeatureSubsetter
+from sdm.models.core.pipeline_features import (
+    pipeline_selected_feature_names,
+    selection_step_feature_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +61,9 @@ def filter_models(
 
 
 def load_model(model_path: Path) -> Any:
-    """Load a pickled model from disk."""
+    """Load a pickled model from disk (supports ``model_results.csv`` package paths)."""
     try:
-        with open(model_path, 'rb') as f:
-            return pickle.load(f)
+        return load_pickled_model(model_path)
     except Exception as e:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise
@@ -134,41 +139,27 @@ def sample_points_from_xarray_dataset(
 
 def extract_model_features(model: Any) -> List[str]:
     """
-    Extract feature names from a model's FeatureSubsetter step.
-    
+    Extract feature names from a model's feature-selection step.
+
+    Supports ``FeatureSubsetter`` (legacy) and ``ColumnTransformer`` (current MaxEnt pipeline).
+
     Args:
-        model: Trained sklearn Pipeline with FeatureSubsetter step
-        
+        model: Trained sklearn ``Pipeline`` with a ``feature_selection`` step
+
     Returns:
         List of feature names used by the model
     """
-    # Use dictionary-style access to get the feature_selection step (preferred method)
-    try:
-        feature_subsetter = model["feature_selection"]
-        if hasattr(feature_subsetter, 'feature_names'):
-            return feature_subsetter.feature_names
-    except (KeyError, TypeError):
-        pass
-    
-    # Fallback: try named_steps attribute
-    if hasattr(model, 'named_steps') and 'feature_selection' in model.named_steps:
-        feature_subsetter = model.named_steps['feature_selection']
-        if hasattr(feature_subsetter, 'feature_names'):
-            return feature_subsetter.feature_names
-    
-    # Fallback: iterate through steps
-    if hasattr(model, 'steps'):
-        feature_subsetter = next(
-            (step[1] for step in model.steps if isinstance(step[1], FeatureSubsetter)),
-            None
-        )
-        if feature_subsetter:
-            return feature_subsetter.feature_names
-    
-    # Fallback: try to get feature names from the model itself
-    if hasattr(model, 'feature_names_in_'):
+    if hasattr(model, "named_steps") and "feature_selection" in model.named_steps:
+        return pipeline_selected_feature_names(model)
+
+    if hasattr(model, "steps"):
+        for _name, step in model.steps:
+            if isinstance(step, (FeatureSubsetter, ColumnTransformer)):
+                return selection_step_feature_names(step)
+
+    if hasattr(model, "feature_names_in_"):
         return list(model.feature_names_in_)
-    
+
     raise ValueError("Could not extract feature names from model")
 
 
@@ -484,7 +475,7 @@ def process_single_model(
         model_path = Path(row.model_path)
         model = load_model(model_path)
         
-        # Extract feature names from model's FeatureSubsetter
+        # Extract feature names from model's feature-selection step
         feature_names = extract_model_features(model)
         logger.info(f"Model {model_id} uses {len(feature_names)} features: {feature_names}")
         
