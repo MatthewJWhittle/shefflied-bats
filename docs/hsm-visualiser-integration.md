@@ -285,6 +285,7 @@ Use coordinates **inside** the suitability raster extent (transform raster bound
 | Explainability / sampling errors on **project** `PUT` | COG extent mostly **nodata**, or sample size vs valid pixels. |
 | `POINT_SAMPLING` / model load errors on **`/point`** | **Pickle** load failure or missing background configuration on the server. |
 | `401` / `403` on writes | Missing/invalid **token**, or `admin_only` / admin claim mismatch. |
+| `MODEL_VALIDATION` / `serialized model file not found` | Rare: catalog row’s **`artifact_root`** is not the usual per-model directory (server cannot persist **`serialized_model.pkl`**). Fix the row / storage layout on the API side, or replace the model record. |
 
 ---
 
@@ -313,6 +314,7 @@ Use coordinates **inside** the suitability raster extent (transform raster bound
 | `sdm/commands/modelling/predict_sdm_models.py` | Prediction paths and `get_model_id` usage. |
 | `sdm/commands/modelling/utils.py` | `get_model_id` implementation. |
 | `scripts/build_model_metadata_from_package.py` | Build API `ModelMetadata` JSON from `data/sdm_models/<model_id>/package.json`. |
+| `scripts/sync_trained_models_to_api.py` | Batch **PUT** every local `package.json` + `model.pkl` to matching `GET /models` rows (`HSM_EMAIL` / `HSM_PASSWORD` / optional `HSM_BASE_URL`). |
 
 ---
 
