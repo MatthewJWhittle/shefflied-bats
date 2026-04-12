@@ -121,6 +121,7 @@ celerybeat.pid
 
 # Environments
 .env
+notebooks/.env.hsm
 .venv
 env/
 venv/

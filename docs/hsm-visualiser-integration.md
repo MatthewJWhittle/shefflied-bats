@@ -314,7 +314,7 @@ Use coordinates **inside** the suitability raster extent (transform raster bound
 | `sdm/commands/modelling/predict_sdm_models.py` | Prediction paths and `get_model_id` usage. |
 | `sdm/commands/modelling/utils.py` | `get_model_id` implementation. |
 | `scripts/build_model_metadata_from_package.py` | Build API `ModelMetadata` JSON from `data/sdm_models/<model_id>/package.json`. |
-| `scripts/sync_trained_models_to_api.py` | Batch **PUT** every local `package.json` + `model.pkl` to matching `GET /models` rows (`HSM_EMAIL` / `HSM_PASSWORD` / optional `HSM_BASE_URL`). |
+| `notebooks/hsm_api_upload_training_packages.ipynb` | Batch **PUT** training packages to the API; uses `notebooks/.env.hsm` (gitignored; copy from `.env.hsm.example`) + `os.chdir(here())` + `load_dotenv`. |
 
 ---
 
