@@ -172,6 +172,31 @@ class TestFetchOccurrencesFromNbn:
         assert len(gdf) == 1
         assert gdf.crs.to_string() == "EPSG:4326"
 
+    @pytest.mark.asyncio
+    async def test_fetch_can_run_inside_existing_event_loop(self, monkeypatch):
+        """Notebook callers already have an event loop; the sync wrapper should still work."""
+
+        records = pd.DataFrame(
+            {
+                "decimalLatitude": [53.38],
+                "decimalLongitude": [-1.47],
+                "scientificName": ["Pipistrellus pipistrellus"],
+            }
+        )
+
+        async def fake_async_fetch(**_kwargs) -> pd.DataFrame:
+            return records
+
+        from sdm.occurrence import nbn_atlas as nbn_mod
+
+        monkeypatch.setattr(nbn_mod, "_fetch_occurrences_async", fake_async_fetch)
+
+        gdf = fetch_occurrences_from_nbn(scientific_name="Pipistrellus pipistrellus")
+
+        assert isinstance(gdf, gpd.GeoDataFrame)
+        assert len(gdf) == 1
+        assert gdf.crs.to_string() == "EPSG:4326"
+
 
 @pytest.mark.slow
 class TestFetchOccurrencesFromNbnLive:

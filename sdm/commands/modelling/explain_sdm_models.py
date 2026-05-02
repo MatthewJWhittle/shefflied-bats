@@ -662,7 +662,7 @@ def explain_sdm_models(
         n_workers = n_jobs
     
     logger.info(f"Computing SHAP values for {len(filtered_index)} models using {n_workers} parallel worker(s)...")
-    results = Parallel(n_jobs=n_jobs, verbose=10 if verbose else 0)(
+    results = Parallel(n_jobs=n_workers, verbose=10 if verbose else 0)(
         delayed(process_single_model)(
             row=row,
             models_dir=models_dir,

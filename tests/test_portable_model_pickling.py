@@ -15,6 +15,7 @@ from sdm.models.maxent.maxent_model import (
     create_maxent_pipeline,
     elapid_maxent_from_config,
 )
+from sdm.types import ModelConfig
 
 
 def _pickle_refs_sdm_maxent_wrapper(blob: bytes) -> bool:
@@ -47,7 +48,7 @@ def test_create_maxent_pipeline_uses_elapid_estimator(tiny_xy):
 
 
 def test_elapid_maxent_from_config_matches_wrapper_from_config():
-    cfg = DefaultMaxentConfig()
+    cfg = DefaultMaxentConfig(beta_lqp=0.7, beta_threshold=2.3, clamp=False)
     direct = elapid_maxent_from_config(cfg, n_cpus=1)
     from sdm.models.maxent.maxent_model import MaxentModel
 
@@ -69,6 +70,35 @@ def test_elapid_maxent_from_config_matches_wrapper_from_config():
     ):
         assert getattr(direct, attr) == getattr(wrapped, attr)
     assert direct.beta_threshold == wrapped.beta_threshold
+    assert direct.beta_threshold == 2.3
+    assert wrapped.beta_threshold == 2.3
+
+
+def test_default_maxent_config_from_model_config_preserves_clamp():
+    cfg = ModelConfig(
+        maxent={
+            "feature_types": ["linear", "hinge"],
+            "beta_multiplier": 1.5,
+            "beta_lqp": 0.8,
+            "beta_hinge": 1.2,
+            "beta_threshold": 2.4,
+            "beta_categorical": 1.1,
+            "n_hinge_features": 10,
+            "n_threshold_features": 0,
+            "clamp": False,
+            "convergence_tolerance": 1e-5,
+            "use_lambdas": "best",
+            "n_lambdas": 100,
+            "class_weights": 100,
+            "tau": 0.5,
+            "transform": "cloglog",
+        }
+    )
+
+    maxent_config = DefaultMaxentConfig.from_config(cfg)
+
+    assert maxent_config.clamp is False
+    assert maxent_config.beta_threshold == 2.4
 
 
 def test_fitted_pipeline_pickle_roundtrip(tiny_xy):

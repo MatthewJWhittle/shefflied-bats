@@ -2,6 +2,8 @@
 Tests for explain_sdm_models: save/load explainer artifacts.
 """
 
+import importlib
+import os
 import pickle
 from pathlib import Path
 
@@ -66,3 +68,63 @@ def test_load_explainer_artifacts_missing_dir_raises():
     """Missing artifacts directory raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError, match="Explainer artifacts directory not found"):
         load_explainer_artifacts(Path("/nonexistent/shap/Plecotus_auritus/Roost"))
+
+
+def test_explain_sdm_models_uses_auto_worker_count(monkeypatch, tmp_path):
+    """When n_jobs=None, the computed auto worker count should be passed to Joblib."""
+
+    explain_mod = importlib.import_module("sdm.commands.modelling.explain_sdm_models")
+    captured: dict[str, int] = {}
+
+    class FakeParallel:
+        def __init__(self, n_jobs, verbose=0):
+            captured["n_jobs"] = n_jobs
+
+        def __call__(self, tasks):
+            return [task() for task in tasks]
+
+    def fake_delayed(func):
+        return lambda **kwargs: lambda: func(**kwargs)
+
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(explain_mod, "Parallel", FakeParallel)
+    monkeypatch.setattr(explain_mod, "delayed", fake_delayed)
+    monkeypatch.setattr(
+        explain_mod,
+        "load_model_index",
+        lambda _models_dir: pd.DataFrame(
+            [{"latin_name": "Pipistrellus pipistrellus", "activity_type": "Roost"}]
+        ),
+    )
+    monkeypatch.setattr(explain_mod, "filter_models", lambda model_index, *_args: model_index)
+    monkeypatch.setattr(explain_mod, "load_environmental_variables", lambda _ev_path: (object(), None))
+    monkeypatch.setattr(
+        explain_mod,
+        "sample_points_from_xarray_dataset",
+        lambda **_kwargs: pd.DataFrame({"a": [1.0]}),
+    )
+    monkeypatch.setattr(
+        explain_mod,
+        "process_single_model",
+        lambda **_kwargs: {
+            "latin_name": "Pipistrellus pipistrellus",
+            "activity_type": "Roost",
+            "model_id": "Pipistrellus_pipistrellus_Roost",
+            "success": True,
+            "n_features": 1,
+            "n_explain": 1,
+            "plot_paths": {},
+            "yaml_path": None,
+            "error": None,
+        },
+    )
+
+    results = explain_mod.explain_sdm_models(
+        ev_path=tmp_path / "ev.tif",
+        models_dir=tmp_path,
+        output_dir=tmp_path,
+        n_jobs=None,
+    )
+
+    assert captured["n_jobs"] == 4
+    assert results["success"].tolist() == [True]

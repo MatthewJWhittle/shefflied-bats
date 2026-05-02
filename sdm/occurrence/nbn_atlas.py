@@ -22,6 +22,7 @@ Notes
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
@@ -259,6 +260,20 @@ async def _fetch_occurrences_async(
     return pd.DataFrame(all_records)
 
 
+def _fetch_occurrences_sync(**kwargs: Any) -> pd.DataFrame:
+    """Run the async NBN fetch from sync code, including notebook event loops."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_fetch_occurrences_async(**kwargs))
+
+    # Jupyter already owns the current thread's event loop. Run the coroutine in
+    # a short-lived thread with its own loop so the public sync API remains usable.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(lambda: asyncio.run(_fetch_occurrences_async(**kwargs)))
+        return future.result()
+
+
 def fetch_occurrences_from_nbn(
     scientific_name: Optional[str] = None,
     taxon_id: Optional[str] = None,
@@ -302,16 +317,14 @@ def fetch_occurrences_from_nbn(
         EPSG:4326. If no records are returned, an empty GeoDataFrame with
         no geometry is returned.
     """
-    df = asyncio.run(
-        _fetch_occurrences_async(
-            scientific_name=scientific_name,
-            taxon_id=taxon_id,
-            query=query,
-            page_size=page_size,
-            max_records=max_records,
-            polygon=polygon,
-            extra_params=extra_params,
-        )
+    df = _fetch_occurrences_sync(
+        scientific_name=scientific_name,
+        taxon_id=taxon_id,
+        query=query,
+        page_size=page_size,
+        max_records=max_records,
+        polygon=polygon,
+        extra_params=extra_params,
     )
 
     if df.empty:
