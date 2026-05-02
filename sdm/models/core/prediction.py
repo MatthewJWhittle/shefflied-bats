@@ -36,7 +36,7 @@ def predict_rasters_with_elapid_model(
             transform=transform,
             crs=crs
         )
-        logger.info(f"Successfully generated prediction raster at: {output_path}")
+        logger.debug(f"Successfully generated prediction raster at: {output_path}")
     except Exception as e:
         logger.error(f"Error generating prediction raster: {e}", exc_info=True)
         raise
@@ -63,7 +63,7 @@ def predict_points_with_model(
         # Generate predictions
         predictions = model.predict_proba(X)[:, 1]
         
-        logger.info(f"Successfully generated predictions for {len(points_gdf)} points")
+        logger.debug(f"Successfully generated predictions for {len(points_gdf)} points")
         return predictions
     except Exception as e:
         logger.error(f"Error generating point predictions: {e}", exc_info=True)
@@ -105,7 +105,7 @@ def save_prediction_raster(
         ) as dst:
             dst.write(predictions, 1)
         
-        logger.info(f"Successfully saved prediction raster to: {output_path}")
+        logger.debug(f"Successfully saved prediction raster to: {output_path}")
     except Exception as e:
         logger.error(f"Error saving prediction raster: {e}", exc_info=True)
         raise

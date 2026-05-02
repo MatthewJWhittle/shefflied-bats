@@ -1,0 +1,16 @@
+variables:
+#- ceh_landcover_arable
+- vom_vegetation_height_max_1000m
+- ceh_landcover_upland_heathland_500m
+- vom_vegetation_height_mean_1500m
+- ceh_landcover_broadleaved_woodland_500m
+- ceh_landcover_suburban_500m
+- ceh_landcover_wetland_500m
+
+- terrain_dtm
+- climate_bioclim_bio_9
+- climate_bioclim_bio_8
+- vom_vegetation_height_std
+- os_cover_buildings
+- ceh_landcover_arable_500m
+- os_cover_water_500m

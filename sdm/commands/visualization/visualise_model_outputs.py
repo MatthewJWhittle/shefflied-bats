@@ -8,6 +8,7 @@ import geopandas as gpd
 import rioxarray as rxr
 
 from sdm.utils.logging_utils import setup_logging
+from sdm.utils.io import resolve_trained_model_path
 from sdm.viz.plots import generate_pdp_individual_plots, sanitize_filename
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,10 @@ def load_model_run_summary(summary_csv_path: Path) -> pd.DataFrame:
 
 def load_pickled_model(model_path_str: str) -> Any:
     """Loads a pickled model object from a given path string."""
-    model_path = Path(model_path_str)
-    if not model_path.exists():
-        logger.error(f"Model file not found: {model_path}")
+    try:
+        model_path = resolve_trained_model_path(model_path_str)
+    except FileNotFoundError:
+        logger.error("Model file not found: %s", model_path_str)
         return None
     try:
         with open(model_path, "rb") as f:

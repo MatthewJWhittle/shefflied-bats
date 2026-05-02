@@ -75,12 +75,14 @@ class TestBackgroundPointsWorkflow:
         """Test that output directory is created if it doesn't exist."""
         output_dir = tmp_path / "nonexistent" / "output"
         
-        # Run the function
+        # Run the function with explicit parameters to avoid issues with new defaults
         bg_points_path, density_raster_path = generate_background_points_wrapper(
             occurrence_data_path=temp_occurrence_file,
             boundary_path=temp_boundary_file,
             output_dir=output_dir,
             n_background_points=100,  # Small number for testing
+            background_method="contrast",  # Use contrast method for small test datasets
+            background_value=0.3,  # Use higher value for small test datasets
             grid_resolution=100,  # Provide grid resolution
             verbose=False
         )
@@ -201,6 +203,32 @@ class TestBackgroundPointsWorkflow:
             bg_points = gpd.read_file(bg_points_path)
             assert len(bg_points) > 0
     
+    def test_background_points_output_path(self, temp_boundary_file, temp_occurrence_file, tmp_path):
+        """Test that background points can be written to a custom output path."""
+        output_dir = tmp_path / "output"
+        custom_output_path = tmp_path / "custom_background_points.geojson"
+        
+        # Run with custom output path
+        bg_points_path, density_raster_path = generate_background_points_wrapper(
+            occurrence_data_path=temp_occurrence_file,
+            boundary_path=temp_boundary_file,
+            output_dir=output_dir,
+            background_points_output_path=custom_output_path,
+            n_background_points=50,
+            background_method="contrast",  # Use contrast for small test datasets
+            background_value=0.3,
+            grid_resolution=100,
+            verbose=False
+        )
+        
+        # Verify the custom output path was used
+        assert bg_points_path == custom_output_path
+        assert custom_output_path.exists()
+        
+        # Verify the file contains data
+        bg_points = gpd.read_file(custom_output_path)
+        assert len(bg_points) > 0
+    
     def test_background_points_number_control(self, temp_boundary_file, temp_occurrence_file, tmp_path):
         """Test that the number of background points is controlled correctly."""
         output_dir = tmp_path / "output"
@@ -213,6 +241,8 @@ class TestBackgroundPointsWorkflow:
                 boundary_path=temp_boundary_file,
                 output_dir=output_dir / f"n_{n_points}",
                 n_background_points=n_points,
+                background_method="contrast",  # Use contrast for small test datasets
+                background_value=0.3,
                 grid_resolution=100,
                 verbose=False
             )
@@ -269,6 +299,8 @@ class TestBackgroundPointsValidation:
             boundary_path=temp_boundary_file,
             output_dir=tmp_path / "output",
             n_background_points=20,
+            background_method="contrast",  # Use contrast for small test datasets
+            background_value=0.3,
             grid_resolution=100,
             verbose=False
         )
@@ -314,6 +346,8 @@ class TestBackgroundPointsValidation:
             boundary_path=temp_boundary_file,
             output_dir=output_dir,
             n_background_points=25,
+            background_method="contrast",  # Use contrast for small test datasets
+            background_value=0.3,
             grid_resolution=100,
             verbose=False
         )
@@ -339,6 +373,8 @@ class TestBackgroundPointsValidation:
             boundary_path=temp_boundary_file,
             output_dir=output_dir,
             n_background_points=30,
+            background_method="contrast",  # Use contrast for small test datasets
+            background_value=0.3,
             grid_resolution=100,
             verbose=False
         )

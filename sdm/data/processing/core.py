@@ -73,7 +73,7 @@ def merge_environmental_layers(
                         )
                         dst.write(data, i)
         
-        logger.info(f"Successfully merged {len(layer_paths)} layers to: {output_path}")
+        logger.debug(f"Successfully merged {len(layer_paths)} layers to: {output_path}")
         
     except Exception as e:
         logger.error(f"Error merging environmental layers: {e}", exc_info=True)
@@ -119,7 +119,7 @@ def process_occurrence_data(
         
         # Save processed data
         occurrence_gdf.to_file(output_path)
-        logger.info(f"Saved processed occurrence data to: {output_path}")
+        logger.debug(f"Saved processed occurrence data to: {output_path}")
         
         return occurrence_gdf
         
@@ -173,7 +173,7 @@ def process_background_data(
         
         # Save processed data
         background_gdf.to_file(output_path)
-        logger.info(f"Saved processed background data to: {output_path}")
+        logger.debug(f"Saved processed background data to: {output_path}")
         
         return background_gdf
         
@@ -215,7 +215,7 @@ def extract_environmental_data(
             
             # Save results
             points_gdf.to_file(output_path)
-            logger.info(f"Saved extracted environmental data to: {output_path}")
+            logger.debug(f"Saved extracted environmental data to: {output_path}")
             
             return points_gdf
             
@@ -243,7 +243,7 @@ def annotate_points(
     try:
         bats_ant = ela.annotate(bats, str(ev_raster), labels=ev_columns)
         background_ant = ela.annotate(background, str(ev_raster), labels=ev_columns)
-        logger.info("Successfully annotated points with environmental variables")
+        logger.debug("Successfully annotated points with environmental variables")
         return bats_ant, background_ant
     except Exception as e:
         logger.error(f"Error annotating points: {e}")

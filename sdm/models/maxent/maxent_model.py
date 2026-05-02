@@ -1,7 +1,7 @@
 # Core MaxEnt (Elapid-based) model training, evaluation, and prediction logic.
 import warnings
 import logging
-from typing import List, Tuple, Optional, Callable, Any, Union, Dict # Added Union, Dict
+from typing import List, Tuple, Optional, Callable, Any, Union, Dict
 from pathlib import Path
 from enum import StrEnum # Added StrEnum import
 
@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.base import BaseEstimator, clone
 import rasterio as rio # For rio.enums and types used in apply_model_to_rasters
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler, QuantileTransformer
 from sklearn.compose import ColumnTransformer
 
 
@@ -20,6 +20,7 @@ from sklearn.compose import ColumnTransformer
 
 import elapid as ela
 from elapid.models import MaxentModel as BaseMaxentModel
+from elapid.models import MaxentModel as ElapidMaxentModel
 from elapid.types import to_iterable # Used by elapid internals, good to be aware of
 from elapid.utils import (
     NoDataException,
@@ -32,7 +33,7 @@ from elapid.utils import (
 )
 from elapid.geo import apply_model_to_array # Core raster prediction function from elapid
 from elapid.models import MaxentConfig
-from sdm.models.core.feature_subsetter import FeatureSubsetter
+from sdm.types import VariablesConfig, ModelConfig
 
 
 tqdm = get_tqdm()
@@ -58,15 +59,15 @@ class DefaultMaxentConfig(MaxentConfig):
             beta_categorical: float = 1.0,
             n_hinge_features: int = 10,
             n_threshold_features: int = 10,
-            clamp: bool = True,
+            clamp: bool = True,  
             convergence_tolerance: float = 1e-5,
             use_lambdas: str = "best",
             n_lambdas: int = 100,
             class_weights: Union[str, float] = 100,
             n_cpus: int = 1,
             use_sklearn: bool = True,
-            tau: float = 0.5,
-            transform: str = "cloglog",
+            tau: float = 0.5,  # Fixed to 0.5 for consistency with tuning
+            transform: str = "cloglog",  # Fixed to "cloglog" for consistency with tuning
     ):
         super().__init__()
         self.feature_types = feature_types
@@ -86,6 +87,28 @@ class DefaultMaxentConfig(MaxentConfig):
         self.use_sklearn=use_sklearn
         self.tau=tau
         self.transform=transform
+    @classmethod
+    def from_config(cls, config: ModelConfig) -> "DefaultMaxentConfig":
+        """
+        Create a DefaultMaxentConfig from a ModelConfig object.
+        """
+        return cls(
+            feature_types=config.maxent.feature_types,
+            beta_multiplier=config.maxent.beta_multiplier,
+            beta_lqp=config.maxent.beta_lqp,
+            beta_hinge=config.maxent.beta_hinge,
+            beta_threshold=config.maxent.beta_threshold,
+            beta_categorical=config.maxent.beta_categorical,
+            n_hinge_features=config.maxent.n_hinge_features,
+            n_threshold_features=config.maxent.n_threshold_features,
+            clamp=config.maxent.clamp,
+            convergence_tolerance=config.maxent.convergence_tolerance,
+            use_lambdas=config.maxent.use_lambdas,
+            n_lambdas=config.maxent.n_lambdas,
+            class_weights=config.maxent.class_weights,
+            tau=config.maxent.tau,
+            transform=config.maxent.transform,
+        )
 
 # add a from_config classmethod to MaxentConfig
 class MaxentModel(BaseMaxentModel):
@@ -107,7 +130,7 @@ class MaxentModel(BaseMaxentModel):
             beta_multiplier=config.beta_multiplier,
             beta_lqp=config.beta_lqp,
             beta_hinge=config.beta_hinge,
-            beta_threshold=config.beta_lqp,
+            beta_threshold=config.beta_threshold,
             beta_categorical=config.beta_categorical,
             n_hinge_features=config.n_hinge_features,
             n_threshold_features=config.n_threshold_features,
@@ -173,8 +196,8 @@ def cross_validate_maxent_model(
     metric_fn: Callable = roc_auc_score, 
     n_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
-    random_state_kfold: Optional[int] = None # For reproducibility of GeographicKFold
 ) -> Tuple[List[BaseEstimator], np.ndarray]:
+    # Note: Returns only valid models (None values filtered out)
     """
     Performs geographic cross-validation for a MaxEnt-like (scikit-learn compatible) model.
 
@@ -184,35 +207,39 @@ def cross_validate_maxent_model(
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
         n_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
-        random_state_kfold: Random state for GeographicKFold for reproducible splits.
 
     Returns:
         Tuple of (trained_models_per_fold, metric_scores_per_fold).
+        Note: trained_models_per_fold may contain None values for failed folds.
     """
     # elapid.GeographicKFold is a good default choice here
     # It can take a random_state if provided in elapid versions that support it.
     # Check elapid documentation for exact signature if random_state is critical.
-    try:
-        gfolds = ela.GeographicKFold(n_splits=n_folds, random_state=random_state_kfold)
-    except TypeError: # Older elapid might not have random_state
-        logger.warning("GeographicKFold does not support random_state in this elapid version. Using default.")
-        gfolds = ela.GeographicKFold(n_splits=n_folds)
+
+    gfolds = ela.GeographicKFold(n_splits=n_folds)
         
     fold_metrics = []
     trained_models = []
 
-    logger.info(f"Starting {n_folds}-fold geographic cross-validation...")
+    logger.debug(f"Starting {n_folds}-fold geographic cross-validation...")
     for i, (train_idx, test_idx) in enumerate(gfolds.split(occurrence_gdf)):
-        logger.info(f"Processing fold {i+1}/{n_folds}")
+        logger.debug(f"Processing fold {i+1}/{n_folds}")
         current_model = clone(model) # Use a fresh clone for each fold
 
         X_train, y_train, w_train = extract_split_data(occurrence_gdf, train_idx, feature_columns=feature_columns)
         X_test, y_test, _ = extract_split_data(occurrence_gdf, test_idx, feature_columns=feature_columns) # Weights not used for test metric here
 
+        # Check both training and test sets have both classes
+        if len(y_train.unique()) < 2:
+            logger.debug(f"Skipping fold {i+1} due to only one class in the training set.")
+            fold_metrics.append(np.nan)
+            trained_models.append(None)
+            continue
+            
         if len(y_test.unique()) < 2:
-            logger.warning(f"Skipping fold {i+1} due to only one class in the test set.")
-            fold_metrics.append(np.nan) # Or some other indicator for a skipped fold
-            trained_models.append(None) # No model for this fold
+            logger.debug(f"Skipping fold {i+1} due to only one class in the test set.")
+            fold_metrics.append(np.nan)
+            trained_models.append(None)
             continue
         
         try:
@@ -225,6 +252,9 @@ def cross_validate_maxent_model(
             # This is a common point of confusion. For now, assume direct elapid.MaxentModel style.
             fit_params = {}
             if w_train is not None:
+                # Fill NaN values in sample weights
+                w_train = w_train.fillna(1.0)
+                
                 # Check if model is a pipeline to construct prefixed param name
                 if hasattr(current_model, 'steps'): # It's a pipeline
                     # Assuming maxent is the last step, or find its name
@@ -236,16 +266,41 @@ def cross_validate_maxent_model(
             current_model.fit(X_train, y_train, **fit_params)
             
             y_pred_proba = current_model.predict_proba(X_test)[:, 1] # Probability of class 1
+            
+            # Check for NaN values in predictions
+            if np.any(np.isnan(y_pred_proba)) or np.any(np.isinf(y_pred_proba)):
+                logger.warning(f"Fold {i+1}: Predictions contain NaN/Inf values, skipping fold")
+                fold_metrics.append(np.nan)
+                trained_models.append(None)
+                continue
+            
             metric_value = metric_fn(y_test, y_pred_proba)
+            
+            # Check if metric is valid
+            if np.isnan(metric_value) or np.isinf(metric_value):
+                logger.warning(f"Fold {i+1}: Metric value is NaN/Inf, skipping fold")
+                fold_metrics.append(np.nan)
+                trained_models.append(None)
+                continue
+                
             fold_metrics.append(metric_value)
             trained_models.append(current_model)
-            logger.info(f"Fold {i+1} metric ({metric_fn.__name__}): {metric_value:.4f}")
+            logger.debug(f"Fold {i+1} metric ({metric_fn.__name__}): {metric_value:.4f}")
         except Exception as e:
-            logger.error(f"Error during training/evaluation of fold {i+1}: {e}", exc_info=True)
+            logger.debug(f"Error during training/evaluation of fold {i+1}: {e}")
             fold_metrics.append(np.nan)
             trained_models.append(None)
 
-    return trained_models, np.array(fold_metrics)
+    # Filter out None models and corresponding NaN metrics
+    valid_models = [m for m in trained_models if m is not None]
+    valid_metrics = np.array([m for m, mod in zip(fold_metrics, trained_models) if mod is not None])
+    
+    # If we have valid models, return them; otherwise return empty lists
+    if len(valid_models) > 0:
+        return valid_models, valid_metrics
+    else:
+        logger.warning("No valid models were trained in cross-validation")
+        return [], np.array([])
 
 
 def train_final_maxent_model(
@@ -253,14 +308,17 @@ def train_final_maxent_model(
     occurrence_gdf: gpd.GeoDataFrame, 
     feature_columns: Optional[List[str]] = None
 ) -> BaseEstimator:
-    """Trains a MaxEnt-like model on the entire dataset."""
-    logger.info("Training final model on all data...")
+    """Train final model on all data, handling sample weights with NaN values."""
+    logger.debug("Training final model on all data...")
     final_model = clone(model)
     train_idx = np.arange(len(occurrence_gdf))
     X_train, y_train, w_train = extract_split_data(occurrence_gdf, train_idx, feature_columns=feature_columns)
     
     fit_params = {}
     if w_train is not None:
+        # Fill NaN values in sample weights
+        w_train = w_train.fillna(1.0)
+        
         if hasattr(final_model, 'steps'):
             maxent_step_name = final_model.steps[-1][0]
             fit_params[f'{maxent_step_name}__sample_weight'] = w_train
@@ -268,7 +326,7 @@ def train_final_maxent_model(
             fit_params['sample_weight'] = w_train
             
     final_model.fit(X_train, y_train, **fit_params)
-    logger.info("Final model training complete.")
+    logger.debug("Final model training complete.")
     return final_model
 
 
@@ -278,7 +336,6 @@ def evaluate_and_train_maxent_model(
     metric_fn: Callable = roc_auc_score,
     n_cv_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
-    random_state_kfold: Optional[int] = None
 ) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray]:
     """
     Performs cross-validation and then trains a final model on all data.
@@ -292,22 +349,28 @@ def evaluate_and_train_maxent_model(
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
         n_cv_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
-        random_state_kfold: Random state for GeographicKFold for reproducible splits.
 
     Returns:
         Tuple of (final_trained_model, cv_models, cv_scores).
     """
-    logger.info("Starting model evaluation and final training process...")
+    logger.debug("Starting model evaluation and final training process...")
     cv_models, cv_scores = cross_validate_maxent_model(
         model=model, # Pass the original model for cloning inside CV
         occurrence_gdf=occurrence_gdf,
         metric_fn=metric_fn,
         n_folds=n_cv_folds,
         feature_columns=feature_columns,
-        random_state_kfold=random_state_kfold
     )
     
-    logger.info(f"CV Mean {metric_fn.__name__}: {np.nanmean(cv_scores):.4f} (+/- {np.nanstd(cv_scores):.4f})")
+    # Log CV results only if we have valid scores (keep as debug, summary will be logged at higher level)
+    if len(cv_scores) > 0 and not np.all(np.isnan(cv_scores)):
+        valid_scores = cv_scores[~np.isnan(cv_scores)]
+        if len(valid_scores) > 0:
+            logger.debug(f"CV Mean {metric_fn.__name__}: {np.mean(valid_scores):.4f} (+/- {np.std(valid_scores):.4f})")
+        else:
+            logger.warning(f"No valid CV scores available")
+    else:
+        logger.warning(f"No valid CV scores available")
     
     final_trained_model = train_final_maxent_model(
         model=model, # Pass the original model for cloning
@@ -379,6 +442,34 @@ def predict_rasters_with_elapid_model(
     logger.info("Prediction map saved successfully.")
 
 
+def elapid_maxent_from_config(config: MaxentConfig, n_cpus: int = 1) -> ElapidMaxentModel:
+    """Build ``elapid.models.MaxentModel`` from a MaxentConfig (no ``sdm`` subclass).
+
+    Mirrors ``MaxentModel.from_config`` on the local wrapper class so pickles reference
+    only ``elapid`` + ``sklearn`` for the estimator step.
+    """
+    return ElapidMaxentModel(
+        feature_types=config.feature_types,
+        tau=config.tau,
+        transform=config.transform,  # type: ignore[arg-type]
+        clamp=config.clamp,
+        scorer=config.scorer,
+        beta_multiplier=config.beta_multiplier,
+        beta_lqp=config.beta_lqp,
+        beta_hinge=config.beta_hinge,
+        beta_threshold=config.beta_threshold,
+        beta_categorical=config.beta_categorical,
+        n_hinge_features=config.n_hinge_features,
+        n_threshold_features=config.n_threshold_features,
+        convergence_tolerance=config.tolerance,
+        use_lambdas=config.use_lambdas,
+        n_lambdas=config.n_lambdas,
+        class_weights=config.class_weights,
+        n_cpus=n_cpus,
+        use_sklearn=True,
+    )
+
+
 def create_maxent_pipeline(
     feature_names: List[str], 
     maxent_n_jobs: int = 1, # Threads for MaxentModel itself
@@ -386,47 +477,47 @@ def create_maxent_pipeline(
     # Add other MaxentModel params as needed
 ) -> Pipeline:
     """Creates a scikit-learn Pipeline for MaxEnt modeling.
-    Includes feature selection (custom FeatureSubsetter), scaling, and the Elapid MaxentModel.
+
+    Uses ``sklearn.compose.ColumnTransformer`` (passthrough of ``feature_names``) and
+    ``elapid.models.MaxentModel`` so the fitted pipeline can be pickled without ``sdm``
+    imports on load (only ``sklearn`` + ``elapid`` + numpy/pandas as dependencies).
 
     Args:
-        feature_names: List of feature names to be selected by FeatureSubsetter.
-        maxent_beta_multiplier: Beta multiplier for the Maxent model.
+        feature_names: Columns to keep, in order, for the model input matrix.
         maxent_n_jobs: Number of threads for the MaxentModel.
+        model_config: Elapid-compatible MaxEnt configuration.
 
     Returns:
-        A scikit-learn Pipeline instance.
+        A scikit-learn ``Pipeline`` instance.
     """
-    logger.info(f"Creating MaxEnt pipeline for features: {feature_names}")
-    
-    # Feature selector: uses custom FeatureSubsetter to select only the desired features
-    feature_selector = FeatureSubsetter(feature_names=feature_names)
-    
-    # Scaler: Standardizes features by removing the mean and scaling to unit variance.
+    logger.debug(f"Creating MaxEnt pipeline for features: {feature_names}")
+
+    column_selector = ColumnTransformer(
+        [("features", "passthrough", feature_names)],
+        remainder="drop",
+        sparse_threshold=0,
+    )
+    if hasattr(column_selector, "set_output"):
+        column_selector.set_output(transform="pandas")
+
     scaler = StandardScaler()
+    maxent_estimator = elapid_maxent_from_config(model_config, n_cpus=maxent_n_jobs)
 
-    # Maxent Model from Elapid
-    maxent_estimator = MaxentModel.from_config(model_config, n_cpus=maxent_n_jobs)
-
-    pipeline = Pipeline([
-        ("feature_selection", feature_selector),
+    return Pipeline([
+        ("feature_selection", column_selector),
         ("scaling", scaler),
-        ("maxent", maxent_estimator)
+        ("maxent", maxent_estimator),
     ])
-    
-    logger.info("MaxEnt pipeline created successfully.")
-    return pipeline
 
 # Enum for activity types, useful for get_feature_config
 class ActivityType(StrEnum):
     ROOST = "Roost"
     IN_FLIGHT = "In flight"
 
-def get_feature_config() -> Dict[ActivityType, List[str]]: # Changed to use ActivityType enum
-    """
-    Gets the list of feature names to include in the model for different activity types.
-    """
-    return {
-        ActivityType.IN_FLIGHT: [
+
+DEFAULT_CONFIG : Dict[ActivityType, VariablesConfig] = {
+    ActivityType.IN_FLIGHT: VariablesConfig(
+        variables=[
             "ceh_landcover_improved_grassland",
             "ceh_landcover_suburban",
             "bgs_coast_distance_to_coast",
@@ -450,8 +541,9 @@ def get_feature_config() -> Dict[ActivityType, List[str]]: # Changed to use Acti
             "os_distance_distance_to_buildings",
             "ceh_landcover_urban_500m",
             "climate_stats_wind_ann_avg",
-        ],
-        ActivityType.ROOST: [
+            ]),
+    ActivityType.ROOST: VariablesConfig(
+        variables=[
             "ceh_landcover_suburban",
             "vom_vegetation_height_max",
             "os_distance_distance_to_buildings",
@@ -468,10 +560,17 @@ def get_feature_config() -> Dict[ActivityType, List[str]]: # Changed to use Acti
             "ceh_landcover_improved_grassland_500m",
             "ceh_landcover_grassland",
             "climate_stats_temp_ann_avg",
-        ],
-    } 
+        ]),
+}
 
-
+def get_feature_config(
+    activity_type: ActivityType,
+) -> VariablesConfig:
+    """
+    Gets the variables config for a given activity type.
+    """
+    assert activity_type in DEFAULT_CONFIG, f"Unknown activity type: {activity_type}"
+    return DEFAULT_CONFIG[activity_type]
 
 def apply_model_to_rasters(
     model: BaseEstimator,

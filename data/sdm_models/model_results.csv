@@ -1,0 +1,18 @@
+identifier,latin_name,activity_type,mean_cv_score,std_cv_score,n_presence,n_background,model_path
+Nyctalus noctula_In flight,Nyctalus noctula,In flight,0.8349151882039593,0.07029966651448134,312,2346,data/sdm_models/Nyctalus noctula_In flight.pkl
+Nyctalus noctula_Roost,Nyctalus noctula,Roost,0.8111373683572586,0.0454537224483717,74,740,data/sdm_models/Nyctalus noctula_Roost.pkl
+Pipistrellus pipistrellus_In flight,Pipistrellus pipistrellus,In flight,0.8385181843594385,0.06774201357871189,630,2306,data/sdm_models/Pipistrellus pipistrellus_In flight.pkl
+Pipistrellus pipistrellus_Roost,Pipistrellus pipistrellus,Roost,0.8895265161550943,0.05289967798162597,1215,2214,data/sdm_models/Pipistrellus pipistrellus_Roost.pkl
+Pipistrellus pygmaeus_In flight,Pipistrellus pygmaeus,In flight,0.8130430742142801,0.10820546829203834,265,2346,data/sdm_models/Pipistrellus pygmaeus_In flight.pkl
+Pipistrellus pygmaeus_Roost,Pipistrellus pygmaeus,Roost,0.9005489369020395,0.02543988488162081,325,2355,data/sdm_models/Pipistrellus pygmaeus_Roost.pkl
+Myotis daubentonii_In flight,Myotis daubentonii,In flight,0.883515750427832,0.04405032027584874,116,1160,data/sdm_models/Myotis daubentonii_In flight.pkl
+Myotis daubentonii_Roost,Myotis daubentonii,Roost,0.8359875658005222,0.02254141762074856,124,1240,data/sdm_models/Myotis daubentonii_Roost.pkl
+Plecotus auritus_In flight,Plecotus auritus,In flight,0.8226870368731024,0.08785249923372965,141,1410,data/sdm_models/Plecotus auritus_In flight.pkl
+Plecotus auritus_Roost,Plecotus auritus,Roost,0.8840258752014657,0.026090559201902543,604,2316,data/sdm_models/Plecotus auritus_Roost.pkl
+Myotis nattereri_In flight,Myotis nattereri,In flight,0.7848399313615573,0.07258581121270019,43,430,data/sdm_models/Myotis nattereri_In flight.pkl
+Myotis nattereri_Roost,Myotis nattereri,Roost,0.8810473737233168,0.03554371514755681,191,1910,data/sdm_models/Myotis nattereri_Roost.pkl
+Nyctalus leisleri_In flight,Nyctalus leisleri,In flight,0.7763745286812025,0.14879553934600848,82,820,data/sdm_models/Nyctalus leisleri_In flight.pkl
+Nyctalus leisleri_Roost,Nyctalus leisleri,Roost,,,32,320,data/sdm_models/Nyctalus leisleri_Roost.pkl
+Myotis brandtii_Roost,Myotis brandtii,Roost,0.8334720010251341,0.09426336793160883,27,270,data/sdm_models/Myotis brandtii_Roost.pkl
+Myotis mystacinus_In flight,Myotis mystacinus,In flight,0.7694365372035683,0.0012741440411751515,32,320,data/sdm_models/Myotis mystacinus_In flight.pkl
+Myotis mystacinus_Roost,Myotis mystacinus,Roost,0.8841771588324215,0.012364832996318137,124,1240,data/sdm_models/Myotis mystacinus_Roost.pkl

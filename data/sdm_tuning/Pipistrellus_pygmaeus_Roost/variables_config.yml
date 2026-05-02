@@ -1,0 +1,19 @@
+variables:
+- climate_bioclim_bio_4
+- climate_bioclim_bio_7
+- climate_stats_temp_mat_avg
+- climate_bioclim_bio_9
+- climate_stats_wind_ann_avg
+- vom_vegetation_height_mean
+- ceh_landcover_suburban
+- ceh_landcover_urban
+- ceh_landcover_wetland_500m
+- vom_vegetation_height_mean_500m
+- ceh_landcover_wetland_1000m
+- ceh_landcover_arable_1000m
+- ceh_landcover_improved_grassland_1000m
+- ceh_landcover_wetland_1500m
+- ceh_landcover_grassland_1500m
+- ceh_landcover_arable_1500m
+- ceh_landcover_broadleaved_woodland_1500m
+- ceh_landcover_improved_grassland_1500m

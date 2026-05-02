@@ -1,0 +1,17 @@
+variables:
+- climate_bioclim_bio_2
+- climate_stats_temp_mat_avg
+- climate_bioclim_bio_9
+- climate_stats_prec_ann_var
+- bgs_coast_distance_to_coast
+- terrain_stats_roughness
+- climate_bioclim_bio_8
+- ceh_landcover_arable
+- vom_vegetation_height_max
+- ceh_landcover_suburban
+- os_cover_water
+- os_cover_water_500m
+- ceh_landcover_urban
+- ceh_landcover_wetland_1500m
+- ceh_landcover_broadleaved_woodland_500m 
+- ceh_landcover_improved_grassland_1000m

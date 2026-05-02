@@ -3,7 +3,8 @@ import xarray as xr
 import numpy as np
 import geopandas as gpd
 import rioxarray as rxr
-from shapely.geometry import box, Polygon
+import pandas as pd
+from shapely.geometry import box, Polygon, Point
 from rasterio.transform import Affine
 
 from sdm.occurrence.sampling import (
@@ -438,3 +439,215 @@ def test_constant_density(simple_regions):
     # The normalise_to_distribution function adds variation, so we check for reasonable bounds
     # Some values can be negative due to the normalization, so we use a wider range
     assert np.all(weighted >= -1.0) and np.all(weighted <= 3.0)
+
+
+# Tests for modular training functions
+from pathlib import Path
+from unittest.mock import Mock, patch
+from shapely.geometry import Point
+from sdm.commands.modelling.train_sdm_models import (
+    setup_training_data,
+    train_models_with_setup,
+    TrainingSetup,
+)
+from sdm.models.maxent.maxent_model import ActivityType, DefaultMaxentConfig
+from sdm.types import ProjectConfig, PathsConfig, SpatialConfig, MlflowConfig
+
+
+@pytest.fixture
+def mock_project_config():
+    """Create a mock project config."""
+    return ProjectConfig(
+        paths=PathsConfig(
+            raw_data="data/raw",
+            processed_data="data/processed",
+            models="data/models",
+            predictions="data/predictions",
+            model_config_path="model_config.yml",
+            variables_config_path="variables_config.yml",
+            tuning_dir="data/sdm_tuning",
+            config_dir="data/sdm_config",
+            occurence_data="data/processed/bats-tidy.geojson",
+            background_points="data/processed/background-points.geojson",
+            boundary="data/processed/boundary.geojson",
+            grid_points="data/processed/grid-points.parquet",
+            evs="data/evs",
+            ev_tiff="data/evs/evs-to-model.tif",
+        ),
+        spatial=SpatialConfig(
+            top=100.0,
+            left=0.0,
+            crs="EPSG:27700",
+            resolution=100,
+            study_area_buffer=1000.0,
+        ),
+        crs="EPSG:27700",
+        mlflow=MlflowConfig(
+            tracking_uri="file:./mlruns",
+            experiment_name="test_experiment",
+        ),
+    )
+
+
+@pytest.fixture
+def mock_annotated_data():
+    """Create mock annotated bat and background data."""
+    # Create mock bat data
+    bats_data = {
+        "latin_name": ["Myotis daubentonii", "Myotis daubentonii"],
+        "activity_type": ["In flight", "In flight"],
+        "geometry": [Point(0, 0), Point(1, 1)],
+        "ev1": [1.0, 2.0],
+        "ev2": [3.0, 4.0],
+    }
+    bats_gdf = gpd.GeoDataFrame(bats_data, crs="EPSG:27700")
+    
+    # Create mock background data
+    background_data = {
+        "geometry": [Point(0.5, 0.5), Point(1.5, 1.5)],
+        "ev1": [1.5, 2.5],
+        "ev2": [3.5, 4.5],
+        "weight": [1.0, 1.0],
+    }
+    background_gdf = gpd.GeoDataFrame(background_data, crs="EPSG:27700")
+    background_density = pd.Series([1.0, 1.0], index=background_gdf.index)
+    
+    return bats_gdf, background_gdf, background_density
+
+
+@patch("sdm.commands.modelling.train_sdm_models.load_project_config")
+@patch("sdm.commands.modelling.train_sdm_models.load_variables_config")
+@patch("sdm.commands.modelling.train_sdm_models.load_bat_data")
+@patch("sdm.commands.modelling.train_sdm_models.load_background_points")
+@patch("sdm.commands.modelling.train_sdm_models.load_environmental_variables")
+@patch("sdm.commands.modelling.train_sdm_models.extract_grid_points")
+@patch("sdm.commands.modelling.train_sdm_models.annotate_points")
+def test_setup_training_data(
+    mock_annotate,
+    mock_extract_grid,
+    mock_load_ev,
+    mock_load_bg,
+    mock_load_bats,
+    mock_load_vars,
+    mock_load_proj,
+    mock_project_config,
+    mock_annotated_data,
+):
+    """Test that setup_training_data correctly loads and prepares shared data."""
+    bats_gdf, background_gdf, background_density = mock_annotated_data
+    
+    # Setup mocks
+    mock_load_proj.return_value = mock_project_config
+    mock_load_vars.return_value = Mock(roster=["ev1", "ev2"], activity_feature_sets={})
+    mock_load_bats.return_value = bats_gdf
+    mock_load_bg.return_value = (background_gdf, background_density)
+    mock_load_ev.return_value = (
+        Mock(data_vars={"ev1": Mock(), "ev2": Mock()}),
+        Path("data/evs/evs-to-model.tif"),
+    )
+    mock_extract_grid.return_value = gpd.GeoDataFrame(
+        {"geometry": [Point(0, 0)]}, crs="EPSG:27700"
+    )
+    mock_annotate.return_value = (bats_gdf, background_gdf)
+    
+    # Call setup function
+    setup = setup_training_data(
+        project_config_path=Path("config.yml"),
+        variables_config_path=None,
+        verbose=False,
+    )
+    
+    # Verify setup object
+    assert isinstance(setup, TrainingSetup)
+    assert setup.project_config == mock_project_config
+    assert len(setup.annotated_bats) == 2
+    assert len(setup.annotated_background) == 2
+    assert setup.ev_columns == ["ev1", "ev2"]
+    assert setup.latin_names == ["Myotis daubentonii"]
+    assert setup.activity_types == ["In flight"]
+
+
+@patch("sdm.commands.modelling.train_sdm_models.generate_training_data")
+@patch("sdm.commands.modelling.train_sdm_models.train_models_parallel")
+def test_train_models_with_setup(
+    mock_train_parallel,
+    mock_generate_training,
+    mock_annotated_data,
+    mock_project_config,
+):
+    """Test that train_models_with_setup correctly uses shared setup data."""
+    bats_gdf, background_gdf, background_density = mock_annotated_data
+    
+    # Create setup
+    setup = TrainingSetup(
+        project_config=mock_project_config,
+        annotated_bats=bats_gdf,
+        annotated_background=background_gdf,
+        background_density=background_density,
+        grid_points=gpd.GeoDataFrame({"geometry": [Point(0, 0)]}, crs="EPSG:27700"),
+        ev_columns=["ev1", "ev2"],
+        all_ev_columns=["ev1", "ev2"],
+        ev_raster_path=Path("data/evs/evs-to-model.tif"),
+        latin_names=["Myotis daubentonii"],
+        activity_types=["In flight"],
+    )
+    
+    # Mock training data and results
+    from sdm.types import TrainingData, TrainingResults
+
+    model_config = DefaultMaxentConfig()
+    mock_training_data = [
+        TrainingData(
+            latin_name="Myotis daubentonii",
+            activity_type="In flight",
+            occurrence=gpd.GeoDataFrame(
+                {"class": [1, 0], "geometry": [Point(0, 0), Point(1, 1)]},
+                crs="EPSG:27700",
+            ),
+            maxent_config=model_config,
+            model_features=["ev1", "ev2"],
+        )
+    ]
+
+    mock_results = [
+        TrainingResults(
+            latin_name="Myotis daubentonii",
+            activity_type="In flight",
+            final_model=Mock(),
+            cv_models=None,
+            cv_scores=np.array([0.8, 0.9, 0.85]),
+            success=True,
+            error=None,
+        )
+    ]
+
+    mock_generate_training.return_value = mock_training_data
+    mock_train_parallel.return_value = mock_results
+
+    # Call training function
+    feature_selection = {ActivityType.IN_FLIGHT: ["ev1", "ev2"]}
+    sampling_params = {
+        "subset_occurrence": None,
+        "subset_background": True,
+        "order_by_density_for_subset": True,
+        "sample_weight_n_neighbors": 5,
+        "background_min_bg": 1000,
+        "background_max_bg": 10000,
+        "background_factor": 10,
+    }
+    
+    results, training_data = train_models_with_setup(
+        setup=setup,
+        model_config=model_config,
+        feature_selection=feature_selection,
+        sampling_params=sampling_params,
+        min_presence=15,
+        verbose=False,
+    )
+    
+    # Verify results
+    assert len(results) == 1
+    assert results[0].success
+    assert len(training_data) == 1
+    mock_generate_training.assert_called_once()
+    mock_train_parallel.assert_called_once()

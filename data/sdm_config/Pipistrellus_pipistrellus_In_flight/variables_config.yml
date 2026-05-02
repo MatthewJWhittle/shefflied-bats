@@ -1,0 +1,14 @@
+variables:
+- climate_bioclim_bio_7
+- climate_stats_temp_mat_avg
+- os_distance_distance_to_buildings
+- climate_bioclim_bio_9
+- vom_vegetation_height_max
+- vom_vegetation_height_mean_1000m
+- vom_vegetation_height_max_1000m
+- ceh_landcover_suburban
+- ceh_landcover_suburban_1500m
+- ceh_landcover_broadleaved_woodland_1500m
+- ceh_landcover_arable
+- os_cover_water
+- os_distance_distance_to_water

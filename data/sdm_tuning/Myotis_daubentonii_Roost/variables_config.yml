@@ -1,0 +1,18 @@
+variables:
+- ceh_landcover_arable
+- vom_vegetation_height_max
+- vom_vegetation_height_mean
+- terrain_stats_tpi
+- os_distance_distance_to_water
+- ceh_landcover_wetland_500m
+- ceh_landcover_upland_heathland_500m
+- ceh_landcover_broadleaved_woodland_500m
+- ceh_landcover_suburban_500m
+- os_cover_water_500m
+- ceh_landcover_coniferous_woodland_500m
+- ceh_landcover_grassland_1000m
+- vom_vegetation_height_max_1000m
+- ceh_landcover_suburban_1000m
+- ceh_landcover_urban_1000m
+- ceh_landcover_grassland_1500m
+- vom_vegetation_height_mean_1500m

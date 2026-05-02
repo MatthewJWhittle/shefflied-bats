@@ -159,7 +159,7 @@ data/
    - `grid-points.parquet`: Sampling grid for model training
 
 4. **Model Outputs**
-   - `sdm_models/`: Trained species distribution models
+   - `sdm_models/`: Trained models as one directory per species–activity (`<model_id>/model.pkl` + `package.json`; index in `model_results.csv`)
    - `sdm_predictions/`: Model prediction rasters
    - `outputs/`: Additional model outputs and visualizations
 

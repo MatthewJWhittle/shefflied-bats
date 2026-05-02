@@ -80,7 +80,7 @@ def load_environmental_variables(
         # rename the variables by their long name
         for var in evs.data_vars:
             evs = evs.rename({var: evs[var].attrs["long_name"]})
-        logger.info("Loaded environmental variables from %s", ev_raster)
+        logger.debug("Loaded environmental variables from %s", ev_raster)
         return evs, ev_raster
     except Exception as e:
         logger.error("Error loading environmental variables: %s", e)

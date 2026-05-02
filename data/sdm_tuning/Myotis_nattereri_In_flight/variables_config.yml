@@ -1,0 +1,18 @@
+variables:
+- climate_bioclim_bio_7
+- ceh_landcover_wetland
+- os_distance_distance_to_buildings
+- climate_bioclim_bio_8
+- climate_bioclim_bio_3
+- vom_vegetation_height_max
+- vom_vegetation_height_std
+- ceh_landcover_broadleaved_woodland
+- ceh_landcover_urban
+- ceh_landcover_improved_grassland
+- terrain_stats_aspect_northness_slope
+- ceh_landcover_broadleaved_woodland_500m
+- ceh_landcover_broadleaved_woodland_1000m
+- vom_vegetation_height_mean_1000m
+- ceh_landcover_suburban_1000m
+- ceh_landcover_urban_1000m
+- ceh_landcover_coniferous_woodland_1500m

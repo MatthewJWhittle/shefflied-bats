@@ -1,0 +1,2 @@
+latin_name,activity_type,study_name,best_objective,mean_cv_auc,std_cv_auc,n_features,n_features_available,best_trial_number,n_trials,n_trials_pruned,n_trials_complete,stability_penalty,feature_penalty,correlation_penalty,min_presence,n_cv_folds,grid_size_m,n_background_points,background_method,transform_method
+Myotis daubentonii,In flight,sdm_tuning_Myotis_daubentonii_In_flight,0.6625957943335404,0.8369443447490488,0.09067461591504145,21,77,480,500,0,500,0.25,0.001,0.05,15,3,2000.0,8000,contrast,presence

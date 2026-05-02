@@ -121,6 +121,7 @@ celerybeat.pid
 
 # Environments
 .env
+notebooks/.env.hsm
 .venv
 env/
 venv/
@@ -178,3 +179,4 @@ deploy-dash.sh
 
 **/.DS_Store
 data/temp/*
+mlflow.db

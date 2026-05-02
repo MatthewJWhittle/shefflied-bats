@@ -15,10 +15,10 @@ import elapid as ela # For stack_geodataframes, distance_weights
 logger = logging.getLogger(__name__)
 
 def calculate_background_points(
-    n_presences: int, 
-    min_bg: int = 1000, 
-    max_bg: int = 10000, 
-    factor: int = 10
+    n_presences: int,
+    min_bg: int = 1000,
+    max_bg: int = 10000,
+    factor: int = 10,
 ) -> int:
     """
     Calculate a recommended number of background (pseudo-absence) points
@@ -34,7 +34,7 @@ def calculate_background_points(
         int: Calculated number of background points.
     """
     n_bg = max(min(n_presences * factor, max_bg), min_bg)
-    logger.info(f"Recommended background points: {n_bg} (presences: {n_presences})")
+    logger.debug(f"Recommended background points: {n_bg} (presences: {n_presences})")
     return int(n_bg)
 
 
@@ -59,14 +59,17 @@ def filter_gdf_to_grid(gdf, grid, tolerance=50):
 def prepare_occurrence_data(
     presence_gdf: gpd.GeoDataFrame,
     background_gdf: gpd.GeoDataFrame,
-    background_density: pd.Series, # Assumes density is pre-calculated and passed
-    grid_gdf: gpd.GeoDataFrame, # Used for filtering by grid_index
+    background_density: pd.Series,  # Assumes density is pre-calculated and passed
+    grid_gdf: gpd.GeoDataFrame,  # Used for filtering by grid_index
     input_vars: List[str],
     drop_na: bool = True,
     sample_weight_n_neighbors: int = 5,
-    filter_to_grid: bool = True, # Whether to filter points to the grid and remove overlaps
-    subset_background: bool = False, # Whether to subset background points
-    order_by_density_for_subset: bool = True, # For background subsetting
+    filter_to_grid: bool = True,  # Whether to filter points to the grid and remove overlaps
+    subset_background: bool = False,  # Whether to subset background points
+    order_by_density_for_subset: bool = True,  # For background subsetting
+    background_min_bg: int = 1000,
+    background_max_bg: int = 10000,
+    background_factor: int = 10,
 ) -> gpd.GeoDataFrame:
     """
     Prepares presence and background GeoDataFrames for model training.
@@ -104,7 +107,7 @@ def prepare_occurrence_data(
         raise ValueError("Not all input_vars found in background_gdf columns.")
 
     if filter_to_grid:
-        logger.info("Filtering points to grid and removing overlaps...")
+        logger.debug("Filtering points to grid and removing overlaps...")
         
         presence_gdf = filter_gdf_to_grid(presence_gdf, grid_gdf)
         background_gdf = filter_gdf_to_grid(background_gdf, grid_gdf)
@@ -113,10 +116,17 @@ def prepare_occurrence_data(
         background_gdf = background_gdf[
             ~background_gdf["grid_index"].isin(presence_gdf["grid_index"])
         ]
+
+        # drop duplicate background points in a grid cell
+        background_gdf = background_gdf.drop_duplicates(subset=["grid_index"])
+        # drop duplicate presence points in a grid cell
+        presence_gdf = presence_gdf.drop_duplicates(subset=["grid_index"])
+
         # filter the density to gdf index
         background_density = background_density.loc[
             background_gdf.index
         ]
+
 
 
         # Drop the grid index column
@@ -124,11 +134,16 @@ def prepare_occurrence_data(
         background_gdf.drop(columns=["grid_index"], inplace=True)
 
     if subset_background:
-        n_bg_calculated = calculate_background_points(len(presence_gdf))
-        logger.info(f"Subsetting background points to approximately {n_bg_calculated}.")
+        n_bg_calculated = calculate_background_points(
+            len(presence_gdf),
+            min_bg=background_min_bg,
+            max_bg=background_max_bg,
+            factor=background_factor,
+        )
+        logger.debug(f"Subsetting background points to approximately {n_bg_calculated}.")
         
         if order_by_density_for_subset and not background_density.empty:
-            logger.info("Subsetting background points by density.")
+            logger.debug("Subsetting background points by density.")
             # Ensure background_density index aligns with background_gdf for sorting
             valid_indices = background_density.index.intersection(background_gdf.index) # type: ignore
             background_gdf : gpd.GeoDataFrame = background_gdf.loc[valid_indices]
@@ -140,7 +155,7 @@ def prepare_occurrence_data(
             ] # type: ignore
             background_gdf = background_gdf.head(n_bg_calculated)
         elif not background_density.empty:
-            logger.info("Subsetting background points randomly.")
+            logger.debug("Subsetting background points randomly.")
             n_bg_sample = min(n_bg_calculated, len(background_gdf))
             if n_bg_sample > 0 :
                 background_gdf : gpd.GeoDataFrame = background_gdf.sample(n=n_bg_sample, random_state=42) # Add random_state for reproducibility
@@ -155,7 +170,7 @@ def prepare_occurrence_data(
             else:
                 logger.warning("No background points available for random sampling.")
                 background_gdf : gpd.GeoDataFrame = background_gdf.iloc[0:0]
-        logger.info(f"Number of background points after subsetting: {len(background_gdf)}.")
+        logger.debug(f"Number of background points after subsetting: {len(background_gdf)}.")
 
     # Select final columns (input_vars + geometry for stacking and weighting)
     # Ensure 'geometry' is always present
@@ -164,13 +179,15 @@ def prepare_occurrence_data(
     background_gdf = background_gdf[cols_to_keep]
 
     if drop_na:
-        logger.info("Dropping rows with NA values from presence and background sets.")
+        logger.debug("Dropping rows with NA values from presence and background sets.")
         original_pres_len = len(presence_gdf)
         original_bg_len = len(background_gdf)
         presence_gdf.dropna(subset=input_vars, inplace=True)
         background_gdf.dropna(subset=input_vars, inplace=True)
-        logger.info(f"Removed {original_pres_len - len(presence_gdf)} NA rows from presences.")
-        logger.info(f"Removed {original_bg_len - len(background_gdf)} NA rows from background.")
+        if original_pres_len - len(presence_gdf) > 0:
+            logger.debug(f"Removed {original_pres_len - len(presence_gdf)} NA rows from presences.")
+        if original_bg_len - len(background_gdf) > 0:
+            logger.debug(f"Removed {original_bg_len - len(background_gdf)} NA rows from background.")
 
     if presence_gdf.empty:
         logger.warning("No presence points remaining after pre-processing. Cannot proceed.")
@@ -182,13 +199,13 @@ def prepare_occurrence_data(
         # Depending on model requirements, this might be an error or acceptable (e.g. presence-only models)
         # For MaxEnt, background points are crucial.
 
-    logger.info("Stacking presence and background points.")
+    logger.debug("Stacking presence and background points.")
     # Ensure columns are exactly the same for concatenation, elapid.stack_geodataframes might handle this
     # For safety, align columns if they might differ due to prior processing steps
     # common_cols = list(set(presence_gdf.columns) & set(background_gdf.columns))
     # presence_gdf = presence_gdf[common_cols]
     # background_gdf = background_gdf[common_cols]
-    logger.info(f"Calculating sample weights (n_neighbors={sample_weight_n_neighbors}).")
+    logger.debug(f"Calculating sample weights (n_neighbors={sample_weight_n_neighbors}).")
     # distance_weights requires all points (presence and background) to be in the same GDF
     presence_gdf["sample_weight"] = ela.distance_weights(
         presence_gdf, n_neighbors=sample_weight_n_neighbors
@@ -197,12 +214,16 @@ def prepare_occurrence_data(
         background_gdf, n_neighbors=sample_weight_n_neighbors
     )
     
+    # Fill NaN values in sample weights (can occur when all distances are the same)
+    presence_gdf["sample_weight"] = presence_gdf["sample_weight"].fillna(1.0)
+    background_gdf["sample_weight"] = background_gdf["sample_weight"].fillna(1.0)
+    
     occurrence_stacked = ela.stack_geodataframes(
         presence_gdf, 
         background_gdf, 
         add_class_label=True # Adds 'class' column (1 for presence, 0 for background)
     )
     
-    logger.info(f"Prepared occurrence data: {len(occurrence_stacked)} total points.")
+    logger.debug(f"Prepared occurrence data: {len(occurrence_stacked)} total points ({len(presence_gdf)} presence, {len(background_gdf)} background).")
 
     return occurrence_stacked 
