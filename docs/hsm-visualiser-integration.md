@@ -17,7 +17,7 @@ This document summarises how this repository’s outputs connect to the **HSM Vi
 | **Project** | Holds the shared **multi-band environmental COG**, **band definitions** (machine `name`, display `label`, `description`), and optional **explainability background** sample. |
 | **Model** | One **species × activity** entry: **suitability COG** (single band, probability-style surface), optional **pickled estimator**, and **`metadata.analysis.feature_band_names`** (ordered list aligned with the model’s feature matrix). |
 | **CRS** | Rasters accepted by the API are expected in **EPSG:3857** (Web Mercator). This repo’s modelling stack uses **EPSG:27700** (`evs-to-model.tif`, native suitability outputs from `sdm predict`) — you must **reproject** before upload (see [Reprojecting to EPSG:3857](#4-reprojecting-to-epsg3857)). Native prediction GeoTIFFs may already be **COG-encoded** in EPSG:27700; the **`gdalwarp` → EPSG:3857 + COG** bundle step stays the same. |
-| **COG** | Uploads should be valid **Cloud Optimized GeoTIFFs**. Use `rio-cogeo` (this repo exposes `sdm.raster.io.translate_to_cog`). |
+| **COG** | Uploads should be valid **Cloud Optimized GeoTIFFs**. Use `rio-cogeo` via **`sdm export-rasters`** / **`sdm.raster.io.export_geotiff`**, or `translate_to_cog` for ad‑hoc scripts. |
 
 ---
 
@@ -115,6 +115,7 @@ translate_to_cog(
 
 - **Source:** `data/sdm_predictions/prediction_<model_id>.tif` where `<model_id>` comes from `get_model_id([latin_name, activity_type])` (lowercase, spaces → underscores), e.g. `nyctalus_noctula_roost`.
 - Apply the same **warp → COG** pattern to that file before `POST`/`PUT` **models**.
+- **CLI shortcut:** `sdm export-rasters` accepts explicit paths (your shell expands globs), e.g. `sdm export-rasters data/sdm_predictions/prediction_*.tif -o exports/share --output-crs EPSG:3857 --cog`.
 
 ---
 
