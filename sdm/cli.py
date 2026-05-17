@@ -297,6 +297,16 @@ def predict(
         "--split-files/--no-split-files",
         help="If True, write each model prediction as a separate file. If False, write all predictions in one combined file.",
     ),
+    prediction_crs: Optional[str] = typer.Option(
+        None,
+        "--prediction-crs",
+        help="CRS for prediction rasters (default: project CRS from config.yml).",
+    ),
+    write_cog: bool = typer.Option(
+        True,
+        "--cog/--no-cog",
+        help="Emit Cloud Optimized GeoTIFF outputs (default: on).",
+    ),
     verbose: bool = False,
 ) -> None:
     """Generate model predictions."""
@@ -312,6 +322,8 @@ def predict(
         species=species,
         activity_types=activity_types,
         split_files=split_files,
+        prediction_crs=prediction_crs,
+        write_cog=write_cog,
         verbose=verbose,
     )
     
@@ -347,7 +359,7 @@ def export_rasters_cmd(
     ),
     verbose: bool = False,
 ) -> None:
-    """Reproject and/or COG-wrap rasters (does not alter ``sdm predict`` outputs)."""
+    """Reproject and/or COG-wrap rasters (secondary bundles; ``sdm predict`` already emits COG by default)."""
     from sdm.commands.modelling.export_rasters import export_raster_paths
 
     setup_logging(verbose=verbose)
@@ -361,63 +373,6 @@ def export_rasters_cmd(
             quiet_cog=not verbose,
         )
     except ValueError as e:
-        typer.secho(str(e), err=True)
-        raise typer.Exit(code=1) from e
-
-    for path in written:
-        logging.info("Wrote %s", path)
-
-
-@app.command("export-predictions")
-def export_predictions_cmd(
-    output_dir: Path = typer.Option(
-        ...,
-        "--output-dir",
-        "-o",
-        help="Directory for exported copies.",
-    ),
-    predictions_dir: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.predictions),
-        "--predictions-dir",
-        help="Folder with all_predictions.tif and optional prediction_*.tif.",
-    ),
-    output_crs: Optional[str] = typer.Option(
-        None,
-        "--output-crs",
-        help="Target CRS (e.g. EPSG:3857). Omit to keep source CRS.",
-    ),
-    as_cog: bool = typer.Option(
-        False,
-        "--cog/--no-cog",
-        help="Cloud Optimized GeoTIFF encoding.",
-    ),
-    no_splits: bool = typer.Option(
-        False,
-        "--no-splits",
-        help="Only export all_predictions.tif (skip prediction_*.tif bands).",
-    ),
-    resampling: str = typer.Option(
-        "bilinear",
-        "--resampling",
-        help="Warp resampling when using --output-crs.",
-    ),
-    verbose: bool = False,
-) -> None:
-    """Export combined + per-model prediction rasters for sharing."""
-    from sdm.commands.modelling.export_rasters import export_predictions_bundle
-
-    setup_logging(verbose=verbose)
-    try:
-        written = export_predictions_bundle(
-            predictions_dir,
-            output_dir,
-            output_crs=output_crs,
-            as_cog=as_cog,
-            resampling=resampling,
-            include_splits=not no_splits,
-            quiet_cog=not verbose,
-        )
-    except (ValueError, FileNotFoundError) as e:
         typer.secho(str(e), err=True)
         raise typer.Exit(code=1) from e
 

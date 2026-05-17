@@ -1,4 +1,4 @@
-"""Tests for ``export_geotiff`` and prediction export helpers."""
+"""Tests for ``export_geotiff`` and ``export_raster_paths``."""
 
 from __future__ import annotations
 

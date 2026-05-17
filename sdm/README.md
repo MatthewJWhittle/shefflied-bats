@@ -94,7 +94,13 @@ Runs the MaxEnt model training pipeline for species distribution modeling.
 ```bash
 sdm predict [OPTIONS]
 ```
-Generates predictions using trained SDM models.
+Generates predictions using trained SDM models. By default this writes **`all_predictions.tif`** (merged stack) and optional per-model **`prediction_*.tif`** files as **Cloud Optimized GeoTIFFs** in the **project CRS** from `config.yml` (typically EPSG:27700). Use **`--no-cog`** for legacy tiled/deflate GeoTIFFs and **`--prediction-crs`** when you need a different target CRS than the project default.
+
+#### Raster export (sharing / Web Mercator)
+```bash
+sdm export-rasters RASTER.tif... --output-dir DIR [OPTIONS]
+```
+Optional **CRS warp** and/or **COG** encoding for any GeoTIFF paths you pass (for example `data/sdm_predictions/all_predictions.tif` or a shell-expanded `prediction_*.tif` list). Use this when you need bundles for HSM (**EPSG:3857**) or plain redistribution without re-running **`sdm predict`**.
 
 ### Visualization
 
@@ -135,17 +141,17 @@ sdm landcover --output-dir data/evs/landcover
 sdm merge --dataset-inputs "terrain=data/evs/terrain/terrain.tif" --dataset-inputs "climate=data/evs/climate/climate.tif"
 ```
 
-6. Train models:
+5. Train models:
 ```bash
 sdm train --bats-file data/processed/bats-tidy.geojson --background-file data/processed/background-points.geojson
 ```
 
-7. Generate predictions:
+6. Generate predictions:
 ```bash
 sdm predict --ev-path data/evs/evs-to-model.tif --models-dir data/sdm_models
 ```
 
-8. Create visualizations:
+7. Create visualizations:
 ```bash
 sdm visualize --run-summary-path outputs/sdm_runs/sdm_run_summary.csv
 ```

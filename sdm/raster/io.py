@@ -136,6 +136,7 @@ def export_geotiff(
                         cog_kw,
                         nodata=meta.get("nodata"),
                         overview_resampling="nearest",
+                        forward_band_tags=True,
                         quiet=quiet,
                     )
                 else:
@@ -155,11 +156,38 @@ def export_geotiff(
                 cog_kw,
                 nodata=src.nodata,
                 overview_resampling="nearest",
+                forward_band_tags=True,
                 quiet=quiet,
             )
             return
 
         shutil.copy2(src_path, dst_path)
+
+
+def cogify_geotiff_inplace(path: Union[str, Path], *, quiet: bool = True) -> None:
+    """Rewrite *path* as a Cloud Optimized GeoTIFF (same CRS, grid, dtype)."""
+    path = Path(path).resolve()
+    with rio.open(path) as src:
+        nodata = src.nodata
+        cog_kw = _deflate_profile_for_dtype(src.profile["dtype"])
+    fd, tmp_name = tempfile.mkstemp(suffix=".tif", dir=str(path.parent))
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        cog_translate(
+            path,
+            tmp_path,
+            cog_kw,
+            nodata=nodata,
+            overview_resampling="nearest",
+            forward_band_tags=True,
+            quiet=quiet,
+        )
+        path.unlink(missing_ok=True)
+        tmp_path.rename(path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def translate_to_cog(
