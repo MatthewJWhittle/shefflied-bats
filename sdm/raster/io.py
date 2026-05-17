@@ -1,6 +1,16 @@
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, Union
 import logging
+import os
+import shutil
+import tempfile
+
+import numpy as np
+import rasterio as rio
+from rasterio.crs import CRS
+from rasterio.enums import Resampling
+from rasterio.transform import array_bounds
+from rasterio.warp import calculate_default_transform, reproject
 
 from rio_cogeo.cogeo import cog_translate
 from rio_cogeo.profiles import cog_profiles
@@ -9,6 +19,147 @@ import xarray as xr
 import rioxarray as rxr
 
 logger = logging.getLogger(__name__)
+
+
+def _deflate_profile_for_dtype(dtype: Union[np.dtype, str]) -> Dict[str, Any]:
+    """Deflate COG kwargs matched to raster dtype (float → predictor 3)."""
+    kw = cog_profiles.get("deflate").copy()
+    dt = np.dtype(dtype)
+    kw.update(dtype=np.dtype(dtype).name)
+    if np.issubdtype(dt, np.floating):
+        kw["predictor"] = 3
+    elif np.issubdtype(dt, np.integer):
+        kw["predictor"] = 2
+    else:
+        kw["predictor"] = 1
+    return kw
+
+
+def _resolve_target_crs(
+    dst_crs: Optional[Union[str, int, CRS]],
+    src_crs: Optional[CRS],
+) -> CRS:
+    if dst_crs is None:
+        if src_crs is None:
+            raise ValueError("Source raster has no CRS; pass dst_crs explicitly.")
+        return src_crs
+    if isinstance(dst_crs, CRS):
+        return dst_crs
+    if isinstance(dst_crs, int):
+        return CRS.from_epsg(dst_crs)
+    return CRS.from_user_input(dst_crs)
+
+
+def export_geotiff(
+    src_path: Union[str, Path],
+    dst_path: Union[str, Path],
+    *,
+    dst_crs: Optional[Union[str, int, CRS]] = None,
+    as_cog: bool = False,
+    resampling: Resampling = Resampling.bilinear,
+    quiet: bool = True,
+) -> None:
+    """Optionally reproject and/or encode a GeoTIFF as a COG.
+
+    ``dst_crs`` and ``as_cog`` are independent: set either or both.
+
+    * ``dst_crs=None`` keeps the source CRS/grid (no warp).
+    * ``as_cog=False`` writes a plain tiled/deflate GeoTIFF when warping; otherwise copies the file when nothing else applies.
+
+    Args:
+        src_path: Input raster path.
+        dst_path: Output path (must differ from ``src_path``).
+        dst_crs: Target CRS (e.g. ``EPSG:3857`` or ``3857``). ``None`` = match source grid.
+        as_cog: When True, final output is Cloud Optimized GeoTIFF (via ``rio-cogeo``).
+        resampling: Warp resampling when ``dst_crs`` differs from the source CRS.
+        quiet: Passed through to ``cog_translate``.
+    """
+    src_path = Path(src_path).resolve()
+    dst_path = Path(dst_path).resolve()
+    if src_path == dst_path:
+        raise ValueError(f"Destination must differ from source ({src_path})")
+
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with rio.open(src_path) as src:
+        if src.crs is None:
+            raise ValueError(f"Raster has no CRS: {src_path}")
+        target_crs = _resolve_target_crs(dst_crs, src.crs)
+        needs_reproject = target_crs != src.crs
+
+        if needs_reproject:
+            dst_transform, dst_width, dst_height = calculate_default_transform(
+                src.crs,
+                target_crs,
+                src.width,
+                src.height,
+                *array_bounds(src.height, src.width, src.transform),
+            )
+            meta = src.meta.copy()
+            meta.update(
+                {
+                    "driver": "GTiff",
+                    "crs": target_crs,
+                    "transform": dst_transform,
+                    "width": dst_width,
+                    "height": dst_height,
+                    "compress": "deflate",
+                    "tiled": True,
+                    "BIGTIFF": "IF_NEEDED",
+                }
+            )
+
+            fd, tmp_name = tempfile.mkstemp(suffix=".tif", dir=str(dst_path.parent))
+            os.close(fd)
+            warped_path = Path(tmp_name)
+            try:
+                with rio.open(warped_path, "w", **meta) as dst:
+                    for i in range(1, src.count + 1):
+                        reproject(
+                            source=rio.band(src, i),
+                            destination=rio.band(dst, i),
+                            src_transform=src.transform,
+                            src_crs=src.crs,
+                            dst_transform=dst_transform,
+                            dst_crs=target_crs,
+                            resampling=resampling,
+                            src_nodata=src.nodata,
+                            dst_nodata=src.nodata,
+                        )
+                    dst.descriptions = src.descriptions
+
+                if as_cog:
+                    cog_kw = _deflate_profile_for_dtype(meta["dtype"])
+                    cog_translate(
+                        warped_path,
+                        dst_path,
+                        cog_kw,
+                        nodata=meta.get("nodata"),
+                        overview_resampling="nearest",
+                        quiet=quiet,
+                    )
+                else:
+                    shutil.move(str(warped_path), str(dst_path))
+                    warped_path = None  # suppress unlink in finally
+            finally:
+                if warped_path is not None:
+                    warped_path.unlink(missing_ok=True)
+            return
+
+        # Same CRS/grid as source
+        if as_cog:
+            cog_kw = _deflate_profile_for_dtype(src.profile["dtype"])
+            cog_translate(
+                src_path,
+                dst_path,
+                cog_kw,
+                nodata=src.nodata,
+                overview_resampling="nearest",
+                quiet=quiet,
+            )
+            return
+
+        shutil.copy2(src_path, dst_path)
 
 
 def translate_to_cog(
