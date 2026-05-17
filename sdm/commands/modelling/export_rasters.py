@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+from rasterio.enums import Resampling
+
 from sdm.raster.io import export_geotiff
 
 logger = logging.getLogger(__name__)
