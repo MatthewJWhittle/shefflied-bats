@@ -59,13 +59,18 @@ def export_raster_paths(
     output_dir.mkdir(parents=True, exist_ok=True)
     suffix = _output_suffix(output_crs, as_cog)
     written: List[Path] = []
+    stem_counts: dict[str, int] = {}
 
     for src in raster_paths:
         src = Path(src)
         if not src.is_file():
             raise FileNotFoundError(f"Raster not found: {src}")
 
-        dst = output_dir / f"{src.stem}{suffix}.tif"
+        base_key = f"{src.stem}{suffix}"
+        idx = stem_counts.get(base_key, 0)
+        stem_counts[base_key] = idx + 1
+        disambig = "" if idx == 0 else f"_{idx + 1}"
+        dst = output_dir / f"{src.stem}{suffix}{disambig}.tif"
         logger.info(
             "Export %s -> %s (output_crs=%s, as_cog=%s)",
             src,
