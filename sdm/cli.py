@@ -297,6 +297,16 @@ def predict(
         "--split-files/--no-split-files",
         help="If True, write each model prediction as a separate file. If False, write all predictions in one combined file.",
     ),
+    prediction_crs: Optional[str] = typer.Option(
+        None,
+        "--prediction-crs",
+        help="CRS for prediction rasters (default: project CRS from config.yml).",
+    ),
+    write_cog: bool = typer.Option(
+        True,
+        "--cog/--no-cog",
+        help="Emit Cloud Optimized GeoTIFF outputs (default: on).",
+    ),
     verbose: bool = False,
 ) -> None:
     """Generate model predictions."""
@@ -312,6 +322,8 @@ def predict(
         species=species,
         activity_types=activity_types,
         split_files=split_files,
+        prediction_crs=prediction_crs,
+        write_cog=write_cog,
         verbose=verbose,
     )
     
@@ -347,7 +359,7 @@ def export_rasters_cmd(
     ),
     verbose: bool = False,
 ) -> None:
-    """Reproject and/or COG-wrap rasters (does not alter ``sdm predict`` outputs)."""
+    """Reproject and/or COG-wrap rasters (secondary bundles; ``sdm predict`` already emits COG by default)."""
     from sdm.commands.modelling.export_rasters import export_raster_paths
 
     setup_logging(verbose=verbose)

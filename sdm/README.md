@@ -94,7 +94,7 @@ Runs the MaxEnt model training pipeline for species distribution modeling.
 ```bash
 sdm predict [OPTIONS]
 ```
-Generates predictions using trained SDM models.
+Generates predictions using trained SDM models. By default this writes **`all_predictions.tif`** (merged stack) and optional per-model **`prediction_*.tif`** files as **Cloud Optimized GeoTIFFs** in the **project CRS** from `config.yml` (typically EPSG:27700). Use **`--no-cog`** for legacy tiled/deflate GeoTIFFs and **`--prediction-crs`** when you need a different target CRS than the project default.
 
 ### Visualization
 

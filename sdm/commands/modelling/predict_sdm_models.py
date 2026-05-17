@@ -15,9 +15,11 @@ import rasterio as rio
 from rasterio.features import geometry_mask
 import geopandas as gpd
 
+from rasterio.crs import CRS
+
 from sdm.utils.logging_utils import setup_logging
-from sdm.utils.io import load_boundary, load_pickled_model
-from sdm.raster.io import load_environmental_variables
+from sdm.utils.io import load_boundary, load_pickled_model, load_project_config
+from sdm.raster.io import cogify_geotiff_inplace, export_geotiff, load_environmental_variables
 from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.pipeline_features import pipeline_selected_feature_names
 from sdm.commands.data_preparation.raster.split_raster_by_band import split_raster_by_band
@@ -154,90 +156,124 @@ def make_predictions(
     output_dir: Path,
     boundary_path: Optional[Path] = None,
     split_files: bool = True,
+    *,
+    prediction_crs: str,
+    write_cog: bool = True,
 ) -> None:
-    """Apply trained models to make predictions."""
+    """Apply trained models to make predictions.
+
+    Writes a staging GeoTIFF on the EV grid, then finalizes ``all_predictions.tif``
+    (and optionally per-band splits) in *prediction_crs*; when *write_cog* is True,
+    outputs are Cloud Optimized GeoTIFFs.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
+    with rio.open(ev_raster) as ev_ds:
+        ev_crs = ev_ds.crs
+    target_crs = CRS.from_user_input(prediction_crs)
+    if ev_crs is not None and ev_crs != target_crs:
+        logger.warning(
+            "Environmental raster CRS (%s) differs from prediction output CRS (%s); "
+            "final export will warp to the target CRS.",
+            ev_crs,
+            target_crs,
+        )
+
     # Load all models
     logger.debug("Loading models...")
     models: Dict[str, Any] = {}
     feature_names = None
-    
+
     for _, row in filtered_index.iterrows():
         model_path = Path(row.model_path)
         latin_name = row.latin_name
         activity_type = row.activity_type
         model_id = get_model_id([latin_name, activity_type])
-        
+
         try:
-            # Load model
             model = load_model(model_path)
-            
+
             if feature_names is None and hasattr(model, "named_steps"):
                 if "feature_selection" in model.named_steps:
                     feature_names = pipeline_selected_feature_names(model)
                     logger.debug(f"Using feature subset: {feature_names}")
-            
+
             models[model_id] = model
             logger.debug(f"Loaded model for {model_id}")
-            
+
         except Exception as e:
             logger.error(f"Failed to load model for {model_id}: {e}")
-    
+
     if not models:
         raise ValueError("No models were successfully loaded")
-    
-    # Generate predictions
+
     logger.info(f"Generating predictions for {len(models)} models...")
+    staging_path = output_dir / "_all_predictions_staging.tif"
     output_path = output_dir / "all_predictions.tif"
-    
+
     try:
         apply_models_to_raster(
             models=models,
             raster_path=ev_raster,
-            output_path=output_path,
+            output_path=staging_path,
             window_size=128,
         )
         logger.debug(f"Successfully generated predictions for {len(models)} models")
-        
-        # Mask to boundary if provided
+
         if boundary_path and boundary_path.exists():
             logger.info(f"Masking predictions to boundary: {boundary_path}")
             try:
-                # Load boundary
                 boundary_gdf = load_boundary(boundary_path, buffer_distance=0)
-                
-                # Mask raster to boundary (preserves transform and profile)
                 mask_raster_to_boundary(
-                    raster_path=output_path,
+                    raster_path=staging_path,
                     boundary_geom=boundary_gdf,
-                    output_path=output_path,
-                    all_touched=True
+                    output_path=staging_path,
+                    all_touched=True,
                 )
-                logger.info(f"Masked predictions saved to: {output_path}")
-                
+                logger.info(f"Masked predictions saved to: {staging_path}")
             except Exception as e:
-                logger.warning(f"Failed to mask predictions to boundary: {e}. Output saved without masking.")
-        
-        # Split into separate files if requested
+                logger.warning(
+                    f"Failed to mask predictions to boundary: {e}. Output saved without masking."
+                )
+
+        logger.info(
+            "Finalizing merged predictions (%s, COG=%s) → %s",
+            prediction_crs,
+            write_cog,
+            output_path.name,
+        )
+        export_geotiff(
+            staging_path,
+            output_path,
+            dst_crs=prediction_crs,
+            as_cog=write_cog,
+        )
+        staging_path.unlink(missing_ok=True)
+
         if split_files:
             logger.info("Splitting predictions into separate files...")
             try:
-                split_raster_by_band(
+                split_paths = split_raster_by_band(
                     input_raster=output_path,
                     output_dir=output_dir,
                     output_prefix="prediction",
                     use_band_names=True,
                     window_size=128,
                 )
+                if write_cog:
+                    for band_path in split_paths:
+                        cogify_geotiff_inplace(band_path)
                 logger.info("Successfully split predictions into separate files")
-                
             except Exception as e:
-                logger.warning(f"Failed to split predictions into separate files: {e}. Combined file available at {output_path}")
-        
+                logger.warning(
+                    f"Failed to split predictions into separate files: {e}. Combined file available at {output_path}"
+                )
+
     except Exception as e:
         logger.error(f"Failed to generate predictions: {e}")
+        staging_path.unlink(missing_ok=True)
         raise
+
 
 def predict_sdm_models(
     ev_path: Path = Path("data/evs/evs-to-model.tif"),
@@ -247,7 +283,9 @@ def predict_sdm_models(
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     split_files: bool = True,
-    verbose: bool = False
+    prediction_crs: Optional[str] = None,
+    write_cog: bool = True,
+    verbose: bool = False,
 ) -> None:
     """Run the model inference pipeline.
 
@@ -259,6 +297,8 @@ def predict_sdm_models(
         species: Optional: Specific species to generate predictions for (Latin names).
         activity_types: Optional: Specific activity types to generate predictions for.
         split_files: If True, write each model prediction as a separate file. If False, write all predictions in one combined file.
+        prediction_crs: CRS for outputs (e.g. ``EPSG:27700``). ``None`` uses ``ProjectConfig.crs`` from ``config.yml``.
+        write_cog: When True (default), emit Cloud Optimized GeoTIFFs.
         verbose: Enable verbose logging.
 
     Raises:
@@ -285,8 +325,9 @@ def predict_sdm_models(
     # Load environmental variables
     logger.debug("Loading environmental variables...")
     _, ev_raster = load_environmental_variables(ev_path)
-    
-    # Generate predictions
+
+    crs_out = prediction_crs if prediction_crs is not None else load_project_config().crs
+
     make_predictions(
         filtered_index,
         models_dir,
@@ -294,6 +335,8 @@ def predict_sdm_models(
         output_dir,
         boundary_path=boundary_path,
         split_files=split_files,
+        prediction_crs=crs_out,
+        write_cog=write_cog,
     )
     
     logger.info("✓ Prediction pipeline complete") 
