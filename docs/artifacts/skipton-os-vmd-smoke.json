@@ -1,0 +1,36 @@
+{
+  "aoi_bbox_osgb": [
+    397100,
+    450300,
+    400100,
+    453300
+  ],
+  "tiles": [
+    "SD",
+    "SE"
+  ],
+  "api_base": "https://api.os.uk/downloads/v1",
+  "auth_required_for_opendata": false,
+  "tile_downloads": {
+    "SD": {
+      "available": true,
+      "fileName": "vmdvec_sd.zip",
+      "size_bytes": 100036691
+    },
+    "SE": {
+      "available": true,
+      "fileName": "vmdvec_se.zip",
+      "size_bytes": 89628913
+    }
+  },
+  "hx_smoke": {
+    "downloaded_bytes": 34707,
+    "shapefiles": [
+      "HX_Building.shp",
+      "HX_Foreshore.shp",
+      "HX_NamedPlace.shp",
+      "HX_Ornament.shp",
+      "HX_TidalBoundary.shp"
+    ]
+  }
+}

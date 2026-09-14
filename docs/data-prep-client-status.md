@@ -12,7 +12,7 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 | Finding | Detail |
 |--------|--------|
 | **CLI gap** | **Resolved (docs-match-CLI).** Root `README.md` and `sdm/README.md` document only registered commands (`sdm setup`, `sdm data`, `sdm background`, modelling commands). Granular Python entry points remain callable from code/notebooks but are not separate Typer commands. |
-| **Live vs manual** | **4 live clients** (terrain DTM/DSM, VOM, climate/WorldClim, boundary from ONS file). **3 manual big-files** (CEH land cover, BGS GeoCoast, OS Vector Map). |
+| **Live vs manual** | **5 live clients** (terrain DTM/DSM, VOM, climate/WorldClim, boundary from ONS file, **OS Vector Map District**). **2 manual big-files** (CEH land cover, BGS GeoCoast). OS VMD keeps manual drop as fallback. |
 | **Likely broken paths** | **Fixed:** `sdm data` now passes explicit `.tif` paths via `build_ev_dataset_inputs`. OS raw path aligned to **`os-vector-map`** (README + `load_os_shps`); parquet cache stays **`data/processed/os-data`**. **Open:** climate **`run_stats=False`** in pipeline but `variables_config.yml` expects `climate_stats_*` bands. |
 | **Orphans** | `ImageTileDownloader`, Sentinel/GEE helpers, legacy `merge_environmental_layers`, duplicate `ceh_processing.py` — not wired to CLI data-prep. |
 | **tilearray** | Not present in this repo. Custom `WCSDownloader` (async tiled WCS 2.0.1) covers the same surface area as a future **tilearray** integration for EA LiDAR/VOM WCS (and potentially WMS/WMTS elsewhere). |
@@ -58,7 +58,7 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 | **CEH land cover (LCM 2023)** | `sdm data` step 4/7 | UKCEH Global Land Cover 2023 10 m GeoTIFF | **Implemented** processing (clip, coarsen, aggregate habitats) | **Manual** — default `data/raw/big-files/CEH/data/7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif` | [UKCEH LCM](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) — EIDC GeoTIFF for modelling; WMS is view-only; **no AOI raster API**; non-commercial free / commercial licensed | `tests/test_generate_ceh_lc_data.py`, `tests/test_get_ceh_data.py` | **CEH licence** (research vs commercial); very large rasters; path is project-specific UUID folder |
 | **VOM (vegetation height)** | `sdm data` step 5/7 | EA Vegetation Object Model **WCS 2.0.1** | **Implemented** — WCS download + `summarise_raster_metrics` | **Live WCS** (no auth) | Already wired: [VOM WCS](https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs) | `tests/test_generate_vom_data.py` (mock + `@pytest.mark.integration`) | Coverage extent/resolution limits; async tile download load |
 | **Coastal distance** | `sdm data` step 6/7 | BGS GeoCoast **Authority Area Inundation** shapefile | **Implemented** — sea-zone polygon + distance raster | **Manual** — `data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp` | [BGS GeoCoast Open](https://www.bgs.ac.uk/datasets/geocoast-open/) + [MapServer](https://map.bgs.ac.uk/arcgis/rest/services/GeoCoast/GeoCoast_Open/MapServer) — REST live; confirm coastal in-scope | `tests/test_generate_coastal_distance.py` | Manual download; geometry processing sensitive to simplify/buffer params; **not an SLR scenario client** (uses inundation polygons for coastline geometry only) |
-| **OS feature cover & distance** | `sdm data` step 7/7 | OS Vector Map District shapefiles | **Implemented** — parquet cache, road split, rasterise cover/distances | **Manual** — raw shapefiles `data/raw/big-files/os-vector-map`; parquet cache `data/processed/os-data` | [OS Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) / [Data Hub OpenData](https://osdatahub.os.uk/downloads/open/VectorMapDistrict) — OpenData automatable **without** API key; not wired yet | `tests/test_process_os_data.py` (component unit tests) | **OS licence**; no end-to-end OS integration test |
+| **OS feature cover & distance** | `sdm data` step 7/7 | OS Vector Map District shapefiles | **Implemented** — live download via `sdm/data/os_download.py`, parquet cache, road split, rasterise cover/distances | **Live + manual fallback** — OS Downloads API → `data/raw/big-files/os-vector-map/<TILE>/`; parquet cache `data/processed/os-data` | [OS Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) — OpenData **without** API key; optional `OS_DATA_HUB_KEY` for premium packages | `tests/test_process_os_data.py`, `tests/test_os_download.py` (mocked HTTP + tile resolution) | **OS licence**; Skipton AOI (~3 km) spans tiles **SD+SE** (~190 MB zipped) |
 | **Merge EV layers** | `sdm data` (final) | Prior step outputs | **Implemented** — reproject, merge, clip to boundary | N/A (orchestration) | N/A | `tests/test_merge_ev_layers.py` (mocked + `build_ev_dataset_inputs`) | **`sdm data` uses `build_ev_dataset_inputs`** — explicit `.tif` paths per layer |
 
 ### Utilities (not standalone CLI data-prep)
@@ -97,7 +97,7 @@ Config defaults (`config.yml`): CRS **EPSG:27700**, model grid resolution **100 
 | ONS counties boundary | `Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson` | [ONS Geoportal](https://geoportal.statistics.gov.uk/search?q=BDY_CTYUA%202024) |
 | CEH LCM 2023 | `CEH/data/.../gblcm2023_10m.tif` (UUID folder varies) | [UKCEH LCM](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) |
 | BGS GeoCoast | `BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp` | [BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/) |
-| OS Vector Map District | **`os-vector-map/`** (raw shapefiles); parquet cache **`data/processed/os-data/`** | [OS VMD product page](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) |
+| OS Vector Map District | **Live:** OS Downloads API → **`os-vector-map/<TILE>/`**; **manual:** flat `os-vector-map/`; parquet cache **`data/processed/os-data/`** | [OS VMD product page](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) / [Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) |
 
 Live caches (auto-created): `data/raw/worldclim/`, `data/processed/os-data/*.parquet`.
 
@@ -123,7 +123,7 @@ Live caches (auto-created): `data/raw/worldclim/`, `data/processed/os-data/*.par
 | Climate | `test_generate_climate_data.py` | Mostly unit; live download not CI-gated |
 | CEH LC | `test_generate_ceh_lc_data.py`, `test_get_ceh_data.py` | Synthetic rasters |
 | Coastal | `test_generate_coastal_distance.py` | Mocked + fixture shapefiles |
-| OS | `test_process_os_data.py` | Synthetic geometries; no real OS tiles |
+| OS | `test_process_os_data.py`, `test_os_download.py` | Mocked Downloads API; Skipton tile-resolution smoke |
 | Merge | `test_merge_ev_layers.py` | Mocked workflow |
 | Boundary | `test_boundary_simple.py` | Mocked counties file |
 | Background | `test_generate_background_points.py` | Synthetic occurrence data |
@@ -177,7 +177,7 @@ Deepen the “Public API feasibility” column for the **manual** sources. MaxEn
 
 ### Suggested wiring order
 
-1. **OS VectorMap** via Downloads API (no key) — path drift fixed; live client still unwired.
+1. ~~**OS VectorMap** via Downloads API (no key)~~ — **wired** (`sdm/data/os_download.py`; Skipton → tiles SD+SE). Smoke artifact: `docs/artifacts/skipton-os-vmd-smoke.json`.
 2. **ONS boundaries** via Open Geography Portal FeatureServer / download.
 3. Decide whether **GeoCoast** is in-scope for general toolchains (or coastal-only studies).
 4. Leave **CEH land cover** on EIDC / manual until the licence story is clear.
@@ -192,7 +192,7 @@ Do **not** put these vendor details in the stranger-facing README — this audit
 2. ~~**Fix merge inputs** in `sdm data`~~ — **done:** `build_ev_dataset_inputs` in `merge_ev_layers.py`.
 3. ~~**Align OS raw path**~~ — **done:** raw `os-vector-map`, parquet cache `data/processed/os-data`.
 4. **Enable `run_stats=True`** in climate step (or drop `climate_stats_*` from `variables_config.yml` until generated).
-5. **Prioritise live API work** — OS Downloads + ONS portal first (see Public API notes above); keep EA WCS (terrain, VOM) + WorldClim; plan tilearray for shared WCS tiling; defer CEH automation pending licence.
+5. **Prioritise live API work** — ONS portal next (see Public API notes above); keep EA WCS (terrain, VOM) + WorldClim + OS VMD; plan tilearray for shared WCS tiling; defer CEH automation pending licence.
 6. **Defer / isolate** GEE Sentinel and `ImageTileDownloader` until a clear EV use-case exists.
 
 ---
@@ -208,7 +208,7 @@ Do **not** put these vendor details in the stranger-facing README — this audit
 | Land cover | `commands/.../generate_ceh_lc_data.py` | `data/landcover.py` |
 | VOM | `commands/.../generate_vom_data.py` | `WCSDownloader` (shared) |
 | Coastal | `commands/.../generate_coastal_distance.py` | — |
-| OS | `commands/.../process_os_data.py` | `data/os.py` |
+| OS | `commands/.../process_os_data.py` | `data/os.py`, `data/os_download.py` |
 | Merge | `commands/.../merge_ev_layers.py` | — |
 | Background | `commands/.../generate_background_points.py` | `occurrence/sampling.py` |
 

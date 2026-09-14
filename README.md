@@ -94,7 +94,15 @@ Large inputs are **not** in git. Download and place as below for the Sheffield /
 
 ### OS Vector Map District
 
-[OS Data Products](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) — study-area tiles → `data/raw/big-files/os-vector-map`
+**Live (preferred):** `sdm data` step 7 downloads missing 100 km tiles from the [OS Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) (OpenData — no API key required). Shapefiles are cached under `data/raw/big-files/os-vector-map/<TILE>/`.
+
+**Manual fallback:** [OS Vector Map District](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) shapefiles → `data/raw/big-files/os-vector-map/`
+
+Optional API key for OS Data Hub premium packages (not required for OpenData):
+
+```bash
+export OS_DATA_HUB_KEY=your-key-here
+```
 
 ### CEH Land Cover
 
