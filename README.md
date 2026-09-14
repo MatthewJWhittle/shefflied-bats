@@ -1,8 +1,10 @@
 # Sheffield Bats — HSM toolchain
 
-Species distribution modelling (SDM) for bat habitat suitability in Sheffield, UK. This repository is the **modelling toolchain**: it prepares environmental variables, trains MaxEnt models, and publishes **portable model packages** that any visualiser can consume.
+Habitat suitability modelling (HSM) for bats — **reference implementation** for a Yorkshire / Sheffield study, built as a reusable toolchain for any species and study area.
 
-The visualiser is a separate project — **[hsm-app](https://github.com/MatthewJWhittle/hsm-app)**. The interface is **artefacts on disk** (pickle + JSON + GeoTIFF COGs), not shared code. See [docs/model-package-contract.md](docs/model-package-contract.md) for the publish contract and how hsm-app maps it.
+This repository **publishes** models: environmental variables, MaxEnt training, prediction COGs, and versioned **model packages** (`model.pkl` + `package.json`). A separate app **visualises** them for regional users (online maps, combined species × activity layers, cite-able model metadata).
+
+Visualiser: **[hsm-app](https://github.com/MatthewJWhittle/hsm-app)**. The boundary between repos is **portable artefacts** (pickle + JSON + GeoTIFF COGs), not shared code. See [docs/model-package-contract.md](docs/model-package-contract.md).
 
 ## Quick start
 

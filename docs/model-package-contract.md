@@ -1,8 +1,10 @@
 # Model package contract
 
-This document defines the **portable artefacts** produced by the HSM (habitat suitability modelling) toolchain in this repository, and how a visualiser consumer maps them to catalog storage.
+This document defines the **portable artefacts** a habitat suitability modelling (HSM) **toolchain publishes** and a separate **visualiser consumes** — without shared code, credentials, or config.
 
-Sheffield Bats is the reference implementation; the layout is intended to work for other species, study areas, and teams.
+The intended workflow is: occurrence records and environmental data in → trained models and prediction surfaces out → **online maps and cite-able model metadata** for regional users (e.g. bat HSM across Yorkshire). The toolchain owns training and raster export; the app owns catalog storage, map UI, and public access. Either side can be replaced as long as this file format is honoured.
+
+Sheffield Bats in this repository is the **reference run** (species set, EV stack, study boundary). The contract itself is **study-area and species agnostic**: another team can publish the same package layout and COG rules for a different taxon or region.
 
 ### Current consumer: [hsm-app](https://github.com/MatthewJWhittle/hsm-app)
 
@@ -14,10 +16,12 @@ Authoritative API shape: deployed OpenAPI at [`https://hsm-dashboard-dev.web.app
 
 ## 1. Catalog concepts (portable)
 
-| Concept | Toolchain artefact | Consumer role (hsm-app) |
-|--------|-------------------|-------------------------|
-| **Project** | Multi-band environmental GeoTIFF (+ optional label patch JSON) | Shared **driver COG** and `environmental_band_definitions[]` on a catalog project |
-| **Model** | `{model_id}/` package + suitability prediction COG | One **species × activity** row: suitability COG, `ModelMetadata`, optional serialized estimator |
+A **project** is one regional or thematic study (shared environmental stack). **Models** are the individual species × activity surfaces users switch between on the map. Combined outputs (`all_predictions.tif`) are a toolchain convenience; the visualiser catalog holds **one suitability COG per model row** plus optional card metadata for citation and model cards.
+
+| Concept | Toolchain publishes | Visualiser (hsm-app) stores |
+|--------|---------------------|----------------------------|
+| **Project** | Multi-band environmental GeoTIFF (+ optional label patch JSON) | Shared **driver COG**, `environmental_band_definitions[]`, project page copy |
+| **Model** | `{model_id}/` package + `prediction_{model_id}.tif` | One catalog row per **species × activity**: suitability COG, `ModelMetadata` (metrics, title, feature list), optional pickle for point explainability |
 
 **CRS policy (hsm-app):** all **environmental** and **suitability** rasters accepted by the API must be **tiled Cloud Optimized GeoTIFFs in EPSG:3857**. Native toolchain outputs are usually **EPSG:27700** — reproject before upload (`sdm export-rasters`, see [§4](#4-prediction-rasters-suitability-cog)).
 
@@ -204,12 +208,15 @@ Pickle is environment-sensitive. Re-export or align Python/sklearn/elapid versio
 
 ---
 
-## 8. End-to-end checklist
+## 8. End-to-end checklist (records → maps)
 
-1. **`sdm train`** → `{model_id}/model.pkl` + `package.json` + `model_results.csv`
-2. **`sdm predict`** → `prediction_{model_id}.tif` (COG, project CRS)
-3. **`sdm export-rasters … --output-crs EPSG:3857 --cog`** → upload-ready COGs
-4. **Publish to hsm-app** (or hand off files): project driver COG + per-model suitability COG + `ModelMetadata` + optional pickle
+1. **Prepare** — occurrence GeoJSON, study boundary, environmental stack (`sdm setup`, `sdm data`, …)
+2. **`sdm train`** — one package per species × activity: `{model_id}/model.pkl` + `package.json`; index in `model_results.csv` (metrics for model cards / citations)
+3. **`sdm predict`** — `all_predictions.tif` (combined stack) and `prediction_{model_id}.tif` per model (COG, project CRS)
+4. **`sdm export-rasters … --output-crs EPSG:3857 --cog`** — web-map-ready COGs when the consumer requires Web Mercator
+5. **Publish to hsm-app** (or equivalent): project driver COG once, then each model’s suitability COG + `ModelMetadata` + optional pickle → appears in the public catalog and map UI
+
+Downstream users should be able to **identify which model they are viewing** (`species`, `activity`, `card` fields), **see suitability on the map**, and **reference training quality** (`metrics`, version) without access to this repository.
 
 ---
 

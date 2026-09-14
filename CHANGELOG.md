@@ -6,7 +6,7 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Added
 
-- [docs/model-package-contract.md](docs/model-package-contract.md) — portable model package and prediction COG contract, aligned with [hsm-app](https://github.com/MatthewJWhittle/hsm-app) OpenAPI.
+- [docs/model-package-contract.md](docs/model-package-contract.md) — portable publish contract (toolchain → visualiser), aligned with [hsm-app](https://github.com/MatthewJWhittle/hsm-app) OpenAPI; study-area/species agnostic framing.
 
 ### Changed
 
