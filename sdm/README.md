@@ -1,179 +1,87 @@
 # Species Distribution Modelling CLI
 
-A command-line interface for processing and modeling species distribution data. This tool provides a comprehensive set of commands for environmental variable processing, model training, and visualization.
-
-## Installation
-
-The CLI is part of the `sdm` package. Install it using pip:
+Command-line interface for environmental data preparation, model training, prediction, and export. Install from the repository root:
 
 ```bash
-pip install -e .
+uv sync   # or: pip install -e .
 ```
 
-## Available Commands
+## Commands
 
-### Data Preparation
+| Command | Purpose |
+|---------|---------|
+| `sdm setup` | Create the study boundary GeoJSON |
+| `sdm data` | Generate and merge all environmental variable layers |
+| `sdm background` | Generate background points for modelling |
+| `sdm train` | Train MaxEnt models and write model packages |
+| `sdm predict` | Apply trained models to the EV stack |
+| `sdm export-rasters` | Reproject and/or COG-wrap rasters for sharing |
+| `sdm visualize` | Partial dependence and related plots |
+| `sdm explain` | SHAP interpretability plots |
+| `sdm pipeline` | Run setup → data → train → predict → visualize |
+| `sdm tune` | Hyperparameter search with Optuna |
+| `sdm set-boundary` | Point `config.yml` at a boundary file |
+| `sdm set-occurrence` | Point `config.yml` at occurrence GeoJSON |
+| `sdm config` | Print current configuration |
 
-#### Boundary Creation
+Run `sdm COMMAND --help` for options.
+
+## Example workflow
+
 ```bash
-sdm boundary [OPTIONS]
-```
-Creates the study area boundary GeoJSON file by loading UK counties, filtering for a defined Yorkshire region, reprojecting, simplifying, and dissolving.
+# Study area
+sdm setup
 
-#### Background Points Generation
-```bash
-sdm background [OPTIONS]
-```
-Generates background points for species distribution modeling based on density-smoothed occurrence data.
+# Environmental variables (terrain, climate, land cover, coastal, OS, merge)
+sdm data
 
-#### Environmental Variables
+# Background points (optional)
+sdm background \
+  --occurrence-data-path data/processed/bats-tidy.geojson \
+  --boundary-path data/processed/boundary.geojson
 
-##### Terrain Data
-```bash
-sdm terrain [OPTIONS]
-```
-Downloads and processes DTM and DSM terrain data from EA WCS services.
+# Train
+sdm train \
+  --bats-file data/processed/bats-tidy.geojson \
+  --ev-file data/evs/evs-to-model.tif
 
-##### Climate Data
-```bash
-sdm climate [OPTIONS]
-```
-Downloads and processes climate data for the study area.
+# Predict (COG, project CRS from config.yml)
+sdm predict \
+  --ev-path data/evs/evs-to-model.tif \
+  --models-dir data/sdm_models
 
-##### Land Cover Data
-```bash
-sdm landcover [OPTIONS]
-```
-Processes CEH land cover data based on a given boundary.
+# Web Mercator bundles for visualisers
+sdm export-rasters data/sdm_predictions/prediction_*.tif \
+  -o exports/share --output-crs EPSG:3857 --cog
 
-##### Vegetation Object Model (VOM)
-```bash
-sdm vom [OPTIONS]
-```
-Downloads Vegetation Object Model (VOM) data and summarizes it to various metrics.
-
-##### Terrain Statistics
-```bash
-sdm terrain-stats [OPTIONS]
-```
-Calculates various terrain statistics from an input Digital Elevation Model (DEM).
-
-##### Coastal Distance
-```bash
-sdm coastal [OPTIONS]
-```
-Generates a coastal distance raster layer using BGS GeoCoast data.
-
-##### OS Data Processing
-```bash
-sdm os [OPTIONS]
-```
-Processes Ordnance Survey data to generate environmental variables.
-
-##### Merge Environmental Layers
-```bash
-sdm merge [OPTIONS]
-```
-Merges multiple raster datasets into a single multi-band GeoTIFF file.
-
-### Modeling
-
-#### Feature Extraction
-```bash
-sdm extract [OPTIONS]
-```
-Extracts environmental variable data for occurrence/background points and saves it as model-ready feature data.
-
-#### Model Training
-```bash
-sdm train [OPTIONS]
-```
-Runs the MaxEnt model training pipeline for species distribution modeling.
-
-#### Model Prediction
-```bash
-sdm predict [OPTIONS]
-```
-Generates predictions using trained SDM models. By default this writes **`all_predictions.tif`** (merged stack) and optional per-model **`prediction_*.tif`** files as **Cloud Optimized GeoTIFFs** in the **project CRS** from `config.yml` (typically EPSG:27700). Use **`--no-cog`** for legacy tiled/deflate GeoTIFFs and **`--prediction-crs`** when you need a different target CRS than the project default.
-
-#### Raster export (sharing / Web Mercator)
-```bash
-sdm export-rasters RASTER.tif... --output-dir DIR [OPTIONS]
-```
-Optional **CRS warp** and/or **COG** encoding for any GeoTIFF paths you pass (for example `data/sdm_predictions/all_predictions.tif` or a shell-expanded `prediction_*.tif` list). Use this when you need bundles for HSM (**EPSG:3857**) or plain redistribution without re-running **`sdm predict`**.
-
-### Visualization
-
-#### Model Outputs
-```bash
-sdm visualize [OPTIONS]
-```
-Generates visualizations (e.g., Partial Dependence Plots) for trained SDM models.
-
-## Common Options
-
-Most commands support these common options:
-
-- `--verbose`, `-v`: Enable verbose logging
-- `--help`: Show help message and exit
-
-## Example Workflow
-
-1. Create study boundary:
-```bash
-sdm boundary --output-geojson data/processed/boundary.geojson
+# Visualise
+sdm visualize \
+  --run-summary-path data/sdm_models/model_results.csv \
+  --ev-raster-path data/evs/evs-to-model.tif
 ```
 
-2. Generate background points:
-```bash
-sdm background --occurrence-data-path data/raw/bats.geojson --boundary-path data/processed/boundary.geojson
-```
+## Predict and export behaviour
 
-3. Process environmental variables:
-```bash
-sdm terrain --output-dir data/evs/terrain
-sdm climate --output-dir data/evs/climate
-sdm landcover --output-dir data/evs/landcover
-```
+**`sdm predict`** writes `all_predictions.tif` and, by default, per-model `prediction_{model_id}.tif` files. Outputs use the project CRS (`config.yml`, typically EPSG:27700) and are COG-encoded unless `--no-cog` is passed. Use `--prediction-crs` to change the output CRS.
 
-4. Merge environmental layers:
-```bash
-sdm merge --dataset-inputs "terrain=data/evs/terrain/terrain.tif" --dataset-inputs "climate=data/evs/climate/climate.tif"
-```
+**`sdm export-rasters`** is for secondary bundles: pass explicit GeoTIFF paths, optionally `--output-crs EPSG:3857` and/or `--cog`. At least one of reprojection or COG encoding must be requested.
 
-5. Train models:
-```bash
-sdm train --bats-file data/processed/bats-tidy.geojson --background-file data/processed/background-points.geojson
-```
+Model package layout and consumer expectations: [docs/model-package-contract.md](../docs/model-package-contract.md).
 
-6. Generate predictions:
-```bash
-sdm predict --ev-path data/evs/evs-to-model.tif --models-dir data/sdm_models
-```
+## Default paths
 
-7. Create visualizations:
-```bash
-sdm visualize --run-summary-path outputs/sdm_runs/sdm_run_summary.csv
-```
+From `config.yml`:
 
-## Configuration
+| Setting | Default |
+|---------|---------|
+| Boundary | `data/processed/boundary.geojson` |
+| Occurrence | `data/processed/bats-tidy.geojson` |
+| Environmental stack | `data/evs/evs-to-model.tif` |
+| Models | `data/sdm_models/` |
+| Predictions | `data/sdm_predictions/` |
 
-The CLI uses default paths for input and output files, but these can be overridden using command-line options. Common default paths include:
+## Adding commands
 
-- Boundary: `data/processed/boundary.geojson`
-- Environmental variables: `data/evs/`
-- Model outputs: `data/sdm_models/`
-- Predictions: `data/sdm_predictions/`
-- Visualizations: `outputs/sdm_visualisations/`
-
-## Contributing
-
-To add new commands or modify existing ones:
-
-1. Add your command function to the appropriate module in `sdm/commands/`
-2. Register the command in `sdm/cli.py`
-3. Update this README with documentation for your new command
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details. 
+1. Implement the command under `sdm/commands/`
+2. Register it in `sdm/cli.py`
+3. Document it in this file

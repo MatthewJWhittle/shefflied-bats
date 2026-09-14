@@ -33,7 +33,8 @@ jobs:
           
     - name: Test with pytest
       run: |
-        uv run pytest
+        # Exclude live WCS/integration tests — they depend on external services and flake in CI.
+        uv run pytest -m "not integration"
 
     - name: Lint with flake8
       run: |
