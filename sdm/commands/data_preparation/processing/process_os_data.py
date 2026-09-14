@@ -64,7 +64,7 @@ def process_os_data(
     # Load OS data
     datasets = ["Building", "Water", "Woodland", "Road"]
     parquet_paths = generate_parquets(
-        datasets, dir="data/raw/big-files/os-data", boundary=box(*bounds), overwrite=load_from_shp
+        datasets, boundary=box(*bounds), overwrite=load_from_shp
     )
     os_data = {
         name: gpd.read_parquet(path) for name, path in zip(datasets, parquet_paths)

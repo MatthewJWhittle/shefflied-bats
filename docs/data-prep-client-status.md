@@ -11,9 +11,9 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 
 | Finding | Detail |
 |--------|--------|
-| **CLI gap** | `sdm/README.md` and root `README.md` document granular commands (`sdm terrain`, `sdm landcover`, …) that are **not registered** in `sdm/cli.py`. Only **`sdm setup`** (boundary), **`sdm data`** (full EV pipeline), and **`sdm background`** expose data-prep today. |
+| **CLI gap** | **Resolved (docs-match-CLI).** Root `README.md` and `sdm/README.md` document only registered commands (`sdm setup`, `sdm data`, `sdm background`, modelling commands). Granular Python entry points remain callable from code/notebooks but are not separate Typer commands. |
 | **Live vs manual** | **4 live clients** (terrain DTM/DSM, VOM, climate/WorldClim, boundary from ONS file). **3 manual big-files** (CEH land cover, BGS GeoCoast, OS Vector Map). |
-| **Likely broken paths** | `sdm data` passes **directories** to `merge_ev_layers` for climate/landcover/vom; merge expects **file paths**. OS raw path is **`os-data`** in code vs **`os-vector-map`** in README. Climate **`run_stats=False`** in pipeline but `variables_config.yml` expects `climate_stats_*` bands. |
+| **Likely broken paths** | **Fixed:** `sdm data` now passes explicit `.tif` paths via `build_ev_dataset_inputs`. OS raw path aligned to **`os-vector-map`** (README + `load_os_shps`); parquet cache stays **`data/processed/os-data`**. **Open:** climate **`run_stats=False`** in pipeline but `variables_config.yml` expects `climate_stats_*` bands. |
 | **Orphans** | `ImageTileDownloader`, Sentinel/GEE helpers, legacy `merge_environmental_layers`, duplicate `ceh_processing.py` — not wired to CLI data-prep. |
 | **tilearray** | Not present in this repo. Custom `WCSDownloader` (async tiled WCS 2.0.1) covers the same surface area as a future **tilearray** integration for EA LiDAR/VOM WCS (and potentially WMS/WMTS elsewhere). |
 
@@ -58,8 +58,8 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 | **CEH land cover (LCM 2023)** | `sdm data` step 4/7 | UKCEH Global Land Cover 2023 10 m GeoTIFF | **Implemented** processing (clip, coarsen, aggregate habitats) | **Manual** — default `data/raw/big-files/CEH/data/7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif` | [UKCEH LCM](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) — EIDC GeoTIFF for modelling; WMS is view-only; **no AOI raster API**; non-commercial free / commercial licensed | `tests/test_generate_ceh_lc_data.py`, `tests/test_get_ceh_data.py` | **CEH licence** (research vs commercial); very large rasters; path is project-specific UUID folder |
 | **VOM (vegetation height)** | `sdm data` step 5/7 | EA Vegetation Object Model **WCS 2.0.1** | **Implemented** — WCS download + `summarise_raster_metrics` | **Live WCS** (no auth) | Already wired: [VOM WCS](https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs) | `tests/test_generate_vom_data.py` (mock + `@pytest.mark.integration`) | Coverage extent/resolution limits; async tile download load |
 | **Coastal distance** | `sdm data` step 6/7 | BGS GeoCoast **Authority Area Inundation** shapefile | **Implemented** — sea-zone polygon + distance raster | **Manual** — `data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp` | [BGS GeoCoast Open](https://www.bgs.ac.uk/datasets/geocoast-open/) + [MapServer](https://map.bgs.ac.uk/arcgis/rest/services/GeoCoast/GeoCoast_Open/MapServer) — REST live; confirm coastal in-scope | `tests/test_generate_coastal_distance.py` | Manual download; geometry processing sensitive to simplify/buffer params; **not an SLR scenario client** (uses inundation polygons for coastline geometry only) |
-| **OS feature cover & distance** | `sdm data` step 7/7 | OS Vector Map District shapefiles | **Implemented** — parquet cache, road split, rasterise cover/distances | **Manual** — code uses `data/raw/big-files/os-data`; README/`load_os_shps` default is `os-vector-map` | [OS Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) / [Data Hub OpenData](https://osdatahub.os.uk/downloads/open/VectorMapDistrict) — OpenData automatable **without** API key; not wired yet | `tests/test_process_os_data.py` (component unit tests) | **OS licence**; **path mismatch** likely breaks fresh checkout; no end-to-end OS integration test |
-| **Merge EV layers** | `sdm data` (final) | Prior step outputs | **Implemented** — reproject, merge, clip to boundary | N/A (orchestration) | N/A | `tests/test_merge_ev_layers.py` (mocked) | **`sdm data` passes dirs** (`evs/climate`, `evs/landcover`, `evs/vom`) but `load_and_preprocess_dataset` calls `rxr.open_rasterio(path)` on a **file**; likely fails for full pipeline |
+| **OS feature cover & distance** | `sdm data` step 7/7 | OS Vector Map District shapefiles | **Implemented** — parquet cache, road split, rasterise cover/distances | **Manual** — raw shapefiles `data/raw/big-files/os-vector-map`; parquet cache `data/processed/os-data` | [OS Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) / [Data Hub OpenData](https://osdatahub.os.uk/downloads/open/VectorMapDistrict) — OpenData automatable **without** API key; not wired yet | `tests/test_process_os_data.py` (component unit tests) | **OS licence**; no end-to-end OS integration test |
+| **Merge EV layers** | `sdm data` (final) | Prior step outputs | **Implemented** — reproject, merge, clip to boundary | N/A (orchestration) | N/A | `tests/test_merge_ev_layers.py` (mocked + `build_ev_dataset_inputs`) | **`sdm data` uses `build_ev_dataset_inputs`** — explicit `.tif` paths per layer |
 
 ### Utilities (not standalone CLI data-prep)
 
@@ -97,7 +97,7 @@ Config defaults (`config.yml`): CRS **EPSG:27700**, model grid resolution **100 
 | ONS counties boundary | `Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson` | [ONS Geoportal](https://geoportal.statistics.gov.uk/search?q=BDY_CTYUA%202024) |
 | CEH LCM 2023 | `CEH/data/.../gblcm2023_10m.tif` (UUID folder varies) | [UKCEH LCM](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) |
 | BGS GeoCoast | `BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp` | [BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/) |
-| OS Vector Map District | **`os-data/`** (code) vs **`os-vector-map/`** (README) | [OS VMD product page](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) |
+| OS Vector Map District | **`os-vector-map/`** (raw shapefiles); parquet cache **`data/processed/os-data/`** | [OS VMD product page](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) |
 
 Live caches (auto-created): `data/raw/worldclim/`, `data/processed/os-data/*.parquet`.
 
@@ -177,7 +177,7 @@ Deepen the “Public API feasibility” column for the **manual** sources. MaxEn
 
 ### Suggested wiring order
 
-1. **OS VectorMap** via Downloads API (no key) + fix `os-data` vs `os-vector-map` path drift.
+1. **OS VectorMap** via Downloads API (no key) — path drift fixed; live client still unwired.
 2. **ONS boundaries** via Open Geography Portal FeatureServer / download.
 3. Decide whether **GeoCoast** is in-scope for general toolchains (or coastal-only studies).
 4. Leave **CEH land cover** on EIDC / manual until the licence story is clear.
@@ -188,9 +188,9 @@ Do **not** put these vendor details in the stranger-facing README — this audit
 
 ## Recommended next steps (for Building discussion)
 
-1. **Register granular Typer commands** (`terrain`, `climate`, `landcover`, …) matching `sdm/README.md`, or update docs to reflect `sdm data` only.
-2. **Fix merge inputs** in `sdm data` — pass explicit `.tif` paths (or teach `merge_ev_layers` to expand directories / globs).
-3. **Align OS raw path** (`os-data` vs `os-vector-map`) and document parquet cache behaviour.
+1. ~~**Register granular Typer commands** or align docs~~ — **done:** docs match registered CLI (`sdm data` orchestrates all EV steps).
+2. ~~**Fix merge inputs** in `sdm data`~~ — **done:** `build_ev_dataset_inputs` in `merge_ev_layers.py`.
+3. ~~**Align OS raw path**~~ — **done:** raw `os-vector-map`, parquet cache `data/processed/os-data`.
 4. **Enable `run_stats=True`** in climate step (or drop `climate_stats_*` from `variables_config.yml` until generated).
 5. **Prioritise live API work** — OS Downloads + ONS portal first (see Public API notes above); keep EA WCS (terrain, VOM) + WorldClim; plan tilearray for shared WCS tiling; defer CEH automation pending licence.
 6. **Defer / isolate** GEE Sentinel and `ImageTileDownloader` until a clear EV use-case exists.

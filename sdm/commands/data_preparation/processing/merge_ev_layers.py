@@ -13,6 +13,24 @@ from sdm.utils.io import load_boundary_and_transform
 from sdm.utils.text_utils import tidy_variable_name
 from sdm.raster.utils import reproject_data, squeeze_dataset
 
+def build_ev_dataset_inputs(evs_dir: Path, resolution: int) -> List[str]:
+    """Build name=path merge inputs for standard ``sdm data`` pipeline outputs."""
+    evs_dir = Path(evs_dir)
+    climate_dir = evs_dir / "climate"
+    return [
+        f"terrain_stats={evs_dir / 'terrain_stats.tif'}",
+        f"climate_bio={climate_dir / 'bio.tif'}",
+        f"climate_tavg={climate_dir / 'tavg.tif'}",
+        f"climate_prec={climate_dir / 'prec.tif'}",
+        f"climate_wind={climate_dir / 'wind.tif'}",
+        f"landcover={evs_dir / 'landcover' / f'ceh-land-cover-{resolution}m.tif'}",
+        f"vom={evs_dir / 'vom' / f'vom_summary_metrics_{resolution}m.tif'}",
+        f"coastal={evs_dir / 'coastal_distance.tif'}",
+        f"os_cover={evs_dir / 'os-feature-cover.tif'}",
+        f"os_distance={evs_dir / 'os-distance-to-feature.tif'}",
+    ]
+
+
 def parse_dataset_input(dataset_inputs: List[str]) -> Dict[str, Path]:
     """Parses list of 'name=path' strings into a dict."""
     parsed_dict = {}
