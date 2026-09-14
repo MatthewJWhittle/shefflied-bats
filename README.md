@@ -1,24 +1,23 @@
 # Sheffield Bats — HSM toolchain
 
-Habitat suitability modelling (HSM) for bats — **reference implementation** for a Yorkshire / Sheffield study, built as a reusable toolchain for any species and study area.
+Reusable **habitat suitability modelling (HSM)** pipeline. Sheffield / Yorkshire bats are the reference study; the same command-line path works for other species and areas.
 
-This repository **publishes** models: environmental variables, MaxEnt training, prediction COGs, and versioned **model packages** (`model.pkl` + `package.json`). A separate app **visualises** them for regional users (online maps, combined species × activity layers, cite-able model metadata).
+This repo **trains and publishes** models. A separate app **maps** them.
 
-Visualiser: **[hsm-app](https://github.com/MatthewJWhittle/hsm-app)**. The boundary between repos is **portable artefacts** (pickle + JSON + GeoTIFF COGs), not shared code. See [docs/model-package-contract.md](docs/model-package-contract.md).
+| Piece | Role |
+|-------|------|
+| **This repo (`shefflied-bats`)** | Environmental layers → MaxEnt training → prediction rasters → versioned **model packages** |
+| **[hsm-app](https://github.com/MatthewJWhittle/hsm-app)** | Online maps, species × activity layers, cite-able model cards |
+
+They share **portable artefacts only** — not code. Each trained model is a small directory (`model.pkl` + `package.json`); map-ready surfaces are **Cloud Optimised GeoTIFFs (COGs)**. Contract: [docs/model-package-contract.md](docs/model-package-contract.md).
+
+Everything runs through the **`sdm` command-line interface (CLI)**.
 
 ## Quick start
 
-### Prerequisites
-
-- Python 3.11+
-- Git
-- ~20 GB disk space for local data and models
-- Access to external datasets where required (OS, CEH, BGS) — see [Required data sources](#required-data-sources)
-
-### Installation
+**You need:** Python 3.11+, Git, roughly 20 GB free for local data, and the external datasets listed under [Required data sources](#required-data-sources).
 
 ```bash
-# Install uv (recommended)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 git clone https://github.com/MatthewJWhittle/shefflied-bats.git
@@ -26,62 +25,46 @@ cd shefflied-bats
 uv sync
 ```
 
-### Basic workflow
+### Workflow
 
-All steps use the **`sdm` CLI**. Paths default from `config.yml` and can be overridden per command.
+Paths default from `config.yml` (override per command as needed).
 
 ```bash
-# 1. Create study boundary
-sdm setup
-
-# 2. Generate and merge environmental variables
-sdm data
-
-# 3. Generate background points (optional — training can generate these on the fly)
-sdm background
-
-# 4. Train models → one package directory per species × activity
-sdm train
-
-# 5. Predict suitability surfaces (COG, project CRS)
-sdm predict
-
-# 6. Export Web Mercator COGs for map visualisers (when needed)
+sdm setup          # study boundary
+sdm data           # build and merge environmental layers
+sdm background     # optional — training can create these on the fly
+sdm train          # one model package per species × activity
+sdm predict        # suitability surfaces (COG, project coordinate reference system)
 sdm export-rasters data/sdm_predictions/prediction_*.tif \
-  -o exports/share --output-crs EPSG:3857 --cog
+  -o exports/share --output-crs EPSG:3857 --cog   # Web Mercator COGs for map apps
 ```
 
-Run the full pipeline in one go:
+Or run data → train → predict → visualise plots in one go:
 
 ```bash
 sdm pipeline
 ```
 
-Command details: [sdm/README.md](sdm/README.md).
+Full command list: [sdm/README.md](sdm/README.md).
 
-## Model packages and predictions
+## What you get
 
-Training writes a **model package** per species × activity:
+**Model package** (per species × activity) under `data/sdm_models/{model_id}/`:
 
 ```
-data/sdm_models/{model_id}/
-├── model.pkl
-└── package.json
+model.pkl
+package.json   # schema_version 1, ordered feature_names, metrics, …
 ```
 
-Predictions land in `data/sdm_predictions/` as `all_predictions.tif` and, by default, per-model `prediction_{model_id}.tif` files.
+**Predictions** under `data/sdm_predictions/` — `all_predictions.tif` plus, by default, `prediction_{model_id}.tif` per model (project CRS from `config.yml`, usually British National Grid / EPSG:27700).
 
-For field definitions, CRS expectations, and EPSG:3857 export rules, see **[docs/model-package-contract.md](docs/model-package-contract.md)**.
-
-To publish into **hsm-app** (HTTP API), see **[docs/hsm-visualiser-integration.md](docs/hsm-visualiser-integration.md)**.
+**hsm-app** expects tiled **EPSG:3857** COGs for both the project environmental stack and each suitability surface. Use `sdm export-rasters` before upload. Field mapping and upload notes: [docs/hsm-visualiser-integration.md](docs/hsm-visualiser-integration.md).
 
 ## Configuration
 
-- **`config.yml`** — paths, CRS (default EPSG:27700), spatial grid, MLflow settings
-- **`model_config.yml`** / **`variables_config.yml`** — training and feature selection
+- `config.yml` — paths, CRS (default EPSG:27700), grid, MLflow
+- `model_config.yml` / `variables_config.yml` — training and features
 - Per-species overrides under `data/sdm_config/` and `data/sdm_tuning/`
-
-Inspect active settings:
 
 ```bash
 sdm config
@@ -89,7 +72,7 @@ sdm config
 
 ## Occurrence data
 
-Prepare occurrence records as GeoJSON at `data/processed/bats-tidy.geojson` (or set another path with `sdm set-occurrence`). Expected columns:
+GeoJSON at `data/processed/bats-tidy.geojson` (or point `config.yml` with `sdm set-occurrence`). Expected columns:
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -101,44 +84,38 @@ Prepare occurrence records as GeoJSON at `data/processed/bats-tidy.geojson` (or 
 | `accuracy` | float | Uncertainty in metres |
 | `geometry` | Point | Location in EPSG:27700 |
 
-## Project layout
+## Layout
 
 ```
 shefflied-bats/
 ├── config.yml
-├── data/                 # raw, processed, evs, models, predictions (mostly gitignored)
-├── docs/                 # integration guides and contracts
-├── sdm/                  # Python package and CLI
-├── scripts/              # small helper utilities
-├── notebooks/            # exploratory and publishing notebooks
+├── data/          # raw, processed, evs, models, predictions (mostly gitignored)
+├── docs/          # contracts and integration guides
+├── sdm/           # Python package + CLI
+├── scripts/
+├── notebooks/
 └── tests/
 ```
 
 ## Required data sources
 
-Large inputs are **not** committed. Download manually and place as below.
+Large inputs are **not** in git. Download and place as below.
 
 ### OS Vector Map District
 
-[OS Data Products](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) — tiles for your study area:
-
-`data/raw/big-files/os-vector-map`
+[OS Data Products](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) — study-area tiles → `data/raw/big-files/os-vector-map`
 
 ### CEH Land Cover
 
-[UKCEH Land Cover Maps](https://www.ceh.ac.uk/data/ukceh-land-cover-maps):
-
-`data/raw/big-files/CEH`
+[UKCEH Land Cover Maps](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) → `data/raw/big-files/CEH`
 
 ### BGS GeoCoast
 
-[BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/):
-
-`data/raw/big-files/BGS GeoCoast`
+[BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/) → `data/raw/big-files/BGS GeoCoast`
 
 ### Study boundary (Sheffield default)
 
-ONS boundary GeoJSON for county filtering in `sdm setup`:
+ONS counties / unitary authorities GeoJSON for `sdm setup`:
 
 `data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson`
 
@@ -150,8 +127,8 @@ Source: [ONS Geoportal — BDY_CTYUA](https://geoportal.statistics.gov.uk/search
 uv run pytest
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution notes.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT — [LICENSE](LICENSE).
