@@ -1,8 +1,8 @@
 # HSM Visualiser API — integration guide (Sheffield Bats)
 
-This document summarises how this repository’s outputs connect to the **HSM Visualiser** HTTP API: authentication, **environmental** (driver) COGs, **suitability** COGs per model, metadata (`feature_band_names`), and common pitfalls. It is written for modellers and tooling authors.
+This document summarises how this repository’s outputs connect to the **hsm-app** HTTP API ([MatthewJWhittle/hsm-app](https://github.com/MatthewJWhittle/hsm-app)): authentication, **environmental** (driver) COGs, **suitability** COGs per model, metadata (`feature_band_names`), and common pitfalls. OpenAPI: [`/api/openapi.json`](https://hsm-dashboard-dev.web.app/api/openapi.json).
 
-For the toolchain-agnostic artefact contract (model packages, prediction naming, CRS), see **[model-package-contract.md](model-package-contract.md)** first.
+For the portable artefact contract (model packages, prediction naming, CRS, hsm-app field mapping), see **[model-package-contract.md](model-package-contract.md)** first.
 
 **Assumptions**
 

@@ -6,7 +6,7 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Added
 
-- [docs/model-package-contract.md](docs/model-package-contract.md) — portable model package and prediction COG contract for any visualiser consumer.
+- [docs/model-package-contract.md](docs/model-package-contract.md) — portable model package and prediction COG contract, aligned with [hsm-app](https://github.com/MatthewJWhittle/hsm-app) OpenAPI.
 
 ### Changed
 

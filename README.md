@@ -2,7 +2,7 @@
 
 Species distribution modelling (SDM) for bat habitat suitability in Sheffield, UK. This repository is the **modelling toolchain**: it prepares environmental variables, trains MaxEnt models, and publishes **portable model packages** that any visualiser can consume.
 
-The companion web app is a separate project. The interface between them is **artefacts on disk** (pickle + JSON + GeoTIFF COGs), not shared code. See [docs/model-package-contract.md](docs/model-package-contract.md) for the publish contract.
+The visualiser is a separate project — **[hsm-app](https://github.com/MatthewJWhittle/hsm-app)**. The interface is **artefacts on disk** (pickle + JSON + GeoTIFF COGs), not shared code. See [docs/model-package-contract.md](docs/model-package-contract.md) for the publish contract and how hsm-app maps it.
 
 ## Quick start
 
@@ -71,7 +71,7 @@ Predictions land in `data/sdm_predictions/` as `all_predictions.tif` and, by def
 
 For field definitions, CRS expectations, and EPSG:3857 export rules, see **[docs/model-package-contract.md](docs/model-package-contract.md)**.
 
-To publish to the HSM Visualiser HTTP API (Sheffield reference deployment), see **[docs/hsm-visualiser-integration.md](docs/hsm-visualiser-integration.md)**.
+To publish into **hsm-app** (HTTP API), see **[docs/hsm-visualiser-integration.md](docs/hsm-visualiser-integration.md)**.
 
 ## Configuration
 
