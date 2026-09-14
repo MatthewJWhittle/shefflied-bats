@@ -114,11 +114,13 @@ export OS_DATA_HUB_KEY=your-key-here
 
 ### Study boundary (Sheffield default)
 
-ONS counties / unitary authorities GeoJSON for `sdm setup`:
+`sdm setup` downloads ONS counties / unitary authorities (BDY_CTYUA, December 2024 BFC) from the [Open Geography Portal](https://geoportal.statistics.gov.uk/) into `data/raw/ons-boundaries/` when no local file is present. No API key is required.
+
+Manual fallback (May 2023 vintage still supported):
 
 `data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson`
 
-Source: [ONS Geoportal — BDY_CTYUA](https://geoportal.statistics.gov.uk/search?q=BDY_CTYUA%202024&sort=Title%7Ctitle%7Casc)
+Disable live download with `sdm setup --no-live-download` when working fully offline.
 
 ## Development
 

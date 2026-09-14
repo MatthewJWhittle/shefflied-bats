@@ -12,7 +12,7 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 | Finding | Detail |
 |--------|--------|
 | **CLI gap** | **Resolved (docs-match-CLI).** Root `README.md` and `sdm/README.md` document only registered commands (`sdm setup`, `sdm data`, `sdm background`, modelling commands). Granular Python entry points remain callable from code/notebooks but are not separate Typer commands. |
-| **Live vs manual** | **5 live clients** (terrain DTM/DSM, VOM, climate/WorldClim, boundary from ONS file, **OS Vector Map District**). **2 manual big-files** (CEH land cover, BGS GeoCoast). OS VMD keeps manual drop as fallback. |
+| **Live vs manual** | **6 live clients** (terrain DTM/DSM, VOM, climate/WorldClim, **ONS boundaries**, **OS Vector Map District**). **2 manual big-files** (CEH land cover, BGS GeoCoast). ONS + OS VMD keep manual drops as fallback. |
 | **Likely broken paths** | **Fixed:** `sdm data` now passes explicit `.tif` paths via `build_ev_dataset_inputs`. OS raw path aligned to **`os-vector-map`** (README + `load_os_shps`); parquet cache stays **`data/processed/os-data`**. **Open:** climate **`run_stats=False`** in pipeline but `variables_config.yml` expects `climate_stats_*` bands. |
 | **Orphans** | `ImageTileDownloader`, Sentinel/GEE helpers, legacy `merge_environmental_layers`, duplicate `ceh_processing.py` — not wired to CLI data-prep. |
 | **tilearray** | Not present in this repo. Custom `WCSDownloader` (async tiled WCS 2.0.1) covers the same surface area as a future **tilearray** integration for EA LiDAR/VOM WCS (and potentially WMS/WMTS elsewhere). |
@@ -45,7 +45,7 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 
 | Client | CLI | Data source | Implementation | Live API vs manual | Public API feasibility | Tests | Risks |
 |--------|-----|-------------|----------------|--------------------|-------------------------|-------|-------|
-| **Study boundary** | `sdm setup` | ONS BDY_CTYUA counties GeoJSON | **Implemented** — filters Yorkshire CTYUA23NM, dissolve, simplify | **Manual** — `data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson` | [ONS Open Geography Portal](https://geoportal.statistics.gov.uk/) — FeatureServer/WFS/GeoJSON; no live client in repo yet (easy to wire) | `tests/test_boundary_simple.py` | Filename/column tied to May 2023 BFC product; docs say `sdm boundary` |
+| **Study boundary** | `sdm setup` | ONS BDY_CTYUA counties GeoJSON | **Implemented** — filters Yorkshire CTYUA names, dissolve, simplify | **Live** — FeatureServer fetch to `data/raw/ons-boundaries/`; **manual fallback** — May 2023 GeoJSON under `data/raw/big-files/` | [ONS Open Geography Portal](https://geoportal.statistics.gov.uk/) — December 2024 BFC FeatureServer (no auth) | `tests/test_boundary_simple.py`, `tests/test_ons_download.py` | CTYUA column varies by vintage (`CTYUA24NM` vs `CTYUA23NM`); legacy manual path still honoured |
 | **Background points** | `sdm background` | Bat occurrence GeoJSON + boundary | **Implemented** — density-smoothed sampling | N/A (derived) | N/A | `tests/test_generate_background_points.py`, `tests/test_sampling.py` | Depends on `paths.occurence_data` and boundary; not an external download client |
 
 ### Environmental variables (EV pipeline)
@@ -94,7 +94,7 @@ Config defaults (`config.yml`): CRS **EPSG:27700**, model grid resolution **100 
 
 | Dataset | Expected path (as in code / README) | Download |
 |---------|--------------------------------------|----------|
-| ONS counties boundary | `Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson` | [ONS Geoportal](https://geoportal.statistics.gov.uk/search?q=BDY_CTYUA%202024) |
+| ONS counties boundary | Live cache `data/raw/ons-boundaries/counties_unitary_authorities_dec2024_bfc.geojson`; manual fallback `data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson` | [ONS Geoportal — BDY_CTYUA Dec 2024](https://geoportal.statistics.gov.uk/) |
 | CEH LCM 2023 | `CEH/data/.../gblcm2023_10m.tif` (UUID folder varies) | [UKCEH LCM](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) |
 | BGS GeoCoast | `BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp` | [BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/) |
 | OS Vector Map District | **Live:** OS Downloads API → **`os-vector-map/<TILE>/`**; **manual:** flat `os-vector-map/`; parquet cache **`data/processed/os-data/`** | [OS VMD product page](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) / [Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) |
@@ -125,7 +125,7 @@ Live caches (auto-created): `data/raw/worldclim/`, `data/processed/os-data/*.par
 | Coastal | `test_generate_coastal_distance.py` | Mocked + fixture shapefiles |
 | OS | `test_process_os_data.py`, `test_os_download.py` | Mocked Downloads API; Skipton tile-resolution smoke |
 | Merge | `test_merge_ev_layers.py` | Mocked workflow |
-| Boundary | `test_boundary_simple.py` | Mocked counties file |
+| Boundary | `test_boundary_simple.py`, `test_ons_download.py` | Mocked + optional live ONS smoke |
 | Background | `test_generate_background_points.py` | Synthetic occurrence data |
 | Terrain stats algo | `test_terrain_stats.py`, `test_data_terrain_stats.py` | Pure numerical |
 
@@ -178,7 +178,7 @@ Deepen the “Public API feasibility” column for the **manual** sources. MaxEn
 ### Suggested wiring order
 
 1. ~~**OS VectorMap** via Downloads API (no key)~~ — **wired** (`sdm/data/os_download.py`; Skipton → tiles SD+SE). Smoke artifact: `docs/artifacts/skipton-os-vmd-smoke.json`.
-2. **ONS boundaries** via Open Geography Portal FeatureServer / download.
+2. ~~**ONS boundaries** via Open Geography Portal FeatureServer / download~~ — **done:** `sdm/data/ons_download.py`, cache `data/raw/ons-boundaries/`.
 3. Decide whether **GeoCoast** is in-scope for general toolchains (or coastal-only studies).
 4. Leave **CEH land cover** on EIDC / manual until the licence story is clear.
 

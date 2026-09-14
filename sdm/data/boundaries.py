@@ -4,14 +4,27 @@ import topojson as tp # type: ignore # Add type ignore if linter complains about
 from pathlib import Path # For path type hints if used for file paths
 from typing import Union, Optional # For type hints
 
-# Default path to the raw counties file, can be overridden
-UK_COUNTIES_FILE = Path("data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson")
+from sdm.data.ons_download import (
+    DEFAULT_CACHE_FILE,
+    LEGACY_MANUAL_FILE,
+    county_name_column,
+    resolve_counties_file,
+)
 
-def load_uk_counties_data(counties_filepath: Union[str, Path] = UK_COUNTIES_FILE) -> gpd.GeoDataFrame:
+# Default path prefers live cache, then legacy manual drop.
+UK_COUNTIES_FILE = DEFAULT_CACHE_FILE
+LEGACY_UK_COUNTIES_FILE = LEGACY_MANUAL_FILE
+
+def load_uk_counties_data(
+    counties_filepath: Union[str, Path] = UK_COUNTIES_FILE,
+    live_download: bool = True,
+) -> gpd.GeoDataFrame:
     """Loads the UK counties and unitary authorities GeoJSON file."""
-    if not Path(counties_filepath).exists():
-        raise FileNotFoundError(f"UK Counties file not found at: {counties_filepath}")
-    return gpd.read_file(counties_filepath)
+    resolved = resolve_counties_file(
+        Path(counties_filepath) if counties_filepath else None,
+        live_download=live_download,
+    )
+    return gpd.read_file(resolved)
 
 def load_south_yorkshire(counties_filepath: Union[str, Path] = UK_COUNTIES_FILE) -> gpd.GeoDataFrame:
     """
@@ -19,10 +32,11 @@ def load_south_yorkshire(counties_filepath: Union[str, Path] = UK_COUNTIES_FILE)
     Assumes the input GeoDataFrame has a 'CTYUA23NM' column.
     """
     counties_gdf = load_uk_counties_data(counties_filepath)
+    name_column = county_name_column(counties_gdf)
     south_yorkshire_names = ["Barnsley", "Doncaster", "Rotherham", "Sheffield"]
-    south_yorkshire_gdf = counties_gdf[counties_gdf["CTYUA23NM"].isin(south_yorkshire_names)].copy()
+    south_yorkshire_gdf = counties_gdf[counties_gdf[name_column].isin(south_yorkshire_names)].copy()
     if south_yorkshire_gdf.empty:
-        raise ValueError("No South Yorkshire counties found. Check CTYUA23NM column and names.")
+        raise ValueError(f"No South Yorkshire counties found. Check {name_column} column and names.")
     return south_yorkshire_gdf
 
 def load_yorkshire_study_area(
@@ -36,6 +50,7 @@ def load_yorkshire_study_area(
     Assumes the input GeoDataFrame has a 'CTYUA23NM' column.
     """
     uk_counties_gdf = load_uk_counties_data(counties_filepath)
+    name_column = county_name_column(uk_counties_gdf)
     
     county_subset_map = {
         "South Yorkshire": ["Barnsley", "Doncaster", "Rotherham", "Sheffield"],
@@ -51,18 +66,18 @@ def load_yorkshire_study_area(
     counties_df_list = []
     for region, names in county_subset_map.items():
         for name in names:
-            counties_df_list.append({"CTYUA23NM": name, "CountyRegion": region})
+            counties_df_list.append({name_column: name, "CountyRegion": region})
     region_mapping_df = pd.DataFrame(counties_df_list)
 
     # Merge with the GeoDataFrame of UK counties
-    study_area_gdf = uk_counties_gdf.merge(region_mapping_df, on="CTYUA23NM", how="inner")
+    study_area_gdf = uk_counties_gdf.merge(region_mapping_df, on=name_column, how="inner")
 
     if study_area_gdf.empty:
-        raise ValueError("Study area is empty after merging. Check CTYUA23NM column and names.")
+        raise ValueError(f"Study area is empty after merging. Check {name_column} column and names.")
 
-    # Verify that all expected CTYUA23NM names were found
-    expected_ctyua_names = set(region_mapping_df["CTYUA23NM"])
-    found_ctyua_names = set(study_area_gdf["CTYUA23NM"])
+    # Verify that all expected CTYUA names were found
+    expected_ctyua_names = set(region_mapping_df[name_column])
+    found_ctyua_names = set(study_area_gdf[name_column])
     missing_ctyua_from_map = expected_ctyua_names - found_ctyua_names
     if missing_ctyua_from_map:
         # This indicates that some names in county_subset_map were not found in the counties file

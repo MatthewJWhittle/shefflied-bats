@@ -24,6 +24,7 @@ app = typer.Typer(
 @app.command()
 def setup(
     counties_file: Optional[Path] = None,
+    live_download: bool = True,
     verbose: bool = False
 ) -> None:
     """Set up the project by creating the study boundary."""
@@ -32,13 +33,13 @@ def setup(
     setup_logging(verbose=verbose)
     
     boundary_path = Path(PROJECT_CONFIG.paths.boundary)
-    counties_path = counties_file or Path("data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson")
     
     boundary_gdf = create_boundary(
-        counties_file=counties_path,
+        counties_file=counties_file,
         county_names=None,  # Yorkshire default
         target_crs=PROJECT_CONFIG.crs,
-        simplify_tolerance=100.0
+        simplify_tolerance=100.0,
+        live_download=live_download,
     )
     
     boundary_path.parent.mkdir(parents=True, exist_ok=True)

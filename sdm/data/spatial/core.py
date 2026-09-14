@@ -8,31 +8,38 @@ from typing import Optional, List
 
 import geopandas as gpd
 
+from sdm.data.ons_download import county_name_column, resolve_counties_file
+
 logger = logging.getLogger(__name__)
 
 def create_boundary(
-    counties_file: Path,
+    counties_file: Optional[Path] = None,
     county_names: Optional[List[str]] = None,
     target_crs: str = "EPSG:27700",
-    simplify_tolerance: Optional[float] = 100.0
+    simplify_tolerance: Optional[float] = 100.0,
+    live_download: bool = True,
 ) -> gpd.GeoDataFrame:
     """
     Create a boundary from UK counties. If no counties specified, creates Yorkshire boundary.
     
     Args:
-        counties_file: Path to the UK counties GeoJSON file
+        counties_file: Path to the UK counties GeoJSON file (optional; live/manual fallback)
         county_names: List of county names (None for Yorkshire)
         target_crs: Target CRS for the output boundary
         simplify_tolerance: Simplification tolerance in meters (None for no simplification)
+        live_download: When True, fetch ONS boundaries from the Open Geography Portal if needed
         
     Returns:
         GeoDataFrame with the study boundary
     """
-    if not counties_file.exists():
-        raise FileNotFoundError(f"Counties file not found: {counties_file}")
+    resolved_counties_file = resolve_counties_file(
+        counties_file,
+        live_download=live_download,
+    )
     
-    logger.info(f"Loading counties data from: {counties_file}")
-    counties_gdf = gpd.read_file(counties_file)
+    logger.info(f"Loading counties data from: {resolved_counties_file}")
+    counties_gdf = gpd.read_file(resolved_counties_file)
+    name_column = county_name_column(counties_gdf)
     
     # Default to Yorkshire if no counties specified
     if county_names is None:
@@ -45,7 +52,7 @@ def create_boundary(
     
     # Filter to requested counties
     logger.info(f"Filtering to {len(county_names)} counties: {county_names}")
-    study_area = counties_gdf[counties_gdf["CTYUA23NM"].isin(county_names)].copy()
+    study_area = counties_gdf[counties_gdf[name_column].isin(county_names)].copy()
     
     if study_area.empty:
         raise ValueError(f"No counties found matching: {county_names}")
