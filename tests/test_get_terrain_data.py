@@ -5,6 +5,7 @@ from sdm.data.terrain import create_terrain_wcs_downloaders
 from sdm.commands.data_preparation.environmental.generate_terrain_data import generate_terrain_data
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_terrain_wcs_downloaders():
     """
@@ -46,6 +47,7 @@ def test_generate_terrain_data():
     assert 'buffer_distance_m' in sig.parameters
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_value_range():
     """Test that downloaded terrain data has reasonable elevation values."""
