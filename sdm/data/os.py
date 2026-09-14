@@ -1,14 +1,18 @@
 from pathlib import Path
 import logging
-from typing import Tuple, Union, List, Dict
+from typing import Tuple, Union, List, Dict, Optional
 
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import box, Polygon
 
+from sdm.data.os_download import ensure_os_vector_map_data
+
 def load_os_shps(
     datasets: List[str], 
-    dir: Union[str, Path] = "data/raw/big-files/os-vector-map"
+    dir: Union[str, Path] = "data/raw/big-files/os-vector-map",
+    bbox: Optional[Tuple[float, float, float, float]] = None,
+    live_download: bool = True,
 ) -> Dict[str, gpd.GeoDataFrame]:
     """Load Ordnance Survey shapefiles for specified datasets.
 
@@ -22,8 +26,16 @@ def load_os_shps(
     Raises:
         FileNotFoundError: If required shapefiles are not found.
     """
-    logging.info("Loading OS shapefiles from %s", dir)
     dir_path = Path(dir)
+    if live_download and bbox is not None:
+        ensure_os_vector_map_data(bbox, dir_path, datasets=datasets)
+    elif not any(dir_path.glob("**/*.shp")):
+        logging.warning(
+            "No OS shapefiles found under %s and live download was not requested",
+            dir_path,
+        )
+
+    logging.info("Loading OS shapefiles from %s", dir)
     datasets_shp = [f"**/*{keyword}*.shp" for keyword in datasets]
     dataset_files = [list(dir_path.glob(pattern)) for pattern in datasets_shp]
 
@@ -42,16 +54,20 @@ def load_os_shps(
 def generate_parquets(
     datasets: List[str],
     dir: str = "data/processed/os-data",
+    raw_dir: Union[str, Path] = "data/raw/big-files/os-vector-map",
     boundary: Union[Polygon, None] = None,
     overwrite: bool = False,
+    live_download: bool = True,
 ) -> List[Path]:
     """Generate parquet files for OS data.
     
     Args:
         datasets: List of dataset names to load and generate parquets for
         dir: Directory to save the parquets
+        raw_dir: Directory containing raw OS Vector Map shapefiles
         boundary: Boundary polygon with which to filter the data
         overwrite: Whether to overwrite existing files
+        live_download: Download missing tiles from the OS Downloads API when needed
         
     Returns:
         List of filepaths to requested parquet files
@@ -71,7 +87,13 @@ def generate_parquets(
             logging.info("All datasets have parquet files already")
             return requested_paths
 
-    shps = load_os_shps(datasets)
+    bbox = boundary.bounds if boundary is not None else None
+    shps = load_os_shps(
+        datasets,
+        dir=raw_dir,
+        bbox=bbox,
+        live_download=live_download,
+    )
 
     if boundary:
         logging.info("Filtering data to boundary")
