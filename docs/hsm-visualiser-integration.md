@@ -2,6 +2,8 @@
 
 This document summarises how this repository’s outputs connect to the **HSM Visualiser** HTTP API: authentication, **environmental** (driver) COGs, **suitability** COGs per model, metadata (`feature_band_names`), and common pitfalls. It is written for modellers and tooling authors.
 
+For the toolchain-agnostic artefact contract (model packages, prediction naming, CRS), see **[model-package-contract.md](model-package-contract.md)** first.
+
 **Assumptions**
 
 - API base URL is configurable (e.g. `http://127.0.0.1:8000` in development).
