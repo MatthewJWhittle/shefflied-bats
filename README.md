@@ -1,21 +1,12 @@
 # Sheffield Bats — HSM toolchain
 
-Reusable **habitat suitability modelling (HSM)** pipeline. Sheffield / Yorkshire bats are the reference study; the same command-line path works for other species and areas.
+Reusable **habitat suitability modelling (HSM)** pipeline driven by the **`sdm` command-line interface (CLI)**. The Sheffield bats study is a **reference run**; the same path works for other species and areas.
 
-This repo **trains and publishes** models. A separate app **maps** them.
-
-| Piece | Role |
-|-------|------|
-| **This repo (`shefflied-bats`)** | Environmental layers → MaxEnt training → prediction rasters → versioned **model packages** |
-| **[hsm-app](https://github.com/MatthewJWhittle/hsm-app)** | Online maps, species × activity layers, cite-able model cards |
-
-They share **portable artefacts only** — not code. Each trained model is a small directory (`model.pkl` + `package.json`); map-ready surfaces are **Cloud Optimised GeoTIFFs (COGs)**. Contract: [docs/model-package-contract.md](docs/model-package-contract.md).
-
-Everything runs through the **`sdm` command-line interface (CLI)**.
+You get environmental layers, MaxEnt training, prediction rasters, and versioned **model packages** you can keep local or hand to whatever downstream tool you use. Package layout and raster expectations: [docs/model-package-contract.md](docs/model-package-contract.md).
 
 ## Quick start
 
-**You need:** Python 3.11+, Git, roughly 20 GB free for local data, and the external datasets listed under [Required data sources](#required-data-sources).
+**You need:** Python 3.11+, Git, roughly 20 GB free for local data, and the external datasets listed under [Required data sources](#required-data-sources) (what this reference run uses).
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -30,16 +21,16 @@ uv sync
 Paths default from `config.yml` (override per command as needed).
 
 ```bash
-sdm setup          # study boundary
+sdm setup          # study boundary (separate from pipeline)
 sdm data           # build and merge environmental layers
 sdm background     # optional — training can create these on the fly
 sdm train          # one model package per species × activity
-sdm predict        # suitability surfaces (COG, project coordinate reference system)
+sdm predict        # suitability surfaces (Cloud Optimised GeoTIFF / COG, project coordinate reference system / CRS)
 sdm export-rasters data/sdm_predictions/prediction_*.tif \
-  -o exports/share --output-crs EPSG:3857 --cog   # Web Mercator COGs for map apps
+  -o exports/share --output-crs EPSG:3857 --cog   # Web Mercator COGs when sharing with map tools
 ```
 
-Or run data → train → predict → visualise plots in one go:
+Or run data → train → predict → visualise in one go (after `sdm setup`):
 
 ```bash
 sdm pipeline
@@ -56,9 +47,9 @@ model.pkl
 package.json   # schema_version 1, ordered feature_names, metrics, …
 ```
 
-**Predictions** under `data/sdm_predictions/` — `all_predictions.tif` plus, by default, `prediction_{model_id}.tif` per model (project CRS from `config.yml`, usually British National Grid / EPSG:27700).
+**Predictions** under `data/sdm_predictions/` — `all_predictions.tif` plus, by default, `prediction_{model_id}.tif` per model (project CRS from `config.yml`, usually British National Grid / EPSG:27700). `sdm predict` emits COGs in the project CRS by default.
 
-**hsm-app** expects tiled **EPSG:3857** COGs for both the project environmental stack and each suitability surface. Use `sdm export-rasters` before upload. Field mapping and upload notes: [docs/hsm-visualiser-integration.md](docs/hsm-visualiser-integration.md).
+**Sharing:** when a consumer needs **Web Mercator (EPSG:3857)** tiled COGs — for example a web map or HTTP upload workflow — use `sdm export-rasters` on prediction rasters (and, if needed, the environmental stack). Package layout, band naming, and CRS rules: [docs/model-package-contract.md](docs/model-package-contract.md). Optional HTTP upload and visualiser notes: [docs/hsm-visualiser-integration.md](docs/hsm-visualiser-integration.md).
 
 ## Configuration
 
@@ -99,7 +90,7 @@ shefflied-bats/
 
 ## Required data sources
 
-Large inputs are **not** in git. Download and place as below.
+Large inputs are **not** in git. Download and place as below for the Sheffield / Yorkshire reference run.
 
 ### OS Vector Map District
 
