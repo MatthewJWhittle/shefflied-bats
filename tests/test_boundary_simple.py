@@ -18,11 +18,14 @@ class TestCreateBoundary:
         """Test that FileNotFoundError is raised when counties file doesn't exist."""
         non_existent_file = Path("non_existent.geojson")
         
-        with pytest.raises(FileNotFoundError, match="Counties file not found"):
-            create_boundary(
-                counties_file=non_existent_file,
-                county_names=["Test County"]
-            )
+        with patch("sdm.data.spatial.core.resolve_counties_file") as resolve_mock:
+            resolve_mock.side_effect = FileNotFoundError("Counties file not found: non_existent.geojson")
+            with pytest.raises(FileNotFoundError, match="Counties file not found"):
+                create_boundary(
+                    counties_file=non_existent_file,
+                    county_names=["Test County"],
+                    live_download=False,
+                )
     
     def test_yorkshire_default(self):
         """Test that Yorkshire boundary is created by default."""
@@ -37,9 +40,9 @@ class TestCreateBoundary:
             ]
         }, crs="EPSG:4326")
         
-        with patch.object(Path, 'exists', return_value=True):
+        with patch("sdm.data.spatial.core.resolve_counties_file", return_value=mock_file):
             with patch('geopandas.read_file', return_value=mock_gdf):
-                result = create_boundary(counties_file=mock_file)
+                result = create_boundary(counties_file=mock_file, live_download=False)
         
         assert len(result) == 1  # Dissolved into single boundary
         assert 'geometry' in result.columns
@@ -78,10 +81,11 @@ class TestCreateBoundary:
             ]
         })
         
-        with patch.object(Path, 'exists', return_value=True):
+        with patch("sdm.data.spatial.core.resolve_counties_file", return_value=mock_file):
             with patch('geopandas.read_file', return_value=mock_gdf):
                 with pytest.raises(ValueError, match="No counties found matching"):
                     create_boundary(
                         counties_file=mock_file,
-                        county_names=["NonExistentCounty"]
+                        county_names=["NonExistentCounty"],
+                        live_download=False,
                     )

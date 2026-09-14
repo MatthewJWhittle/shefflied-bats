@@ -8,10 +8,11 @@ from sdm.data.spatial import create_boundary
 from sdm.utils.logging_utils import setup_logging
 
 def create_study_boundary_wrapper(
-    raw_counties_file: Path = Path("data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson"),
+    raw_counties_file: Optional[Path] = None,
     output_geojson: Path = Path("data/processed/boundary.geojson"),
     target_crs: str = "EPSG:27700",
     simplify_tolerance: Optional[float] = 100.0,
+    live_download: bool = True,
     verbose: bool = False
 ) -> Path:
     """
@@ -23,7 +24,8 @@ def create_study_boundary_wrapper(
         counties_file=raw_counties_file,
         county_names=None,  # Default to Yorkshire
         target_crs=target_crs,
-        simplify_tolerance=simplify_tolerance
+        simplify_tolerance=simplify_tolerance,
+        live_download=live_download,
     )
 
     output_geojson.parent.mkdir(parents=True, exist_ok=True)

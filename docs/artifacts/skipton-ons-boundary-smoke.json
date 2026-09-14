@@ -1,0 +1,12 @@
+{
+  "county_for_skipton": "North Yorkshire",
+  "smoke_counties": [
+    "Sheffield",
+    "North Yorkshire"
+  ],
+  "feature_server_query": "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/Counties_and_Unitary_Authorities_December_2024_Boundaries_UK_BFC/FeatureServer/0/query",
+  "default_cache_file": "data/raw/ons-boundaries/counties_unitary_authorities_dec2024_bfc.geojson",
+  "legacy_manual_file": "data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson",
+  "auth_required": false,
+  "north_yorkshire_feature_count": 1
+}
