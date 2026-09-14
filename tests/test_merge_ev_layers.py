@@ -9,9 +9,27 @@ from pathlib import Path
 from unittest.mock import patch, Mock
 
 from sdm.commands.data_preparation.processing.merge_ev_layers import (
+    build_ev_dataset_inputs,
     parse_dataset_input,
     merge_ev_layers
 )
+
+
+class TestBuildEvDatasetInputs:
+    """Test merge input paths for the sdm data pipeline."""
+
+    def test_build_ev_dataset_inputs_use_files_not_directories(self):
+        evs_dir = Path("data/evs")
+        inputs = build_ev_dataset_inputs(evs_dir, resolution=100)
+        parsed = parse_dataset_input(inputs)
+
+        assert len(parsed) == 10
+        for name, path in parsed.items():
+            assert path.suffix == ".tif", f"{name} should point to a GeoTIFF, got {path}"
+
+        assert parsed["landcover"] == evs_dir / "landcover" / "ceh-land-cover-100m.tif"
+        assert parsed["vom"] == evs_dir / "vom" / "vom_summary_metrics_100m.tif"
+        assert parsed["climate_bio"] == evs_dir / "climate" / "bio.tif"
 
 
 class TestParseDatasetInput:

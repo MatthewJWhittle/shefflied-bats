@@ -57,7 +57,10 @@ def data(
     from sdm.commands.data_preparation.spatial.generate_coastal_distance import generate_coastal_distance
     from sdm.commands.data_preparation.processing.process_os_data import process_os_data
     from sdm.commands.data_preparation.environmental.generate_terrain_stats import generate_terrain_stats
-    from sdm.commands.data_preparation.processing.merge_ev_layers import merge_ev_layers
+    from sdm.commands.data_preparation.processing.merge_ev_layers import (
+        build_ev_dataset_inputs,
+        merge_ev_layers,
+    )
     
     setup_logging(verbose=verbose)
     
@@ -131,15 +134,9 @@ def data(
     # Merge all layers
     logging.info("Merging all environmental layers...")
     merge_ev_layers(
-        dataset_inputs=[
-            "terrain_stats=evs/terrain_stats.tif",
-            "climate=evs/climate",
-            "landcover=evs/landcover",
-            "vom=evs/vom",
-            "coastal=evs/coastal_distance.tif",
-            "os_cover=evs/os-feature-cover.tif",
-            "os_distance=evs/os-distance-to-feature.tif"
-        ],
+        dataset_inputs=build_ev_dataset_inputs(
+            evs_dir, PROJECT_CONFIG.spatial.resolution
+        ),
         boundary_path=boundary_path,
         output_path=Path(PROJECT_CONFIG.paths.ev_tiff),
         verbose=verbose
