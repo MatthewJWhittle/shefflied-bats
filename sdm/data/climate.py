@@ -8,6 +8,8 @@ from pathlib import Path
 import xarray as xr
 import geopandas as gpd
 
+from sdm.raster.utils import reproject_data
+
 from .loaders import ClimateData
 
 def fetch_worldclim_datasets(
@@ -40,10 +42,11 @@ def reproject_climate_datasets(
     
     for var, data in datasets.items():
         try:
-            reprojected[var] = data.rio.reproject(
-                dst_crs=target_crs,
+            reprojected[var] = reproject_data(
+                data,
+                crs=target_crs,
                 transform=target_transform,
-                resolution=target_resolution
+                resolution=target_resolution,
             )
         except Exception as e:
             print(f"Error reprojecting {var}: {e}")

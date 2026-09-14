@@ -57,6 +57,6 @@ class ClimateData:
             raise ValueError(f"Expected DataArray from {cache_path}, got {type(data)}")
         
         if aoi is not None:
-            data = data.rio.clip(aoi.geometry, aoi.crs)
+            data = data.rio.clip(list(aoi.geometry.values), crs=aoi.crs)
             
         return data 
