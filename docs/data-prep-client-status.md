@@ -12,7 +12,7 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 | Finding | Detail |
 |--------|--------|
 | **CLI gap** | **Resolved (docs-match-CLI).** Root `README.md` and `sdm/README.md` document only registered commands (`sdm setup`, `sdm data`, `sdm background`, modelling commands). Granular Python entry points remain callable from code/notebooks but are not separate Typer commands. |
-| **Live vs manual** | **6 live clients** (terrain DTM/DSM, VOM, climate/WorldClim, **ONS boundaries**, **OS Vector Map District**). **2 manual big-files** (CEH land cover, BGS GeoCoast). ONS + OS VMD keep manual drops as fallback. |
+| **Live vs manual** | **7 live clients** (terrain DTM/DSM, VOM, climate/WorldClim, **ONS boundaries**, **OS Vector Map District**, **OS Boundary-Line coastline**). **2 manual big-files** (CEH land cover, BGS GeoCoast optional). ONS + OS VMD + Boundary-Line keep manual drops as fallback. |
 | **Likely broken paths** | **Fixed:** `sdm data` now passes explicit `.tif` paths via `build_ev_dataset_inputs`. OS raw path aligned to **`os-vector-map`** (README + `load_os_shps`); parquet cache stays **`data/processed/os-data`**. **Open:** climate **`run_stats=False`** in pipeline but `variables_config.yml` expects `climate_stats_*` bands. |
 | **Orphans** | `ImageTileDownloader`, Sentinel/GEE helpers, legacy `merge_environmental_layers`, duplicate `ceh_processing.py` — not wired to CLI data-prep. |
 | **tilearray** | Not present in this repo. Custom `WCSDownloader` (async tiled WCS 2.0.1) covers the same surface area as a future **tilearray** integration for EA LiDAR/VOM WCS (and potentially WMS/WMTS elsewhere). |
@@ -57,7 +57,7 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 | **Climate (WorldClim 2.1)** | `sdm data` step 3/7 | `https://geodata.ucdavis.edu/climate/worldclim/2_1/tiles/iso/GBR_wc2.1_30s_{var}.tif` | **Implemented** — `ClimateData` download + cache + clip/reproject | **Live HTTPS** (no auth) | Already wired; cache dir `data/raw/worldclim` | `tests/test_generate_climate_data.py` | **`run_stats=False` in pipeline** but models expect `climate_stats_*` in `variables_config.yml`; 30s (~1 km) source reprojected to 100 m |
 | **CEH land cover (LCM 2023)** | `sdm data` step 4/7 | UKCEH Global Land Cover 2023 10 m GeoTIFF | **Implemented** processing (clip, coarsen, aggregate habitats) | **Manual** — default `data/raw/big-files/CEH/data/7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif` | [UKCEH LCM](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) — EIDC GeoTIFF for modelling; WMS is view-only; **no AOI raster API**; non-commercial free / commercial licensed | `tests/test_generate_ceh_lc_data.py`, `tests/test_get_ceh_data.py` | **CEH licence** (research vs commercial); very large rasters; path is project-specific UUID folder |
 | **VOM (vegetation height)** | `sdm data` step 5/7 | EA Vegetation Object Model **WCS 2.0.1** | **Implemented** — WCS download + `summarise_raster_metrics` | **Live WCS** (no auth) | Already wired: [VOM WCS](https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs) | `tests/test_generate_vom_data.py` (mock + `@pytest.mark.integration`) | Coverage extent/resolution limits; async tile download load |
-| **Coastal distance** | `sdm data` step 6/7 | BGS GeoCoast **Authority Area Inundation** shapefile | **Implemented** — sea-zone polygon + distance raster | **Manual** — `data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp` | [BGS GeoCoast Open](https://www.bgs.ac.uk/datasets/geocoast-open/) + [MapServer](https://map.bgs.ac.uk/arcgis/rest/services/GeoCoast/GeoCoast_Open/MapServer) — REST live; confirm coastal in-scope | `tests/test_generate_coastal_distance.py` | Manual download; geometry processing sensitive to simplify/buffer params; **not an SLR scenario client** (uses inundation polygons for coastline geometry only) |
+| **Coastal distance** | `sdm data` step 6/7 | **OS Boundary-Line** `high_water_polyline` (CODE `0071` MHW) | **Implemented** — MHW polyline distance raster (Britain-wide) | **Live + manual fallback** — OS Downloads API → `data/raw/boundary-line/`; optional BGS GeoCoast manual; OSM Overpass bbox fallback on download failure | [OS Boundary-Line OpenData](https://osdatahub.os.uk/data/downloads/open/BoundaryLine) via [Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) (no auth); [BGS GeoCoast](https://www.bgs.ac.uk/datasets/geocoast-open/) optional manual | `tests/test_generate_coastal_distance.py`, `tests/test_coastline_download.py` | GB zip ~700 MB; full GB MHW used for inland AOIs; BGS sea-zone path retained for explicit manual override; **not an SLR scenario client** |
 | **OS feature cover & distance** | `sdm data` step 7/7 | OS Vector Map District shapefiles | **Implemented** — live download via `sdm/data/os_download.py`, parquet cache, road split, rasterise cover/distances | **Live + manual fallback** — OS Downloads API → `data/raw/big-files/os-vector-map/<TILE>/`; parquet cache `data/processed/os-data` | [OS Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) — OpenData **without** API key; optional `OS_DATA_HUB_KEY` for premium packages | `tests/test_process_os_data.py`, `tests/test_os_download.py` (mocked HTTP + tile resolution) | **OS licence**; Skipton AOI (~3 km) spans tiles **SD+SE** (~190 MB zipped) |
 | **Merge EV layers** | `sdm data` (final) | Prior step outputs | **Implemented** — reproject, merge, clip to boundary | N/A (orchestration) | N/A | `tests/test_merge_ev_layers.py` (mocked + `build_ev_dataset_inputs`) | **`sdm data` uses `build_ev_dataset_inputs`** — explicit `.tif` paths per layer |
 
@@ -96,10 +96,11 @@ Config defaults (`config.yml`): CRS **EPSG:27700**, model grid resolution **100 
 |---------|--------------------------------------|----------|
 | ONS counties boundary | Live cache `data/raw/ons-boundaries/counties_unitary_authorities_dec2024_bfc.geojson`; manual fallback `data/raw/big-files/Counties_and_Unitary_Authorities_May_2023_UK_BFC_7858717830545248014.geojson` | [ONS Geoportal — BDY_CTYUA Dec 2024](https://geoportal.statistics.gov.uk/) |
 | CEH LCM 2023 | `CEH/data/.../gblcm2023_10m.tif` (UUID folder varies) | [UKCEH LCM](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) |
-| BGS GeoCoast | `BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp` | [BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/) |
+| OS Boundary-Line MHW | Live cache `data/raw/boundary-line/high_water_polyline.shp` | [OS Boundary-Line OpenData](https://osdatahub.os.uk/data/downloads/open/BoundaryLine) |
+| BGS GeoCoast (optional) | `BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp` | [BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/) |
 | OS Vector Map District | **Live:** OS Downloads API → **`os-vector-map/<TILE>/`**; **manual:** flat `os-vector-map/`; parquet cache **`data/processed/os-data/`** | [OS VMD product page](https://www.ordnancesurvey.co.uk/products/os-vectormap-district) / [Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) |
 
-Live caches (auto-created): `data/raw/worldclim/`, `data/processed/os-data/*.parquet`.
+Live caches (auto-created): `data/raw/worldclim/`, `data/raw/boundary-line/`, `data/processed/os-data/*.parquet`.
 
 ---
 
@@ -122,7 +123,7 @@ Live caches (auto-created): `data/raw/worldclim/`, `data/processed/os-data/*.par
 | VOM WCS | `test_generate_vom_data.py` | Yes — optional real WCS tests |
 | Climate | `test_generate_climate_data.py` | Mostly unit; live download not CI-gated |
 | CEH LC | `test_generate_ceh_lc_data.py`, `test_get_ceh_data.py` | Synthetic rasters |
-| Coastal | `test_generate_coastal_distance.py` | Mocked + fixture shapefiles |
+| Coastal | `test_generate_coastal_distance.py`, `test_coastline_download.py` | Mocked Downloads API + fixture shapefiles; Whitby smoke artifact |
 | OS | `test_process_os_data.py`, `test_os_download.py` | Mocked Downloads API; Skipton tile-resolution smoke |
 | Merge | `test_merge_ev_layers.py` | Mocked workflow |
 | Boundary | `test_boundary_simple.py`, `test_ons_download.py` | Mocked + optional live ONS smoke |
@@ -161,12 +162,22 @@ Deepen the “Public API feasibility” column for the **manual** sources. MaxEn
 - **Licence:** Open Government Licence; datasets often also carry OS intellectual-property acknowledgment — follow the portal citation for the chosen vintage.
 - **Use:** Replace the hard-coded May 2023 counties GeoJSON path with a live or version-pinned portal fetch.
 
-#### BGS GeoCoast Open — **medium; confirm in-scope**
+#### OS Boundary-Line coastline — **wired (live default)**
+
+- **Endpoint:** OS Downloads API — `https://api.os.uk/downloads/v1/products/BoundaryLine/downloads?area=GB&format=ESRI%C2%AE%20Shapefile` (one GB zip, not tile soup).
+- **Layer:** `high_water_polyline`; filter `CODE` `0071` (mean high water / springs).
+- **Auth:** None for OpenData.
+- **Licence:** Open Government Licence; acknowledge OS.
+- **Cache:** `data/raw/boundary-line/` (extracts MHW layer only).
+- **Fallback:** OSM Overpass coastline (bbox-scoped) if Boundary-Line download fails; BGS GeoCoast manual optional for coastal-specific jobs.
+- **Smoke artifact:** `docs/artifacts/whitby-coastline-smoke.json`.
+
+#### BGS GeoCoast Open — **manual optional (coastal-specific)**
 
 - **Endpoint:** ArcGIS REST MapServer — `https://map.bgs.ac.uk/arcgis/rest/services/GeoCoast/GeoCoast_Open/MapServer` (query / GeoJSON); bulk download from [BGS GeoCoast Open](https://www.bgs.ac.uk/datasets/geocoast-open/).
 - **Auth:** None for open layers.
 - **Licence:** Open Government Licence; acknowledge BGS © UKRI.
-- **Caveat:** This is a **coastal** product (inundation / erosion domains). Confirm the inland Sheffield reference run still needs it before investing in a live client; the current coastal-distance step uses inundation polygons as a coastline proxy only.
+- **Use:** Optional manual override via explicit `coastline_path=` for coastal inundation studies; default pipeline uses Boundary-Line MHW.
 
 #### UKCEH Land Cover Map — **hardest (keep EIDC / manual for now)**
 
@@ -179,8 +190,9 @@ Deepen the “Public API feasibility” column for the **manual** sources. MaxEn
 
 1. ~~**OS VectorMap** via Downloads API (no key)~~ — **wired** (`sdm/data/os_download.py`; Skipton → tiles SD+SE). Smoke artifact: `docs/artifacts/skipton-os-vmd-smoke.json`.
 2. ~~**ONS boundaries** via Open Geography Portal FeatureServer / download~~ — **done:** `sdm/data/ons_download.py`, cache `data/raw/ons-boundaries/`.
-3. Decide whether **GeoCoast** is in-scope for general toolchains (or coastal-only studies).
-4. Leave **CEH land cover** on EIDC / manual until the licence story is clear.
+3. ~~**Boundary-Line coastline** via Downloads API~~ — **wired** (`sdm/data/coastline_download.py`; Whitby smoke artifact).
+4. **GeoCoast** retained as optional manual override for coastal-specific studies only.
+5. Leave **CEH land cover** on EIDC / manual until the licence story is clear.
 
 Do **not** put these vendor details in the stranger-facing README — this audit is the right home.
 
@@ -207,7 +219,7 @@ Do **not** put these vendor details in the stranger-facing README — this audit
 | Climate | `commands/.../generate_climate_data.py` | `data/loaders/climate.py`, `data/climate.py` |
 | Land cover | `commands/.../generate_ceh_lc_data.py` | `data/landcover.py` |
 | VOM | `commands/.../generate_vom_data.py` | `WCSDownloader` (shared) |
-| Coastal | `commands/.../generate_coastal_distance.py` | — |
+| Coastal | `commands/.../generate_coastal_distance.py` | `data/coastline_download.py` |
 | OS | `commands/.../process_os_data.py` | `data/os.py`, `data/os_download.py` |
 | Merge | `commands/.../merge_ev_layers.py` | — |
 | Background | `commands/.../generate_background_points.py` | `occurrence/sampling.py` |

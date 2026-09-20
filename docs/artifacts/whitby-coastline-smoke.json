@@ -1,0 +1,32 @@
+{
+  "aoi_bbox_osgb": [
+    480000,
+    510000,
+    490000,
+    520000
+  ],
+  "product_id": "BoundaryLine",
+  "layer": "high_water_polyline",
+  "mhw_code": "0071",
+  "api_base": "https://api.os.uk/downloads/v1",
+  "download_url": "https://api.os.uk/downloads/v1/products/BoundaryLine/downloads?area=GB&format=ESRI%C2%AE%20Shapefile",
+  "auth_required_for_opendata": false,
+  "licence": "Open Government Licence",
+  "cache_dir": "data/raw/boundary-line",
+  "manual_bgs_fallback": "data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp",
+  "osm_fallback": "Overpass API (bbox-scoped) when Boundary-Line download fails",
+  "smoke_results": {
+    "whitby": {
+      "min_m": 1.0201421219355065,
+      "max_m": 14129.462394535758,
+      "mean_m": 5017.625344661215,
+      "valid_pixels": 53508
+    },
+    "skipton": {
+      "min_m": 39125.445227273,
+      "max_m": 53814.49185454137,
+      "mean_m": 47208.48289960972,
+      "valid_pixels": 24878
+    }
+  }
+}

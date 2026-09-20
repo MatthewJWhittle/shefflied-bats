@@ -7,13 +7,14 @@ import numpy as np
 import geopandas as gpd
 import xarray as xr
 from pathlib import Path
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 from unittest.mock import Mock, patch
 
 from sdm.commands.data_preparation.spatial.generate_coastal_distance import (
+    build_distance_target_geometry,
     load_and_process_coast_data,
     create_sea_zone_polygon,
-    generate_coastal_distance
+    generate_coastal_distance,
 )
 from sdm.raster.processing import calculate_distance_to_geom as calculate_coastal_distance
 
@@ -177,11 +178,13 @@ class TestGenerateCoastalDistance:
     @patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.calculate_coastal_distance')
     @patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.reproject_data')
     @patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.squeeze_dataset')
+    @patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.resolve_coastline_source')
     def test_generate_coastal_distance_success(
-        self, mock_squeeze, mock_reproject, mock_calc_distance, 
+        self, mock_resolve, mock_squeeze, mock_reproject, mock_calc_distance, 
         mock_load_boundary, temp_coast_file, temp_boundary_file, tmp_path
     ):
         """Test successful coastal distance generation."""
+        mock_resolve.return_value = (temp_coast_file, "bgs_geocoast")
         # Mock the dependencies
         mock_boundary = gpd.GeoDataFrame({'geometry': [Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])]}, crs="EPSG:27700")
         mock_transform = Mock()
@@ -207,8 +210,9 @@ class TestGenerateCoastalDistance:
         result = generate_coastal_distance(
             boundary_path=temp_boundary_file,
             output_dir=output_dir,
-            bgs_geocoast_shp_path=temp_coast_file,
-            verbose=False
+            coastline_path=temp_coast_file,
+            live_download=False,
+            verbose=False,
         )
         
         # Verify the result
@@ -223,17 +227,25 @@ class TestGenerateCoastalDistance:
         mock_squeeze.assert_called_once()
         # Note: to_raster call is verified by the function completing successfully
     
-    def test_generate_coastal_distance_file_not_found(self, temp_boundary_file, tmp_path):
+    @patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.resolve_coastline_source')
+    def test_generate_coastal_distance_file_not_found(
+        self, mock_resolve, temp_boundary_file, tmp_path
+    ):
         """Test error handling when coast file doesn't exist."""
+        mock_resolve.side_effect = FileNotFoundError("No coastline source found")
         with pytest.raises(FileNotFoundError):
             generate_coastal_distance(
                 boundary_path=temp_boundary_file,
                 output_dir=tmp_path / "output",
-                bgs_geocoast_shp_path=Path("nonexistent_file.shp")
+                live_download=False,
             )
     
-    def test_generate_coastal_distance_creates_output_dir(self, temp_coast_file, temp_boundary_file, tmp_path):
+    @patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.resolve_coastline_source')
+    def test_generate_coastal_distance_creates_output_dir(
+        self, mock_resolve, temp_coast_file, temp_boundary_file, tmp_path
+    ):
         """Test that output directory is created if it doesn't exist."""
+        mock_resolve.return_value = (temp_coast_file, "bgs_geocoast")
         output_dir = tmp_path / "nonexistent" / "output"
         
         with patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.load_boundary_and_transform') as mock_load, \
@@ -258,12 +270,39 @@ class TestGenerateCoastalDistance:
             generate_coastal_distance(
                 boundary_path=temp_boundary_file,
                 output_dir=output_dir,
-                bgs_geocoast_shp_path=temp_coast_file
+                coastline_path=temp_coast_file,
+                live_download=False,
             )
             
             # Verify output directory was created
             assert output_dir.exists()
             assert output_dir.is_dir()
+
+
+class TestBuildDistanceTargetGeometry:
+    """Test polyline vs polygon distance target construction."""
+
+    def test_polyline_source_uses_union_all(self, sample_coast_data):
+        polyline_gdf = gpd.GeoDataFrame(
+            {"CODE": ["0071"]},
+            geometry=[LineString([(0, 0), (100, 0)])],
+            crs="EPSG:27700",
+        )
+        result = build_distance_target_geometry(
+            polyline_gdf,
+            use_polyline_source=True,
+        )
+        assert result.geom_type in ("LineString", "MultiLineString")
+
+    def test_polygon_source_uses_sea_zone(self, sample_coast_data):
+        processed = sample_coast_data.dissolve()
+        result = build_distance_target_geometry(
+            processed,
+            use_polyline_source=False,
+            buffer_dist_km_for_sea=1.0,
+            min_sea_area_km2=0.001,
+        )
+        assert result.area > 0
 
 
 class TestIntegration:
