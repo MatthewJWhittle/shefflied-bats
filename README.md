@@ -108,9 +108,13 @@ export OS_DATA_HUB_KEY=your-key-here
 
 [UKCEH Land Cover Maps](https://www.ceh.ac.uk/data/ukceh-land-cover-maps) → `data/raw/big-files/CEH`
 
-### BGS GeoCoast
+### Coastal distance (Boundary-Line)
 
-[BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/) → `data/raw/big-files/BGS GeoCoast`
+**Live (default):** `sdm data` step 6 downloads OS [Boundary-Line](https://osdatahub.os.uk/data/downloads/open/BoundaryLine) mean high water polylines (`high_water_polyline`, CODE `0071`) from the [OS Downloads API](https://docs.os.uk/os-apis/accessing-os-apis/os-downloads-api) (OpenData — no API key). One GB zip is cached under `data/raw/boundary-line/`.
+
+**Manual optional (coastal-specific):** [BGS GeoCoast Open](https://www.bgs.ac.uk/download/bgs-geocoast-open/) → `data/raw/big-files/BGS GeoCoast` — pass explicitly via `coastline_path=` when needed.
+
+Disable live download with `sdm data --no-live-download` when working fully offline (uses cached Boundary-Line or BGS manual drop if present).
 
 ### Study boundary (Sheffield default)
 

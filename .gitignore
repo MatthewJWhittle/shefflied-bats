@@ -164,6 +164,7 @@ cython_debug/
 # Big Files
 data/raw/big-files/*
 data/raw/ons-boundaries/*
+data/raw/boundary-line/*
 test/data/test_cache/*
 
 

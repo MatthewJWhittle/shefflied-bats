@@ -48,7 +48,8 @@ def setup(
 
 @app.command()
 def data(
-    verbose: bool = False
+    live_download: bool = True,
+    verbose: bool = False,
 ) -> None:
     """Generate all environmental data layers."""
     from sdm.commands.data_preparation.environmental.generate_terrain_data import generate_terrain_data
@@ -119,8 +120,8 @@ def data(
     generate_coastal_distance(
         boundary_path=boundary_path,
         output_dir=evs_dir,
-        bgs_geocoast_shp_path=Path("data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp"),
-        verbose=verbose
+        live_download=live_download,
+        verbose=verbose,
     )
     
     # 7. OS data
@@ -499,7 +500,7 @@ def pipeline(
     # Run all steps
     if generate_background:
         background(verbose=verbose)
-    data(verbose=verbose)
+    data(live_download=True, verbose=verbose)
     train(species=species, activity_types=activity_types, verbose=verbose)
     predict(species=species, activity_types=activity_types, verbose=verbose)
     visualize(species=species, activity_types=activity_types, verbose=verbose)
