@@ -24,10 +24,19 @@ class TestBuildEvDatasetInputs:
         parsed = parse_dataset_input(inputs)
 
         assert len(parsed) == 10
+
+    def test_build_ev_dataset_inputs_skip_ceh_and_coastal(self):
+        evs_dir = Path("data/evs")
+        inputs = build_ev_dataset_inputs(
+            evs_dir, resolution=100, skip_ceh=True, skip_coastal=True
+        )
+        parsed = parse_dataset_input(inputs)
+        assert len(parsed) == 8
+        assert "landcover" not in parsed
+        assert "coastal" not in parsed
         for name, path in parsed.items():
             assert path.suffix == ".tif", f"{name} should point to a GeoTIFF, got {path}"
 
-        assert parsed["landcover"] == evs_dir / "landcover" / "ceh-land-cover-100m.tif"
         assert parsed["vom"] == evs_dir / "vom" / "vom_summary_metrics_100m.tif"
         assert parsed["climate_bio"] == evs_dir / "climate" / "bio.tif"
 

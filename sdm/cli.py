@@ -49,6 +49,16 @@ def setup(
 @app.command()
 def data(
     live_download: bool = True,
+    skip_ceh: bool = typer.Option(
+        False,
+        "--skip-ceh",
+        help="Skip CEH land cover (manual GeoTIFF). Use for live-source smoke tests.",
+    ),
+    skip_coastal: bool = typer.Option(
+        False,
+        "--skip-coastal",
+        help="Skip coastal distance layer. Use for live-source smoke tests.",
+    ),
     verbose: bool = False,
 ) -> None:
     """Generate all environmental data layers."""
@@ -98,13 +108,16 @@ def data(
     )
     
     # 4. Land cover data
-    logging.info("4/7: Processing land cover data...")
-    generate_ceh_lc_data(
-        output_dir=evs_dir / "landcover",
-        boundary_path=boundary_path,
-        ceh_data_path=Path("data/raw/big-files/CEH/data/7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif"),
-        verbose=verbose
-    )
+    if skip_ceh:
+        logging.info("4/7: Skipping CEH land cover (--skip-ceh)")
+    else:
+        logging.info("4/7: Processing land cover data...")
+        generate_ceh_lc_data(
+            output_dir=evs_dir / "landcover",
+            boundary_path=boundary_path,
+            ceh_data_path=Path("data/raw/big-files/CEH/data/7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif"),
+            verbose=verbose
+        )
     
     # 5. VOM data
     logging.info("5/7: Downloading VOM data...")
@@ -116,13 +129,16 @@ def data(
     )
     
     # 6. Coastal distance
-    logging.info("6/7: Calculating coastal distance...")
-    generate_coastal_distance(
-        boundary_path=boundary_path,
-        output_dir=evs_dir,
-        live_download=live_download,
-        verbose=verbose,
-    )
+    if skip_coastal:
+        logging.info("6/7: Skipping coastal distance (--skip-coastal)")
+    else:
+        logging.info("6/7: Calculating coastal distance...")
+        generate_coastal_distance(
+            boundary_path=boundary_path,
+            output_dir=evs_dir,
+            live_download=live_download,
+            verbose=verbose,
+        )
     
     # 7. OS data
     logging.info("7/7: Processing OS data...")
@@ -137,7 +153,10 @@ def data(
     logging.info("Merging all environmental layers...")
     merge_ev_layers(
         dataset_inputs=build_ev_dataset_inputs(
-            evs_dir, PROJECT_CONFIG.spatial.resolution
+            evs_dir,
+            PROJECT_CONFIG.spatial.resolution,
+            skip_ceh=skip_ceh,
+            skip_coastal=skip_coastal,
         ),
         boundary_path=boundary_path,
         output_path=Path(PROJECT_CONFIG.paths.ev_tiff),

@@ -8,7 +8,11 @@ from typing import Optional, List
 
 import geopandas as gpd
 
-from sdm.data.ons_download import county_name_column, resolve_counties_file
+from sdm.data.ons_download import (
+    DEFAULT_YORKSHIRE_COUNTY_NAMES,
+    county_name_column,
+    resolve_counties_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +36,18 @@ def create_boundary(
     Returns:
         GeoDataFrame with the study boundary
     """
+    if county_names is None:
+        county_names = list(DEFAULT_YORKSHIRE_COUNTY_NAMES)
+
     resolved_counties_file = resolve_counties_file(
         counties_file,
         live_download=live_download,
+        county_names=county_names,
     )
     
     logger.info(f"Loading counties data from: {resolved_counties_file}")
     counties_gdf = gpd.read_file(resolved_counties_file)
     name_column = county_name_column(counties_gdf)
-    
-    # Default to Yorkshire if no counties specified
-    if county_names is None:
-        county_names = [
-            "Barnsley", "Doncaster", "Rotherham", "Sheffield",
-            "Bradford", "Calderdale", "Kirklees", "Leeds", "Wakefield",
-            "North Yorkshire", "York",
-            "East Riding of Yorkshire", "Kingston upon Hull, City of"
-        ]
     
     # Filter to requested counties
     logger.info(f"Filtering to {len(county_names)} counties: {county_names}")
