@@ -13,22 +13,38 @@ from sdm.utils.io import load_boundary_and_transform
 from sdm.utils.text_utils import tidy_variable_name
 from sdm.raster.utils import reproject_data, squeeze_dataset
 
-def build_ev_dataset_inputs(evs_dir: Path, resolution: int) -> List[str]:
+def build_ev_dataset_inputs(
+    evs_dir: Path,
+    resolution: int,
+    *,
+    skip_ceh: bool = False,
+    skip_coastal: bool = False,
+) -> List[str]:
     """Build name=path merge inputs for standard ``sdm data`` pipeline outputs."""
     evs_dir = Path(evs_dir)
     climate_dir = evs_dir / "climate"
-    return [
+    inputs = [
         f"terrain_stats={evs_dir / 'terrain_stats.tif'}",
         f"climate_bio={climate_dir / 'bio.tif'}",
         f"climate_tavg={climate_dir / 'tavg.tif'}",
         f"climate_prec={climate_dir / 'prec.tif'}",
         f"climate_wind={climate_dir / 'wind.tif'}",
-        f"landcover={evs_dir / 'landcover' / f'ceh-land-cover-{resolution}m.tif'}",
         f"vom={evs_dir / 'vom' / f'vom_summary_metrics_{resolution}m.tif'}",
-        f"coastal={evs_dir / 'coastal_distance.tif'}",
         f"os_cover={evs_dir / 'os-feature-cover.tif'}",
         f"os_distance={evs_dir / 'os-distance-to-feature.tif'}",
     ]
+    if not skip_ceh:
+        inputs.insert(
+            5,
+            f"landcover={evs_dir / 'landcover' / f'ceh-land-cover-{resolution}m.tif'}",
+        )
+    if not skip_coastal:
+        insert_at = 6 if skip_ceh else 7
+        inputs.insert(
+            insert_at,
+            f"coastal={evs_dir / 'coastal_distance.tif'}",
+        )
+    return inputs
 
 
 def parse_dataset_input(dataset_inputs: List[str]) -> Dict[str, Path]:
@@ -68,7 +84,8 @@ def load_and_preprocess_dataset(dataset_name: str, dataset_path: Path) -> xr.Dat
         raise RuntimeError(f"Failed to open dataset '{dataset_name}' from {dataset_path}: {e}") from e
 
     # Rename variables based on original band descriptions or to a consistent format
-    rename_map = {}
+    rename_map: dict[str, str] = {}
+    used_names: set[str] = set()
     for var_original_name in list(data.data_vars):
         band_description = data[var_original_name].attrs.get("long_name", var_original_name)
         new_var_name = tidy_variable_name(f"{dataset_name}_{band_description}")
@@ -76,9 +93,11 @@ def load_and_preprocess_dataset(dataset_name: str, dataset_path: Path) -> xr.Dat
             new_var_name = tidy_variable_name(f"{dataset_name}_{var_original_name}")
         elif len(data.data_vars) == 1:
             new_var_name = dataset_name
-        
+        if new_var_name in used_names:
+            new_var_name = tidy_variable_name(f"{new_var_name}_{var_original_name}")
+        used_names.add(new_var_name)
         rename_map[var_original_name] = new_var_name
-    
+
     data = data.rename(rename_map)
 
     # Convert to float32 and handle nodata

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import geopandas as gpd
 import requests
+from requests.exceptions import HTTPError
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,40 @@ SKIPTON_COUNTY_NAME = "North Yorkshire"
 YORKSHIRE_SMOKE_COUNTIES = ("Sheffield", SKIPTON_COUNTY_NAME)
 
 COUNTY_NAME_COLUMNS = ("CTYUA24NM", "CTYUA23NM", "CTYUA22NM")
+
+# Default Yorkshire CTYUA names used by ``create_boundary`` when ``county_names`` is None.
+DEFAULT_YORKSHIRE_COUNTY_NAMES: tuple[str, ...] = (
+    "Barnsley",
+    "Doncaster",
+    "Rotherham",
+    "Sheffield",
+    "Bradford",
+    "Calderdale",
+    "Kirklees",
+    "Leeds",
+    "Wakefield",
+    "North Yorkshire",
+    "York",
+    "East Riding of Yorkshire",
+    "Kingston upon Hull, City of",
+)
+
+RETRYABLE_HTTP_STATUS = {502, 503, 504}
+DEFAULT_QUERY_PAGE_SIZE = 500
+DEFAULT_QUERY_MAX_RETRIES = 4
+DEFAULT_QUERY_RETRY_BACKOFF_S = 5.0
+
+
+def counties_where_clause(
+    county_names: Sequence[str],
+    name_column: str = COUNTY_NAME_COLUMNS[0],
+) -> str:
+    """Build a FeatureServer ``where`` clause for an explicit list of CTYUA names."""
+    if not county_names:
+        raise ValueError("county_names must not be empty")
+    escaped = [name.replace("'", "''") for name in county_names]
+    joined = ", ".join(f"'{name}'" for name in escaped)
+    return f"{name_column} IN ({joined})"
 
 
 def county_name_column(gdf: gpd.GeoDataFrame) -> str:
@@ -64,7 +100,9 @@ class ONSBoundariesClient:
         where: str = "1=1",
         out_fields: str = "*",
         out_sr: int = 4326,
-        page_size: int = 2000,
+        page_size: int = DEFAULT_QUERY_PAGE_SIZE,
+        max_retries: int = DEFAULT_QUERY_MAX_RETRIES,
+        retry_backoff_s: float = DEFAULT_QUERY_RETRY_BACKOFF_S,
     ) -> dict:
         """Fetch GeoJSON features, paginating when the service transfer limit applies."""
         features: list[dict] = []
@@ -80,8 +118,11 @@ class ONSBoundariesClient:
                 "resultOffset": offset,
                 "resultRecordCount": page_size,
             }
-            response = self.session.get(self.query_url, params=params, timeout=120)
-            response.raise_for_status()
+            response = self._get_with_retries(
+                params,
+                max_retries=max_retries,
+                retry_backoff_s=retry_backoff_s,
+            )
             payload = response.json()
 
             if "error" in payload:
@@ -102,25 +143,58 @@ class ONSBoundariesClient:
             result["crs"] = crs
         return result
 
+    def _get_with_retries(
+        self,
+        params: dict,
+        *,
+        max_retries: int,
+        retry_backoff_s: float,
+    ) -> requests.Response:
+        last_error: Optional[HTTPError] = None
+        for attempt in range(max_retries):
+            response = self.session.get(self.query_url, params=params, timeout=120)
+            try:
+                response.raise_for_status()
+                return response
+            except HTTPError as exc:
+                last_error = exc
+                status = exc.response.status_code if exc.response is not None else None
+                if status not in RETRYABLE_HTTP_STATUS or attempt >= max_retries - 1:
+                    raise
+                wait_s = retry_backoff_s * (2**attempt)
+                logger.warning(
+                    "ONS FeatureServer returned HTTP %s; retrying in %.1fs (attempt %d/%d)",
+                    status,
+                    wait_s,
+                    attempt + 1,
+                    max_retries,
+                )
+                time.sleep(wait_s)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("ONS FeatureServer request failed without an HTTP error")
+
     def download_counties_geojson(
         self,
         output_path: Path,
         *,
+        where: str = "1=1",
         overwrite: bool = False,
     ) -> Path:
-        """Download the full UK counties / unitary authorities layer to GeoJSON."""
+        """Download counties / unitary authorities GeoJSON from the FeatureServer."""
         output_path = Path(output_path)
         if output_path.exists() and not overwrite:
             logger.info("Using cached ONS counties GeoJSON at %s", output_path)
             return output_path
 
         logger.info(
-            "Downloading ONS %s from %s to %s",
+            "Downloading ONS %s from %s to %s (where=%s)",
             PRODUCT_ID,
             self.query_url,
             output_path,
+            where,
         )
-        payload = self.query_geojson()
+        payload = self.query_geojson(where=where)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle)
@@ -139,6 +213,7 @@ def resolve_counties_file(
     cache_file: Path = DEFAULT_CACHE_FILE,
     live_download: bool = True,
     overwrite: bool = False,
+    county_names: Optional[Sequence[str]] = None,
     client: Optional[ONSBoundariesClient] = None,
 ) -> Path:
     """Resolve a counties GeoJSON path, preferring explicit/manual paths then live cache.
@@ -173,4 +248,22 @@ def resolve_counties_file(
         )
 
     downloader = client or ONSBoundariesClient()
-    return downloader.download_counties_geojson(cache_path, overwrite=overwrite)
+    try:
+        return downloader.download_counties_geojson(cache_path, overwrite=overwrite)
+    except HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        fallback_names = tuple(county_names or DEFAULT_YORKSHIRE_COUNTY_NAMES)
+        if status not in RETRYABLE_HTTP_STATUS or not fallback_names:
+            raise
+        logger.warning(
+            "Full-UK ONS counties download failed with HTTP %s; "
+            "falling back to filtered query for %d CTYUAs",
+            status,
+            len(fallback_names),
+        )
+        where = counties_where_clause(fallback_names)
+        return downloader.download_counties_geojson(
+            cache_path,
+            where=where,
+            overwrite=True,
+        )

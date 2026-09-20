@@ -10,13 +10,17 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Polygon, box
 
+from requests.exceptions import HTTPError
+
 from sdm.data.ons_download import (
     DEFAULT_CACHE_FILE,
+    DEFAULT_YORKSHIRE_COUNTY_NAMES,
     LEGACY_MANUAL_FILE,
     ONSBoundariesClient,
     QUERY_URL,
     SKIPTON_COUNTY_NAME,
     YORKSHIRE_SMOKE_COUNTIES,
+    counties_where_clause,
     county_name_column,
     resolve_counties_file,
 )
@@ -110,6 +114,39 @@ def test_resolve_counties_file_uses_legacy_manual_drop(tmp_path: Path) -> None:
         resolved = resolve_counties_file(live_download=False)
 
     assert resolved == manual
+
+
+def test_counties_where_clause_escapes_quotes() -> None:
+    clause = counties_where_clause(["Kingston upon Hull, City of"])
+    assert "Kingston upon Hull, City of" in clause
+    assert clause.startswith("CTYUA24NM IN (")
+
+
+def test_resolve_counties_file_falls_back_to_yorkshire_on_gateway_timeout(
+    tmp_path: Path,
+) -> None:
+    cache_file = tmp_path / "ons" / "counties.geojson"
+    response = MagicMock()
+    response.status_code = 504
+    full_uk_error = HTTPError(response=response)
+    fallback_path = cache_file
+
+    with patch("sdm.data.ons_download.LEGACY_MANUAL_FILE", tmp_path / "missing.geojson"), patch.object(
+        ONSBoundariesClient,
+        "download_counties_geojson",
+        side_effect=[full_uk_error, fallback_path],
+    ) as download_mock:
+        resolved = resolve_counties_file(
+            cache_file=cache_file,
+            live_download=True,
+            county_names=DEFAULT_YORKSHIRE_COUNTY_NAMES,
+        )
+
+    assert resolved == fallback_path
+    assert download_mock.call_count == 2
+    fallback_call = download_mock.call_args_list[1]
+    assert "where=" in str(fallback_call)
+    assert fallback_call.kwargs.get("overwrite") is True
 
 
 def test_resolve_counties_file_downloads_when_missing(tmp_path: Path) -> None:
