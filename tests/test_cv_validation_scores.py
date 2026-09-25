@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
+
+import elapid as ela
 import numpy as np
 import geopandas as gpd
 import pandas as pd
@@ -13,6 +16,10 @@ from sklearn.dummy import DummyClassifier
 from sdm.models.maxent.maxent_model import (
     cross_validate_maxent_model,
     evaluate_and_train_maxent_model,
+)
+
+_GEOGRAPHIC_KFOLD_SUPPORTS_RANDOM_STATE = (
+    "random_state" in inspect.signature(ela.GeographicKFold.__init__).parameters
 )
 
 
@@ -109,6 +116,10 @@ class TestCollectCvValidationScores:
             for point_idx in fold_scores["point_index"]:
                 assert point_idx not in trained_on
 
+    @pytest.mark.skipif(
+        not _GEOGRAPHIC_KFOLD_SUPPORTS_RANDOM_STATE,
+        reason="elapid<1.0.4 does not support GeographicKFold random_state",
+    )
     def test_geographic_kfold_is_seeded(
         self,
         occurrence_gdf: gpd.GeoDataFrame,

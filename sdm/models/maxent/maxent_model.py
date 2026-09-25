@@ -1,4 +1,5 @@
 # Core MaxEnt (Elapid-based) model training, evaluation, and prediction logic.
+import inspect
 import warnings
 import logging
 from typing import List, Tuple, Optional, Callable, Any, Union, Dict
@@ -190,6 +191,19 @@ def extract_split_data(
     return X, y, weights
 
 
+def _geographic_kfold(n_splits: int, random_state: Optional[int]) -> ela.GeographicKFold:
+    """Construct ``GeographicKFold``, passing ``random_state`` when elapid supports it."""
+    params: Dict[str, Any] = {"n_splits": n_splits}
+    if "random_state" in inspect.signature(ela.GeographicKFold.__init__).parameters:
+        params["random_state"] = random_state
+    elif random_state is not None:
+        logger.warning(
+            "Installed elapid does not support GeographicKFold random_state; "
+            "fold assignment may be non-deterministic. Upgrade elapid>=1.0.4."
+        )
+    return ela.GeographicKFold(**params)
+
+
 def _maxent_fit_params(model: BaseEstimator, w_train: Optional[pd.Series]) -> Dict[str, Any]:
     """Build sample-weight fit params for a MaxEnt model or pipeline."""
     fit_params: Dict[str, Any] = {}
@@ -231,7 +245,7 @@ def cross_validate_maxent_model(
         ``validation_scores`` is ``None`` unless ``collect_validation_scores`` is True.
         Note: trained_models_per_fold may contain None values for failed folds.
     """
-    gfolds = ela.GeographicKFold(n_splits=n_folds, random_state=random_state)
+    gfolds = _geographic_kfold(n_folds, random_state)
         
     fold_metrics = []
     trained_models = []

@@ -916,8 +916,9 @@ def save_models(
 
     Layout per species–activity (filesystem-safe ``model_id`` from ``get_model_id``)::
 
-        {output_dir}/{model_id}/model.pkl      — fitted sklearn pipeline
-        {output_dir}/{model_id}/package.json — feature list, MaxEnt params, CV metrics, counts
+        {output_dir}/{model_id}/model.pkl                  — fitted sklearn pipeline
+        {output_dir}/{model_id}/validation_scores.parquet  — held-out CV scores per point
+        {output_dir}/{model_id}/package.json               — feature list, MaxEnt params, CV metrics, counts
 
     Args:
         models: Training results (only entries with ``final_model`` are written).
