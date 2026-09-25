@@ -38,6 +38,7 @@ Each trained species × activity model is a **directory**:
 ├── model_results.csv              # index (recommended)
 └── {model_id}/
     ├── model.pkl                  # required — fitted sklearn/elapid pipeline
+    ├── validation_scores.parquet  # held-out CV scores (written by ``sdm train``)
     └── package.json               # required — metadata and feature manifest
 ```
 
@@ -84,7 +85,9 @@ Written by `sdm train`. Key columns:
 | Field | Type | Description |
 |-------|------|-------------|
 | `maxent_config` | object | Serialised MaxEnt / elapid hyperparameters |
+| `cross_validation` | object | Geographic CV metadata: `splitter`, `n_folds`, `n_folds_valid`, `random_state` |
 | `metrics` | object | e.g. `mean_cv_auc`, `std_cv_auc`, `n_presence`, `n_background`, `training_success` → hsm-app **`metadata.card`** via adapter |
+| `threshold` | object | Written by ``sdm threshold``: `value`, `rule`, `rule_params`, `source`, `n_presence_records`, `bootstrap_range` |
 
 ### Example (abbreviated)
 
@@ -97,9 +100,59 @@ Written by `sdm train`. Key columns:
   "activity_type": "Roost",
   "feature_names": ["terrain_dtm", "terrain_slope", "ceh_broadleaved_500m"],
   "metrics": { "mean_cv_auc": 0.82, "std_cv_auc": 0.04, "n_presence": 120, "n_background": 4000 },
-  "artifacts": { "model_pickle": "model.pkl" }
+  "artifacts": {
+    "model_pickle": "model.pkl",
+    "validation_scores": "validation_scores.parquet"
+  },
+  "cross_validation": {
+    "splitter": "GeographicKFold",
+    "n_folds": 3,
+    "n_folds_valid": 3,
+    "random_state": 42
+  }
 }
 ```
+
+### `validation_scores.parquet`
+
+Written during training. One row per training point with columns:
+
+| Column | Description |
+|--------|-------------|
+| `point_index` | Row index in the species–activity training frame |
+| `class` | `1` presence, `0` background |
+| `fold` | Geographic CV fold index (0-based) |
+| `held_out_score` | Suitability score from the fold model that did not train on this point |
+
+Background rows are included so future rules (e.g. max sensitivity + specificity) can reuse the same file without retraining.
+
+### Suitability threshold (``sdm threshold``)
+
+Thresholds are computed **after** training from held-out presence scores only. Changing the percentile (or other rule parameters) requires rerunning ``sdm threshold``, not ``sdm train``.
+
+Configuration lives in `model_config.yml`:
+
+```yaml
+model:
+  cv:
+    n_folds: 3
+    random_state: 42
+  threshold:
+    rule: "presence_percentile"
+    percentile: 10
+    bootstrap_samples: 1000
+    bootstrap_random_state: 42
+    bootstrap_percentile_low: 5
+    bootstrap_percentile_high: 95
+```
+
+```bash
+sdm threshold --models-dir data/sdm_models
+```
+
+The command updates each `package.json` with a `threshold` object. Postprocessing notebooks can read `threshold.value` instead of recomputing in-sample percentiles.
+
+**Seed note:** ``GeographicKFold`` uses KMeans clustering; fold assignment is controlled by `model.cv.random_state` (default `42`). Data-prep sampling already uses fixed seeds elsewhere in the pipeline.
 
 ### Mapping to hsm-app `ModelMetadata`
 
@@ -211,10 +264,11 @@ Pickle is environment-sensitive. Re-export or align Python/sklearn/elapid versio
 ## 8. End-to-end checklist (records → maps)
 
 1. **Prepare** — occurrence GeoJSON, study boundary, environmental stack (`sdm setup`, `sdm data`, …)
-2. **`sdm train`** — one package per species × activity: `{model_id}/model.pkl` + `package.json`; index in `model_results.csv` (metrics for model cards / citations)
-3. **`sdm predict`** — `all_predictions.tif` (combined stack) and `prediction_{model_id}.tif` per model (COG, project CRS)
-4. **`sdm export-rasters … --output-crs EPSG:3857 --cog`** — web-map-ready COGs when the consumer requires Web Mercator
-5. **Publish to hsm-app** (or equivalent): project driver COG once, then each model’s suitability COG + `ModelMetadata` + optional pickle → appears in the public catalog and map UI
+2. **`sdm train`** — one package per species × activity: `{model_id}/model.pkl`, `validation_scores.parquet`, and `package.json`; index in `model_results.csv` (metrics for model cards / citations)
+3. **`sdm threshold`** — read `validation_scores.parquet`, write suitability threshold into each `package.json` (rerunnable when percentile changes)
+4. **`sdm predict`** — `all_predictions.tif` (combined stack) and `prediction_{model_id}.tif` per model (COG, project CRS)
+5. **`sdm export-rasters … --output-crs EPSG:3857 --cog`** — web-map-ready COGs when the consumer requires Web Mercator
+6. **Publish to hsm-app** (or equivalent): project driver COG once, then each model’s suitability COG + `ModelMetadata` + optional pickle → appears in the public catalog and map UI
 
 Downstream users should be able to **identify which model they are viewing** (`species`, `activity`, `card` fields), **see suitability on the map**, and **reference training quality** (`metrics`, version) without access to this repository.
 

@@ -256,6 +256,14 @@ def train(
         10,
         help="Number of neighbors for sample weighting.",
     ),
+    n_cv_folds: Optional[int] = typer.Option(
+        None,
+        help="Number of geographic CV folds (defaults to model_config.yml cv.n_folds).",
+    ),
+    cv_random_state: Optional[int] = typer.Option(
+        None,
+        help="Random seed for GeographicKFold cluster assignment (defaults to model_config.yml).",
+    ),
     verbose: bool = False,
 ) -> None:
     """Train SDM models using the new modular approach.
@@ -286,9 +294,38 @@ def train(
         d_min=d_min,
         d_max=d_max_value,
         sample_weight_n_neighbors=sample_weight_n_neighbors,
+        n_cv_folds=n_cv_folds,
+        cv_random_state=cv_random_state,
     )
     
     logging.info("Model training complete!")
+
+@app.command()
+def threshold(
+    models_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.models),
+        help="Directory containing trained model packages.",
+    ),
+    model_config_path: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.model_config_path),
+        help="Path to model configuration YAML (threshold rule settings).",
+    ),
+    species: Optional[List[str]] = None,
+    activity_types: Optional[List[str]] = None,
+    verbose: bool = False,
+) -> None:
+    """Compute suitability thresholds from held-out CV validation scores."""
+    from sdm.commands.modelling.compute_sdm_thresholds import compute_sdm_thresholds
+
+    setup_logging(verbose=verbose)
+    compute_sdm_thresholds(
+        models_dir=models_dir,
+        model_config_path=model_config_path,
+        species=species,
+        activity_types=activity_types,
+        verbose=verbose,
+    )
+    logging.info("Threshold computation complete!")
 
 @app.command()
 def predict(

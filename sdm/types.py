@@ -120,10 +120,30 @@ class SamplingConfig(BaseModel):
     grid_size_m: float = 2000
 
 
+class CrossValidationConfig(BaseModel):
+    """Geographic cross-validation settings for model training."""
+
+    n_folds: int = 3
+    random_state: int = 42
+
+
+class ThresholdConfig(BaseModel):
+    """Post-training suitability threshold settings (applied via ``sdm threshold``)."""
+
+    rule: str = "presence_percentile"
+    percentile: float = 10.0
+    bootstrap_samples: int = 1000
+    bootstrap_random_state: int = 42
+    bootstrap_percentile_low: float = 5.0
+    bootstrap_percentile_high: float = 95.0
+
+
 class ModelConfig(BaseModel):
     maxent: MaxentConfigModel
     sampling: Optional[SamplingConfig] = None
     background: Optional[BackgroundConfig] = None
+    cv: CrossValidationConfig = CrossValidationConfig()
+    threshold: ThresholdConfig = ThresholdConfig()
 
 
 class SDMModel(BaseModel):
@@ -148,6 +168,9 @@ class TrainingResults(SDMModel):
     final_model: Optional[object] = None
     cv_models: Optional[List[object]] = None
     cv_scores: Optional[np.ndarray] = None
+    validation_scores: Optional[Any] = None  # pd.DataFrame of held-out CV scores
+    cv_n_folds: Optional[int] = None
+    cv_random_state: Optional[int] = None
     success: bool = False
     error: Optional[str] = None
 
