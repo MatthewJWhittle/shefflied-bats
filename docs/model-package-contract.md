@@ -41,6 +41,8 @@ Each trained species × activity model is a **directory**:
     └── package.json               # required — metadata and feature manifest
 ```
 
+Training also writes `validation_scores.parquet` per model: one row per training point with `point_index`, `class`, `fold`, and `held_out_score` (the suitability score from the fold model that did not train on that point; background points included). `package.json` may reference it as `artifacts.validation_scores` and record `metrics.n_cv_folds` for the fold count actually used.
+
 ### Model identifier (`model_id`)
 
 Derived from `latin_name` and `activity_type`: lowercased, spaces → underscores, joined with `_`.

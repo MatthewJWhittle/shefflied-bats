@@ -148,6 +148,8 @@ class TrainingResults(SDMModel):
     final_model: Optional[object] = None
     cv_models: Optional[List[object]] = None
     cv_scores: Optional[np.ndarray] = None
+    validation_scores: Optional[Any] = None
+    cv_n_folds: Optional[int] = None
     success: bool = False
     error: Optional[str] = None
 

@@ -196,7 +196,8 @@ def cross_validate_maxent_model(
     metric_fn: Callable = roc_auc_score, 
     n_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
-) -> Tuple[List[BaseEstimator], np.ndarray]:
+    collect_validation_scores: bool = False,
+) -> Tuple[List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     # Note: Returns only valid models (None values filtered out)
     """
     Performs geographic cross-validation for a MaxEnt-like (scikit-learn compatible) model.
@@ -207,19 +208,18 @@ def cross_validate_maxent_model(
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
         n_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
+        collect_validation_scores: When True, return per-point held-out scores as a DataFrame.
 
     Returns:
-        Tuple of (trained_models_per_fold, metric_scores_per_fold).
+        Tuple of (trained_models_per_fold, metric_scores_per_fold, validation_scores).
+        ``validation_scores`` is ``None`` unless ``collect_validation_scores`` is True.
         Note: trained_models_per_fold may contain None values for failed folds.
     """
-    # elapid.GeographicKFold is a good default choice here
-    # It can take a random_state if provided in elapid versions that support it.
-    # Check elapid documentation for exact signature if random_state is critical.
-
     gfolds = ela.GeographicKFold(n_splits=n_folds)
         
     fold_metrics = []
     trained_models = []
+    validation_rows: List[Dict[str, Any]] = []
 
     logger.debug(f"Starting {n_folds}-fold geographic cross-validation...")
     for i, (train_idx, test_idx) in enumerate(gfolds.split(occurrence_gdf)):
@@ -243,26 +243,15 @@ def cross_validate_maxent_model(
             continue
         
         try:
-            # Elapid MaxentModel expects sample_weight as `maxent__sample_weight` in fit params
-            # Or if using a Pipeline, it would be `stepname__maxent__sample_weight`
-            # Assuming model is a direct MaxentModel or compatible with this param name.
-            # We need to find the correct parameter name for sample_weight.
-            # For a direct elapid.MaxentModel, it is 'sample_weight'.
-            # If it's part of a scikit-learn pipeline, it would be '<estimator_name>__sample_weight'.
-            # This is a common point of confusion. For now, assume direct elapid.MaxentModel style.
             fit_params = {}
             if w_train is not None:
-                # Fill NaN values in sample weights
                 w_train = w_train.fillna(1.0)
-                
-                # Check if model is a pipeline to construct prefixed param name
-                if hasattr(current_model, 'steps'): # It's a pipeline
-                    # Assuming maxent is the last step, or find its name
-                    maxent_step_name = current_model.steps[-1][0] 
+                if hasattr(current_model, 'steps'):
+                    maxent_step_name = current_model.steps[-1][0]
                     fit_params[f'{maxent_step_name}__sample_weight'] = w_train
-                else: # Assume it's a direct estimator
+                else:
                     fit_params['sample_weight'] = w_train
-            
+
             current_model.fit(X_train, y_train, **fit_params)
             
             y_pred_proba = current_model.predict_proba(X_test)[:, 1] # Probability of class 1
@@ -273,6 +262,19 @@ def cross_validate_maxent_model(
                 fold_metrics.append(np.nan)
                 trained_models.append(None)
                 continue
+
+            if collect_validation_scores:
+                for point_idx, score, class_val in zip(
+                    test_idx, y_pred_proba, y_test.to_numpy()
+                ):
+                    validation_rows.append(
+                        {
+                            "point_index": int(point_idx),
+                            "class": int(class_val),
+                            "fold": int(i),
+                            "held_out_score": float(score),
+                        }
+                    )
             
             metric_value = metric_fn(y_test, y_pred_proba)
             
@@ -295,12 +297,16 @@ def cross_validate_maxent_model(
     valid_models = [m for m in trained_models if m is not None]
     valid_metrics = np.array([m for m, mod in zip(fold_metrics, trained_models) if mod is not None])
     
+    validation_scores: Optional[pd.DataFrame] = None
+    if collect_validation_scores and validation_rows:
+        validation_scores = pd.DataFrame(validation_rows)
+
     # If we have valid models, return them; otherwise return empty lists
     if len(valid_models) > 0:
-        return valid_models, valid_metrics
+        return valid_models, valid_metrics, validation_scores
     else:
         logger.warning("No valid models were trained in cross-validation")
-        return [], np.array([])
+        return [], np.array([]), validation_scores
 
 
 def train_final_maxent_model(
@@ -316,15 +322,13 @@ def train_final_maxent_model(
     
     fit_params = {}
     if w_train is not None:
-        # Fill NaN values in sample weights
         w_train = w_train.fillna(1.0)
-        
         if hasattr(final_model, 'steps'):
             maxent_step_name = final_model.steps[-1][0]
             fit_params[f'{maxent_step_name}__sample_weight'] = w_train
         else:
             fit_params['sample_weight'] = w_train
-            
+
     final_model.fit(X_train, y_train, **fit_params)
     logger.debug("Final model training complete.")
     return final_model
@@ -336,7 +340,8 @@ def evaluate_and_train_maxent_model(
     metric_fn: Callable = roc_auc_score,
     n_cv_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
-) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray]:
+    collect_validation_scores: bool = False,
+) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     """
     Performs cross-validation and then trains a final model on all data.
 
@@ -349,17 +354,19 @@ def evaluate_and_train_maxent_model(
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
         n_cv_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
+        collect_validation_scores: When True, include per-point held-out scores.
 
     Returns:
-        Tuple of (final_trained_model, cv_models, cv_scores).
+        Tuple of (final_trained_model, cv_models, cv_scores, validation_scores).
     """
     logger.debug("Starting model evaluation and final training process...")
-    cv_models, cv_scores = cross_validate_maxent_model(
+    cv_models, cv_scores, validation_scores = cross_validate_maxent_model(
         model=model, # Pass the original model for cloning inside CV
         occurrence_gdf=occurrence_gdf,
         metric_fn=metric_fn,
         n_folds=n_cv_folds,
         feature_columns=feature_columns,
+        collect_validation_scores=collect_validation_scores,
     )
     
     # Log CV results only if we have valid scores (keep as debug, summary will be logged at higher level)
@@ -378,7 +385,7 @@ def evaluate_and_train_maxent_model(
         feature_columns=feature_columns
     )
     
-    return final_trained_model, cv_models, cv_scores
+    return final_trained_model, cv_models, cv_scores, validation_scores
 
 
 def predict_rasters_with_elapid_model(
