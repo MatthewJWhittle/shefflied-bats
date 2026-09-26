@@ -39,16 +39,4 @@ model:
     sigma: 6.5
     transform_method: "presence"
 
-  cv:
-    n_folds: 3
-    random_state: 42
-
-  threshold:
-    rule: "presence_percentile"
-    percentile: 10
-    bootstrap_samples: 1000
-    bootstrap_random_state: 42
-    bootstrap_percentile_low: 5
-    bootstrap_percentile_high: 95
-
 

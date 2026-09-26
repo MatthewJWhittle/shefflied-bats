@@ -1,5 +1,4 @@
 # Core MaxEnt (Elapid-based) model training, evaluation, and prediction logic.
-import inspect
 import warnings
 import logging
 from typing import List, Tuple, Optional, Callable, Any, Union, Dict
@@ -191,40 +190,12 @@ def extract_split_data(
     return X, y, weights
 
 
-def _geographic_kfold(n_splits: int, random_state: Optional[int]) -> ela.GeographicKFold:
-    """Construct ``GeographicKFold``, passing ``random_state`` when elapid supports it."""
-    params: Dict[str, Any] = {"n_splits": n_splits}
-    if "random_state" in inspect.signature(ela.GeographicKFold.__init__).parameters:
-        params["random_state"] = random_state
-    elif random_state is not None:
-        logger.warning(
-            "Installed elapid does not support GeographicKFold random_state; "
-            "fold assignment may be non-deterministic. Upgrade elapid>=1.0.4."
-        )
-    return ela.GeographicKFold(**params)
-
-
-def _maxent_fit_params(model: BaseEstimator, w_train: Optional[pd.Series]) -> Dict[str, Any]:
-    """Build sample-weight fit params for a MaxEnt model or pipeline."""
-    fit_params: Dict[str, Any] = {}
-    if w_train is None:
-        return fit_params
-    w_train = w_train.fillna(1.0)
-    if hasattr(model, "steps"):
-        maxent_step_name = model.steps[-1][0]
-        fit_params[f"{maxent_step_name}__sample_weight"] = w_train
-    else:
-        fit_params["sample_weight"] = w_train
-    return fit_params
-
-
 def cross_validate_maxent_model(
     model: BaseEstimator, 
     occurrence_gdf: gpd.GeoDataFrame, 
     metric_fn: Callable = roc_auc_score, 
     n_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
-    random_state: Optional[int] = 42,
     collect_validation_scores: bool = False,
 ) -> Tuple[List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     # Note: Returns only valid models (None values filtered out)
@@ -237,7 +208,6 @@ def cross_validate_maxent_model(
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
         n_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
-        random_state: Seed for ``GeographicKFold`` KMeans clustering (``None`` = unseeded).
         collect_validation_scores: When True, return per-point held-out scores as a DataFrame.
 
     Returns:
@@ -245,7 +215,7 @@ def cross_validate_maxent_model(
         ``validation_scores`` is ``None`` unless ``collect_validation_scores`` is True.
         Note: trained_models_per_fold may contain None values for failed folds.
     """
-    gfolds = _geographic_kfold(n_folds, random_state)
+    gfolds = ela.GeographicKFold(n_splits=n_folds)
         
     fold_metrics = []
     trained_models = []
@@ -273,7 +243,15 @@ def cross_validate_maxent_model(
             continue
         
         try:
-            fit_params = _maxent_fit_params(current_model, w_train)
+            fit_params = {}
+            if w_train is not None:
+                w_train = w_train.fillna(1.0)
+                if hasattr(current_model, 'steps'):
+                    maxent_step_name = current_model.steps[-1][0]
+                    fit_params[f'{maxent_step_name}__sample_weight'] = w_train
+                else:
+                    fit_params['sample_weight'] = w_train
+
             current_model.fit(X_train, y_train, **fit_params)
             
             y_pred_proba = current_model.predict_proba(X_test)[:, 1] # Probability of class 1
@@ -342,7 +320,15 @@ def train_final_maxent_model(
     train_idx = np.arange(len(occurrence_gdf))
     X_train, y_train, w_train = extract_split_data(occurrence_gdf, train_idx, feature_columns=feature_columns)
     
-    fit_params = _maxent_fit_params(final_model, w_train)
+    fit_params = {}
+    if w_train is not None:
+        w_train = w_train.fillna(1.0)
+        if hasattr(final_model, 'steps'):
+            maxent_step_name = final_model.steps[-1][0]
+            fit_params[f'{maxent_step_name}__sample_weight'] = w_train
+        else:
+            fit_params['sample_weight'] = w_train
+
     final_model.fit(X_train, y_train, **fit_params)
     logger.debug("Final model training complete.")
     return final_model
@@ -354,7 +340,6 @@ def evaluate_and_train_maxent_model(
     metric_fn: Callable = roc_auc_score,
     n_cv_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
-    cv_random_state: Optional[int] = 42,
     collect_validation_scores: bool = False,
 ) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     """
@@ -369,7 +354,6 @@ def evaluate_and_train_maxent_model(
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
         n_cv_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
-        cv_random_state: Seed for geographic fold assignment (``GeographicKFold`` KMeans).
         collect_validation_scores: When True, include per-point held-out scores.
 
     Returns:
@@ -382,7 +366,6 @@ def evaluate_and_train_maxent_model(
         metric_fn=metric_fn,
         n_folds=n_cv_folds,
         feature_columns=feature_columns,
-        random_state=cv_random_state,
         collect_validation_scores=collect_validation_scores,
     )
     

@@ -586,7 +586,6 @@ def train_single_model(
     max_threads_per_model: int,
     n_cv_folds: int = 3,
     min_presence: int = 15,
-    cv_random_state: int = 42,
 ) -> TrainingResults:
     """Train a single MaxEnt model for a given set of training data."""
     try:
@@ -630,7 +629,6 @@ def train_single_model(
             n_cv_folds=n_cv_folds,
             metric_fn=roc_auc_score,
             feature_columns=model_features,  # Explicitly pass feature columns to avoid using extra columns as features
-            cv_random_state=cv_random_state,
             collect_validation_scores=True,
         )
         
@@ -661,7 +659,6 @@ def train_single_model(
             cv_scores=cv_scores,
             validation_scores=validation_scores,
             cv_n_folds=n_cv_folds,
-            cv_random_state=cv_random_state,
             success=True,
             error=None,
         )
@@ -684,9 +681,6 @@ def train_models_parallel(
     training_data: List[TrainingData],
     max_threads_per_model: int = 1,
     n_jobs: Optional[int] = None,
-    n_cv_folds: int = 3,
-    min_presence: int = 15,
-    cv_random_state: int = 42,
 ) -> List[TrainingResults]:
     """Train MaxEnt models in parallel for each set of training data.
     
@@ -724,9 +718,6 @@ def train_models_parallel(
                     train_single_model,
                     data,
                     max_threads_per_model,
-                    n_cv_folds,
-                    min_presence,
-                    cv_random_state,
                 )
             )
         
@@ -916,9 +907,8 @@ def save_models(
 
     Layout per species–activity (filesystem-safe ``model_id`` from ``get_model_id``)::
 
-        {output_dir}/{model_id}/model.pkl                  — fitted sklearn pipeline
-        {output_dir}/{model_id}/validation_scores.parquet  — held-out CV scores per point
-        {output_dir}/{model_id}/package.json               — feature list, MaxEnt params, CV metrics, counts
+        {output_dir}/{model_id}/model.pkl      — fitted sklearn pipeline
+        {output_dir}/{model_id}/package.json — feature list, MaxEnt params, CV metrics, counts
 
     Args:
         models: Training results (only entries with ``final_model`` are written).
@@ -960,15 +950,10 @@ def save_models(
             "activity_type": model.activity_type,
             "feature_names": list(data.model_features),
             "maxent_config": _maxent_config_to_dict(data.maxent_config),
-            "cross_validation": {
-                "splitter": "GeographicKFold",
-                "n_folds": model.cv_n_folds,
-                "n_folds_valid": n_valid,
-                "random_state": model.cv_random_state,
-            },
             "metrics": {
                 "mean_cv_auc": _finite_float_or_none(mean_cv),
                 "std_cv_auc": _finite_float_or_none(std_cv),
+                "n_cv_folds": model.cv_n_folds,
                 "n_cv_folds_valid": n_valid,
                 "n_cv_folds_total": n_total,
                 "n_presence": n_presence,
@@ -1281,7 +1266,6 @@ def train_models_with_setup(
     max_threads_per_model: int = 2,
     n_jobs: Optional[int] = None,
     n_cv_folds: int = 3,
-    cv_random_state: int = 42,
     verbose: bool = False,
 ) -> tuple[List[TrainingResults], List[TrainingData]]:
     """Train models using pre-setup shared data.
@@ -1345,9 +1329,6 @@ def train_models_with_setup(
         training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
-        n_cv_folds=n_cv_folds,
-        min_presence=min_presence,
-        cv_random_state=cv_random_state,
     )
     
     return models, training_data
@@ -1371,8 +1352,6 @@ def train_sdm_models(
     d_min: float = 500,
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,
-    n_cv_folds: Optional[int] = None,
-    cv_random_state: Optional[int] = None,
 ) -> pd.DataFrame:
     """Run the MaxEnt model training pipeline using the new modular approach.
     
@@ -1510,19 +1489,6 @@ def train_sdm_models(
     effective_min_presence = (
         min_presence if min_presence is not None else base_model_cfg.sampling.min_presence
     )
-    effective_n_cv_folds = (
-        n_cv_folds if n_cv_folds is not None else base_model_cfg.cv.n_folds
-    )
-    effective_cv_random_state = (
-        cv_random_state
-        if cv_random_state is not None
-        else base_model_cfg.cv.random_state
-    )
-    logger.info(
-        "Cross-validation config: n_folds=%d, random_state=%s",
-        effective_n_cv_folds,
-        effective_cv_random_state,
-    )
     
     for latin_name, activity_type in tqdm(
         filter_combinations, desc="Preparing training data"
@@ -1629,9 +1595,6 @@ def train_sdm_models(
         training_data=training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
-        n_cv_folds=effective_n_cv_folds,
-        min_presence=effective_min_presence,
-        cv_random_state=effective_cv_random_state,
     )
     
     # Prepare and save results

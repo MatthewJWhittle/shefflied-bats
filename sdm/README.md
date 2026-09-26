@@ -14,7 +14,6 @@ uv sync   # or: pip install -e .
 | `sdm data` | Generate and merge all environmental variable layers |
 | `sdm background` | Generate background points for modelling |
 | `sdm train` | Train MaxEnt models and write model packages |
-| `sdm threshold` | Compute suitability thresholds from held-out CV scores |
 | `sdm predict` | Apply trained models to the EV stack |
 | `sdm export-rasters` | Reproject and/or COG-wrap rasters for sharing |
 | `sdm visualize` | Partial dependence and related plots |
@@ -45,9 +44,6 @@ sdm background \
 sdm train \
   --bats-file data/processed/bats-tidy.geojson \
   --ev-file data/evs/evs-to-model.tif
-
-# Threshold (after train; rerun when changing percentile in model_config.yml)
-sdm threshold --models-dir data/sdm_models
 
 # Predict (COG, project CRS from config.yml)
 sdm predict \
