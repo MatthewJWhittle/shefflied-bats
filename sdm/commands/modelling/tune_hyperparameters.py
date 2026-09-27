@@ -366,7 +366,7 @@ def eval_model(
         )
     
     # Only do CV evaluation (no final model training for tuning)
-    _cv_models, cv_scores = cross_validate_maxent_model(
+    _cv_models, cv_scores, _ = cross_validate_maxent_model(
         model=model,
         occurrence_gdf=data.occurrence,
         n_folds=n_cv_folds,

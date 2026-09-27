@@ -623,12 +623,13 @@ def train_single_model(
         if (n_presence // n_cv_folds) < min_presence:
             n_cv_folds = 2
             logger.info(f"Using 2 folds for {latin_name} - {activity_type.value} because n_presence < {min_presence}")
-        final_model, cv_models, cv_scores = evaluate_and_train_maxent_model(
+        final_model, cv_models, cv_scores, validation_scores = evaluate_and_train_maxent_model(
             model=model,
             occurrence_gdf=data.occurrence,
             n_cv_folds=n_cv_folds,
             metric_fn=roc_auc_score,
             feature_columns=model_features,  # Explicitly pass feature columns to avoid using extra columns as features
+            collect_validation_scores=True,
         )
         
         if final_model is None:
@@ -656,6 +657,8 @@ def train_single_model(
             final_model=final_model,
             cv_models=cv_models if cv_models is not None else None,
             cv_scores=cv_scores,
+            validation_scores=validation_scores,
+            cv_n_folds=n_cv_folds,
             success=True,
             error=None,
         )
@@ -950,6 +953,7 @@ def save_models(
             "metrics": {
                 "mean_cv_auc": _finite_float_or_none(mean_cv),
                 "std_cv_auc": _finite_float_or_none(std_cv),
+                "n_cv_folds": model.cv_n_folds,
                 "n_cv_folds_valid": n_valid,
                 "n_cv_folds_total": n_total,
                 "n_presence": n_presence,
@@ -958,6 +962,10 @@ def save_models(
             },
             "artifacts": {"model_pickle": "model.pkl"},
         }
+        if model.validation_scores is not None and len(model.validation_scores) > 0:
+            validation_path = pkg_dir / "validation_scores.parquet"
+            model.validation_scores.to_parquet(validation_path, index=False)
+            package["artifacts"]["validation_scores"] = "validation_scores.parquet"
         with open(pkg_dir / "package.json", "w", encoding="utf-8") as jf:
             json.dump(package, jf, indent=2, allow_nan=False)
 

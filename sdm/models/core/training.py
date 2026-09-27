@@ -228,7 +228,7 @@ def train_single_model(
                     maxent_n_jobs=max_threads_per_model
                 )
                 
-                final_model, cv_models, cv_scores = evaluate_and_train_maxent_model(
+                final_model, cv_models, cv_scores, _validation_scores = evaluate_and_train_maxent_model(
                     model=maxent_pipeline, 
                     occurrence_gdf=training_data_gdf, 
                     n_cv_folds=3, 
