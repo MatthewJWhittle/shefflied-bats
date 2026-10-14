@@ -182,3 +182,16 @@ deploy-dash.sh
 **/.DS_Store
 data/temp/*
 mlflow.db
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+tfplan
+crash.log
+# Credentials
+*-key.json
+*credentials*.json

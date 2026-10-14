@@ -1,0 +1,88 @@
+name: Terraform
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  repo-hygiene:
+    name: repo-hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Block state, tfvars, keys and data files
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          git cat-file -e "$base" 2>/dev/null || base=$(git hash-object -t tree /dev/null)
+          files=$(git diff --name-only --diff-filter=AR "$base" HEAD)
+          bad=$(printf '%s\n' "$files" | grep -Ei \
+            -e '\.tfstate(\.backup)?$' \
+            -e '\.tfvars(\.json)?$' \
+            -e '(^|/)[^/]*(key|credential|service[-_]?account)[^/]*\.json$' \
+            -e '\.(pem|p12)$' \
+            -e '\.(tif|tiff|gpkg|shp|parquet|nc|zarr|feather|pkl|joblib)$' \
+            | grep -v 'terraform\.tfvars\.example$' || true)
+          if [ -n "$bad" ]; then
+            echo "These files must not be committed:"; echo "$bad"; exit 1
+          fi
+          echo "OK"
+
+  validate:
+    name: terraform-validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+
+  apply:
+    name: terraform-apply
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [repo-hygiene, validate]
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: terraform-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ vars.GCP_REGION }}
+      TF_VAR_bucket_name: ${{ vars.GCP_BUCKET_NAME }}
+      TF_VAR_state_bucket_name: ${{ vars.GCP_STATE_BUCKET }}
+      TF_VAR_billing_account: ${{ vars.GCP_BILLING_ACCOUNT }}
+      TF_VAR_github_repository: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform init -input=false -backend-config="bucket=${{ vars.GCP_STATE_BUCKET }}"
+      - run: terraform plan -input=false -out=tfplan
+      - run: terraform apply -input=false tfplan
