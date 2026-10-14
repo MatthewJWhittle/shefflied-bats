@@ -4,7 +4,7 @@ locals {
 
 # ---------------------------------------------------------------------------
 # Run identity: reads inputs/, writes new objects under runs/.
-# No access to published/. No delete, so existing objects cannot be overwritten.
+# Can list file names in published/ but can't read or change anything there. No delete, so existing objects cannot be overwritten.
 # ---------------------------------------------------------------------------
 resource "google_service_account" "run" {
   account_id   = "model-run"

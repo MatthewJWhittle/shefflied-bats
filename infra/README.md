@@ -10,7 +10,7 @@ Data isn't stored in this repo.
 | Data bucket | `inputs/`, `runs/`, `published/` prefixes. Uniform access, public access prevention, versioning (old versions kept 30 days). |
 | State bucket | Terraform remote state. Versioned, not public. |
 | Budget | Monthly budget alert at 50% and 100%. |
-| `model-run` service account | Reads `inputs/`, creates new objects under `runs/`. Cannot delete or overwrite, no access to `published/`. |
+| `model-run` service account | Reads `inputs/`, creates new objects under `runs/`. Cannot delete or overwrite. Can list file names in `published/` but can't read or change anything there. |
 | `terraform-deploy` service account | Used by GitHub Actions to apply changes, via Workload Identity Federation (no keys). |
 | Workload identity pool/provider | Trusts only this repository, `main`, in the `production` environment. |
 
