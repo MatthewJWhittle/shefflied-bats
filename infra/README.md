@@ -32,7 +32,6 @@ variables:
 | `GCP_WIF_PROVIDER` | after bootstrap (`terraform output`) | Workload Identity provider for GitHub sign-in |
 | `GCP_DEPLOY_SA` | after bootstrap (`terraform output`) | deploy service account email |
 | `GCP_BUCKET_NAME`, `GCP_BILLING_ACCOUNT` | after bootstrap | `TF_VAR_bucket_name`, `TF_VAR_billing_account` |
-| `MODEL_RUN_IMPERSONATOR_EMAIL` | now | `TF_VAR_model_run_impersonator_email` (token creator on `model-run`) |
 
 The apply job fails with a clear error if any required variable is unset.
 
@@ -59,7 +58,7 @@ bucket and the workload identity provider, which only the bootstrap creates.
 7. In GitHub, set `production` environment variables from `terraform output`
    (`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) plus
    `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_BUCKET_NAME`, `TF_STATE_BUCKET`,
-   `GCP_BILLING_ACCOUNT`, `MODEL_RUN_IMPERSONATOR_EMAIL`.
+   `GCP_BILLING_ACCOUNT`.
 
 After that, changes go through pull requests and are applied on merge.
 
@@ -69,19 +68,11 @@ After that, changes go through pull requests and are applied on merge.
 - Push to `main`: the `apply` job waits for approval in the `production`
   environment, then runs `terraform plan` and `apply` with short-lived credentials.
 
-## Local runs with the run identity
+## Remote runs with the run identity
 
-Default: no key files. Run locally with your own sign-in and
-service account impersonation:
-
-```
-gcloud auth application-default login --impersonate-service-account=<run-sa-email>
-```
-
-Optional exception (off by default, owner decision): a key for the run identity
-on one trusted machine. It is not created by Terraform, so it never enters state.
-If approved, create it with `gcloud iam service-accounts keys create`, keep it
-outside the repo, and delete it when no longer needed.
+Remote machines authenticate as the run service account with a key file created
+manually after bootstrap (`gcloud iam service-accounts keys create`). Keys are
+not created by Terraform and must not be committed to git.
 
 ## References
 
