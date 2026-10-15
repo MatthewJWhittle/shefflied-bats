@@ -3,7 +3,7 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
-# Run identity: reads inputs/, writes new objects under runs/.
+# Run identity: reads inputs/ and runs/, creates new objects under runs/.
 # Can list file names in published/ but can't read or change anything there. No delete, so existing objects cannot be overwritten.
 # ---------------------------------------------------------------------------
 resource "google_service_account" "run" {
@@ -27,6 +27,18 @@ resource "google_storage_bucket_iam_member" "run_read_inputs" {
   condition {
     title      = "inputs-read"
     expression = "resource.type == \"storage.googleapis.com/Bucket\" || resource.name.startsWith(\"${local.objects_prefix}/inputs/\")"
+  }
+}
+
+resource "google_storage_bucket_iam_member" "run_read_runs" {
+  bucket = google_storage_bucket.data.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.run.email}"
+
+  # Listing is checked against the bucket; object get/list applies only under runs/.
+  condition {
+    title      = "runs-read"
+    expression = "resource.type == \"storage.googleapis.com/Bucket\" || resource.name.startsWith(\"${local.objects_prefix}/runs/\")"
   }
 }
 
