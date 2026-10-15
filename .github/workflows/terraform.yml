@@ -73,7 +73,7 @@ jobs:
       TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
       TF_VAR_region: ${{ vars.GCP_REGION }}
       TF_VAR_bucket_name: ${{ vars.GCP_BUCKET_NAME }}
-      TF_VAR_state_bucket_name: ${{ vars.GCP_STATE_BUCKET }}
+      TF_VAR_state_bucket_name: ${{ vars.TF_STATE_BUCKET }}
       TF_VAR_billing_account: ${{ vars.GCP_BILLING_ACCOUNT }}
       TF_VAR_github_repository: ${{ github.repository }}
     steps:
@@ -82,15 +82,18 @@ jobs:
           missing=""
           [ -n "$TF_VAR_project_id" ] || missing="$missing GCP_PROJECT_ID"
           [ -n "$TF_VAR_region" ] || missing="$missing GCP_REGION"
+          [ -n "$TF_VAR_state_bucket_name" ] || missing="$missing TF_STATE_BUCKET"
+          [ -n "${{ vars.GCP_WIF_PROVIDER }}" ] || missing="$missing GCP_WIF_PROVIDER"
+          [ -n "${{ vars.GCP_DEPLOY_SA }}" ] || missing="$missing GCP_DEPLOY_SA"
           if [ -n "$missing" ]; then
             echo "::error::Set these variables on the production environment:$missing"; exit 1
           fi
       - uses: actions/checkout@v5
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
       - uses: hashicorp/setup-terraform@v3
-      - run: terraform init -input=false -backend-config="bucket=${{ vars.GCP_STATE_BUCKET }}"
+      - run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
       - run: terraform plan -input=false -out=tfplan
       - run: terraform apply -input=false tfplan

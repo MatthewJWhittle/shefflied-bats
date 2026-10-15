@@ -21,6 +21,20 @@ variables on the `production` environment (`GCP_PROJECT_ID`, `GCP_REGION`); the
 workflow passes them as `TF_VAR_project_id` / `TF_VAR_region` and fails if unset.
 Locally, put them in your gitignored `terraform.tfvars`.
 
+Nothing project-specific is in code. All of these are `production` environment
+variables:
+
+| Variable | Set when | Used for |
+| --- | --- | --- |
+| `GCP_PROJECT_ID` | now | `TF_VAR_project_id` |
+| `GCP_REGION` | now | `TF_VAR_region` |
+| `TF_STATE_BUCKET` | after bootstrap | `terraform init -backend-config="bucket=..."` (partial backend config) |
+| `GCP_WIF_PROVIDER` | after bootstrap (`terraform output`) | Workload Identity provider for GitHub sign-in |
+| `GCP_DEPLOY_SA` | after bootstrap (`terraform output`) | deploy service account email |
+| `GCP_BUCKET_NAME`, `GCP_BILLING_ACCOUNT` | after bootstrap | `TF_VAR_bucket_name`, `TF_VAR_billing_account` |
+
+The apply job fails with a clear error if any required variable is unset.
+
 Do this before the first merge to `main`. The apply job needs the state
 bucket and the workload identity provider, which only the bootstrap creates.
 
@@ -31,9 +45,9 @@ bucket and the workload identity provider, which only the bootstrap creates.
 4. Restore the backend block and migrate state:
    `terraform init -migrate-state -backend-config="bucket=<state-bucket-name>"`.
 5. Grant the deploy identity `roles/billing.costsManager` on the billing account.
-6. In GitHub, set repository variables from `terraform output`
-   (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`) plus
-   `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_BUCKET_NAME`, `GCP_STATE_BUCKET`,
+6. In GitHub, set `production` environment variables from `terraform output`
+   (`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) plus
+   `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_BUCKET_NAME`, `TF_STATE_BUCKET`,
    `GCP_BILLING_ACCOUNT`.
 
 After that, changes go through pull requests and are applied on merge.
