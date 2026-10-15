@@ -8,6 +8,8 @@ import pytest
 from google.api_core.exceptions import PreconditionFailed
 
 from sdm.utils.model_run_gcs_upload import (
+    MODEL_RUN_IMPERSONATE_SA_ENV,
+    ImpersonationRequiredError,
     UploadConflictError,
     UploadVerificationError,
     collect_local_objects,
@@ -41,11 +43,7 @@ class FakeBlob:
         self._store[self.name] = {"size": self.size, "md5": digest}
 
     def reload(self) -> None:
-        entry = self._store.get(self.name)
-        if entry is None:
-            raise FileNotFoundError(self.name)
-        self.size = int(entry["size"])
-        self.md5_hash = str(entry["md5"])
+        raise AssertionError("reload() must not be called during upload verification")
 
 
 class FakeBucket:
@@ -60,8 +58,10 @@ class FakeBucket:
     def list_blobs(self, prefix: str = ""):
         for name in sorted(self._objects):
             if name.startswith(prefix):
-                blob = self.blob(name)
-                blob.reload()
+                entry = self._objects[name]
+                blob = FakeBlob(name, self._objects)
+                blob.size = int(entry["size"])
+                blob.md5_hash = str(entry["md5"])
                 yield blob
 
 
@@ -177,6 +177,28 @@ def test_happy_path_deletes_local_and_prints_links(tmp_path: Path, capsys) -> No
     assert f"gs://test-bucket/{prefix}nested/metrics.json" in captured
     assert f"gs://test-bucket/{prefix}summary.csv" in captured
     assert "console.cloud.google.com/storage/browser/test-bucket/" in captured
+
+
+def test_missing_impersonate_sa_fails_before_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_tree(tmp_path)
+    monkeypatch.delenv("MODEL_RUN_IMPERSONATE_SA", raising=False)
+    monkeypatch.setenv("MODEL_OUTPUT_BUCKET", "test-bucket")
+    uploads_started: list[int] = []
+
+    def track_upload(*_args, **_kwargs) -> None:
+        uploads_started.append(1)
+
+    monkeypatch.setattr(
+        "sdm.utils.model_run_gcs_upload._upload_objects",
+        track_upload,
+    )
+
+    with pytest.raises(ImpersonationRequiredError, match=MODEL_RUN_IMPERSONATE_SA_ENV):
+        upload_model_run_outputs(tmp_path, bucket_name="test-bucket")
+
+    assert not uploads_started
 
 
 def test_verify_upload_detects_md5_mismatch(tmp_path: Path) -> None:

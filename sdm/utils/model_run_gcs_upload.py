@@ -1,9 +1,10 @@
 """
 Upload a local model-run output directory to Google Cloud Storage.
 
-Uses Application Default Credentials (optionally service-account impersonation),
-creates a unique run prefix under ``runs/``, verifies uploads, then removes the
-local directory on success.
+Uses Application Default Credentials as the source for mandatory service-account
+impersonation (``MODEL_RUN_IMPERSONATE_SA``), creates a unique run prefix under
+``runs/``, verifies uploads via ``list_blobs`` metadata, then removes the local
+directory on success.
 """
 
 from __future__ import annotations
@@ -38,6 +39,10 @@ class UploadVerificationError(RuntimeError):
     """Uploaded objects do not match the local manifest."""
 
 
+class ImpersonationRequiredError(ValueError):
+    """MODEL_RUN_IMPERSONATE_SA is required for GCS uploads."""
+
+
 @dataclass(frozen=True)
 class LocalObject:
     relative_path: str
@@ -62,8 +67,6 @@ class BlobLike(Protocol):
     def upload_from_filename(
         self, filename: str, *, if_generation_match: int | None = None
     ) -> None: ...
-
-    def reload(self) -> None: ...
 
 
 class BucketLike(Protocol):
@@ -114,18 +117,31 @@ def collect_local_objects(local_dir: Path) -> list[LocalObject]:
     return objects
 
 
+def require_impersonate_service_account() -> str:
+    impersonate_sa = os.environ.get(MODEL_RUN_IMPERSONATE_SA_ENV, "").strip()
+    if not impersonate_sa:
+        raise ImpersonationRequiredError(
+            f"{MODEL_RUN_IMPERSONATE_SA_ENV} must be set to the service account "
+            "email to impersonate for GCS uploads. Application Default Credentials "
+            "from `gcloud auth application-default login` are used only as the "
+            "impersonation source, not as the storage identity. "
+            f"Example: export {MODEL_RUN_IMPERSONATE_SA_ENV}"
+            "=my-run-sa@my-project.iam.gserviceaccount.com"
+        )
+    return impersonate_sa
+
+
 def get_gcs_credentials_and_project() -> tuple[object, str | None]:
     import google.auth
     from google.auth import impersonated_credentials
 
-    credentials, project = google.auth.default(scopes=[GCS_RW_SCOPE])
-    impersonate_sa = os.environ.get(MODEL_RUN_IMPERSONATE_SA_ENV)
-    if impersonate_sa:
-        credentials = impersonated_credentials.Credentials(
-            source_credentials=credentials,
-            target_principal=impersonate_sa,
-            target_scopes=[GCS_RW_SCOPE],
-        )
+    impersonate_sa = require_impersonate_service_account()
+    source_credentials, project = google.auth.default(scopes=[GCS_RW_SCOPE])
+    credentials = impersonated_credentials.Credentials(
+        source_credentials=source_credentials,
+        target_principal=impersonate_sa,
+        target_scopes=[GCS_RW_SCOPE],
+    )
     return credentials, project
 
 
@@ -168,7 +184,6 @@ def _remote_manifest(
         relative = blob.name[len(run_prefix) :]
         if not relative:
             continue
-        blob.reload()
         if blob.md5_hash is None:
             raise UploadVerificationError(
                 f"Remote object missing MD5 hash: {blob.name}"
@@ -227,18 +242,16 @@ def upload_model_run_outputs(
     """
     Upload ``local_dir`` to GCS under a unique run prefix, verify, optionally delete local.
 
-    ``bucket_handle`` supports tests; when omitted, ``storage_client`` or ADC is used.
+    ``bucket_handle`` supports tests; when omitted, impersonated ADC is used.
     """
     resolved_bucket = resolve_bucket_name(bucket_name)
     local_objects = collect_local_objects(local_dir)
     prefix = run_prefix or generate_run_prefix()
 
     if bucket_handle is None:
+        credentials, project_id = get_gcs_credentials_and_project()
         if storage_client is None:
-            credentials, project_id = get_gcs_credentials_and_project()
             storage_client = storage.Client(credentials=credentials, project=project_id)
-        else:
-            _, project_id = get_gcs_credentials_and_project()
         bucket_handle = storage_client.bucket(resolved_bucket)
     else:
         project_id = None
