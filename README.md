@@ -126,6 +126,22 @@ Manual fallback (May 2023 vintage still supported):
 
 Disable live download with `sdm setup --no-live-download` when working fully offline.
 
+## Uploading model-run outputs (GCS)
+
+After a training or prediction run, upload the output directory to Google Cloud Storage and remove the local copy once the upload is verified (object count, sizes, and MD5 hashes):
+
+```bash
+gcloud auth application-default login
+
+export MODEL_OUTPUT_BUCKET=your-bucket-name
+# Optional: act as a service account instead of your user ADC identity
+export MODEL_RUN_IMPERSONATE_SA=some-account@your-project.iam.gserviceaccount.com
+
+sdm upload-model-outputs path/to/run/outputs
+```
+
+Each upload is stored under a unique prefix such as `runs/20251015T071700Z-a1b2c3d4/`. Objects use paths relative to the local output folder only. Uploads never overwrite existing objects (`if_generation_match=0`).
+
 ## Development
 
 ```bash

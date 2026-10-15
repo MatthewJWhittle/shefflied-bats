@@ -290,6 +290,36 @@ def train(
     
     logging.info("Model training complete!")
 
+
+@app.command("upload-model-outputs")
+def upload_model_outputs(
+    local_dir: Path = typer.Argument(
+        ...,
+        help="Directory containing model-run outputs to upload.",
+    ),
+    bucket: Optional[str] = typer.Option(
+        None,
+        envvar="MODEL_OUTPUT_BUCKET",
+        help="Target GCS bucket (defaults to MODEL_OUTPUT_BUCKET).",
+    ),
+    keep_local: bool = typer.Option(
+        False,
+        "--keep-local",
+        help="Keep the local directory after a successful upload.",
+    ),
+    verbose: bool = False,
+) -> None:
+    """Upload model-run outputs to GCS, verify, and remove the local copy."""
+    from sdm.utils.model_run_gcs_upload import upload_model_run_outputs
+
+    setup_logging(verbose=verbose)
+    upload_model_run_outputs(
+        local_dir,
+        bucket_name=bucket,
+        delete_local=not keep_local,
+    )
+
+
 @app.command()
 def predict(
     ev_path: Path = typer.Option(
