@@ -59,8 +59,12 @@ from sdm.utils.logging_utils import setup_logging
 from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
 from sdm.commands.modelling.utils import get_model_id
 from sdm.utils.model_output_fs import (
+    artifact_parent_uri,
     build_run_output_uri,
+    join_run_artifact,
+    local_materialized_path,
     model_run_write_context,
+    resolve_data_path,
     resolve_output_root,
 )
 logger = logging.getLogger(__name__)
@@ -1426,26 +1430,32 @@ def train_sdm_models(
     # Load data
     logger.info("Loading input data...")
     
-    bats_path = bats_file or Path(project_config.paths.occurence_data)
-    ev_path = ev_file or Path(project_config.paths.ev_tiff)
-    boundary_path = Path(project_config.paths.boundary)
+    bats_uri = resolve_data_path(
+        bats_file if bats_file is not None else project_config.paths.occurence_data
+    )
+    ev_uri = resolve_data_path(
+        ev_file if ev_file is not None else project_config.paths.ev_tiff
+    )
+    boundary_uri = resolve_data_path(project_config.paths.boundary)
     output_root = resolve_output_root(
         cli_output_dir=output_dir,
         config_models_path=project_config.paths.models,
     )
 
     logger.debug("Loading bat occurrence data...")
-    bats_ant = load_bat_data(bats_path)
+    with local_materialized_path(bats_uri) as bats_path:
+        bats_ant = load_bat_data(bats_path)
     bats_ant = bats_ant[bats_ant.accuracy <= 100]  # Filter by accuracy
-    
+
     logger.debug("Loading boundary...")
-    boundary = load_boundary(
-        filepath=boundary_path, buffer_distance=0, target_crs=27700
-    )
+    with local_materialized_path(boundary_uri) as boundary_path:
+        boundary = load_boundary(
+            filepath=boundary_path, buffer_distance=0, target_crs=27700
+        )
     boundary = simplify_boundary(boundary, tolerance=100)
-    
+
     logger.debug("Loading environmental variables...")
-    evs_to_model, _ = load_environmental_variables(ev_path)
+    evs_to_model, _ = load_environmental_variables(ev_uri)
     
     # Filter species and activity types if specified
     if species is not None:
@@ -1612,12 +1622,19 @@ def train_sdm_models(
     with model_run_write_context(run_uri) as (models_output_dir, written_uri):
         model_paths = save_models(models, training_data, models_output_dir)
 
+        published_paths = {
+            identifier: join_run_artifact(
+                written_uri,
+                Path(path).relative_to(models_output_dir),
+            )
+            for identifier, path in model_paths.items()
+        }
         results_df["model_path"] = [
-            str(model_paths[identifier]) if identifier in model_paths else ""
+            published_paths.get(identifier, "")
             for identifier in results_df["identifier"]
         ]
         results_df["model_package_dir"] = [
-            str(Path(p).parent.resolve()) if p else ""
+            artifact_parent_uri(p) if p else ""
             for p in results_df["model_path"]
         ]
 

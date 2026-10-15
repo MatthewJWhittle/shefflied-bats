@@ -16,7 +16,41 @@ import fsspec
 logger = logging.getLogger(__name__)
 
 MODEL_OUTPUT_ROOT_ENV = "MODEL_OUTPUT_ROOT"
+INPUT_DATA_ROOT_ENV = "INPUT_DATA_ROOT"
 RUNS_DIR_NAME = "runs"
+
+
+def resolve_data_path(config_or_cli_path: str | Path) -> str:
+    """Resolve a config path, optionally under ``INPUT_DATA_ROOT`` or pass-through ``gs://``."""
+    path_str = str(config_or_cli_path)
+    if "://" in path_str:
+        return path_str
+    root = os.environ.get(INPUT_DATA_ROOT_ENV, "").strip()
+    if root:
+        return f"{root.rstrip('/')}/{path_str.lstrip('/')}"
+    return path_str
+
+
+def uri_for_rasterio(uri_or_path: str | Path) -> str:
+    """Map ``gs://`` URIs to GDAL ``/vsigs/`` paths for rasterio/rioxarray."""
+    ref = str(uri_or_path)
+    if ref.startswith("gs://"):
+        return f"/vsigs/{ref[len('gs://'):]}"
+    return ref
+
+
+def join_run_artifact(run_uri: str, relative_path: str | Path) -> str:
+    rel = Path(relative_path).as_posix().lstrip("/")
+    if "://" in run_uri:
+        return f"{run_uri.rstrip('/')}/{rel}"
+    return str(Path(run_uri.rstrip("/")) / rel)
+
+
+def artifact_parent_uri(artifact_uri: str) -> str:
+    if "://" in artifact_uri:
+        head, _sep, _tail = artifact_uri.rpartition("/")
+        return f"{head}/" if head else artifact_uri
+    return str(Path(artifact_uri).parent)
 
 
 def resolve_output_root(
@@ -75,6 +109,29 @@ def is_local_uri(uri: str) -> bool:
 def ensure_run_directory(run_uri: str) -> None:
     fs, path = filesystem_for_uri(run_uri)
     fs.makedirs(path, exist_ok=True)
+
+
+@contextmanager
+def local_materialized_path(uri_or_path: str | Path) -> Iterator[Path]:
+    """Yield a local ``Path`` (download remote objects to a temporary file first)."""
+    ref = str(uri_or_path)
+    if "://" not in ref:
+        yield Path(ref)
+        return
+
+    fs, remote_path = filesystem_for_uri(ref)
+    if _protocol_name(fs) == "file":
+        yield Path(remote_path)
+        return
+
+    suffix = Path(remote_path).suffix or ".dat"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+        temp_path = Path(handle.name)
+    try:
+        fs.get(remote_path, str(temp_path))
+        yield temp_path
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def put_local_tree(fs: fsspec.AbstractFileSystem, local_dir: Path, remote_dir: str) -> None:

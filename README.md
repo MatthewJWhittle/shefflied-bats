@@ -131,16 +131,26 @@ Disable live download with `sdm setup --no-live-download` when working fully off
 Training writes each run under `runs/<UTC date-time>-<short hex>/` beneath an output **root**. Default root: `paths.models` in `config.yml` (`data/sdm_models`). Override with the CLI `--output-dir` or:
 
 ```bash
-export MODEL_OUTPUT_ROOT=gs://your-bucket/model-outputs
+export MODEL_OUTPUT_ROOT=gs://habitat-suitability-modelling-data
 ```
 
-Remote roots use [fsspec](https://filesystem-spec.readthedocs.io/) / `gcsfs` with normal Google credentials (`gcloud auth application-default login` on a laptop, or `GOOGLE_APPLICATION_CREDENTIALS` on a server). Libraries that need local paths (pickle, GeoTIFF, and similar) write to a temporary directory first; the helper uploads the tree to the run folder.
+The bucket URI is the root; each train run creates `gs://habitat-suitability-modelling-data/runs/<timestamp-id>/`. Service accounts used for upload typically need permission to write only under the bucket’s top-level `runs/` prefix.
 
-Browse or copy objects with the gcloud CLI:
+Remote roots use [fsspec](https://filesystem-spec.readthedocs.io/) / `gcsfs` with normal Google credentials (`gcloud auth application-default login` on a laptop, or `GOOGLE_APPLICATION_CREDENTIALS` on a server). Libraries that need local paths (pickle, GeoTIFF, and similar) write to a temporary directory first; the helper uploads the tree to the run folder. `model_results.csv` records final `gs://` paths for packages, not staging directories.
+
+**Inputs from GCS (optional):** set a prefix for config-relative paths such as occurrence GeoJSON, boundary, and the environmental stack:
 
 ```bash
-gcloud storage ls gs://your-bucket/model-outputs/runs/
-gcloud storage cp -r gs://your-bucket/model-outputs/runs/20251015T120000Z-a1b2c3d4 ./local-copy
+export INPUT_DATA_ROOT=gs://habitat-suitability-modelling-data/inputs
+```
+
+Vector inputs are fetched via fsspec; the environmental GeoTIFF is read through GDAL `/vsigs/` (requires GDAL Google Cloud access in the runtime environment).
+
+Browse or copy outputs with the gcloud CLI:
+
+```bash
+gcloud storage ls gs://habitat-suitability-modelling-data/runs/
+gcloud storage cp -r gs://habitat-suitability-modelling-data/runs/20251015T120000Z-a1b2c3d4 ./local-copy
 ```
 
 ## Development

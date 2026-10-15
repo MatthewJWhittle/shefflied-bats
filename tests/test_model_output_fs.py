@@ -8,13 +8,20 @@ from pathlib import Path
 import fsspec
 import pytest
 
+import pandas as pd
+
 from sdm.utils.model_output_fs import (
+    INPUT_DATA_ROOT_ENV,
     MODEL_OUTPUT_ROOT_ENV,
+    artifact_parent_uri,
     build_run_output_uri,
     generate_run_segment,
+    join_run_artifact,
     model_run_write_context,
     put_local_tree,
+    resolve_data_path,
     resolve_output_root,
+    uri_for_rasterio,
 )
 
 
@@ -84,6 +91,52 @@ def test_model_run_write_context_local_filesystem(tmp_path: Path) -> None:
     assert expected.is_file()
     assert expected.read_text() == "id\n1\n"
     assert uri == run_uri
+
+
+def test_resolve_data_path_with_input_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        INPUT_DATA_ROOT_ENV, "gs://habitat-suitability-modelling-data/inputs"
+    )
+    resolved = resolve_data_path("data/processed/occurrence.geojson")
+    assert (
+        resolved
+        == "gs://habitat-suitability-modelling-data/inputs/data/processed/occurrence.geojson"
+    )
+
+
+def test_uri_for_rasterio_maps_gs_to_vsigs() -> None:
+    assert uri_for_rasterio("gs://bucket/evs/stack.tif") == "/vsigs/bucket/evs/stack.tif"
+    assert uri_for_rasterio("/data/local.tif") == "/data/local.tif"
+
+
+def test_published_paths_in_model_results_use_run_uri() -> None:
+    root = "memory://results-bucket"
+    run_uri = build_run_output_uri(root, run_segment="20251015T120000Z-pubtest")
+
+    with model_run_write_context(run_uri) as (write_dir, written_uri):
+        pkg_dir = write_dir / "alpha_pkg"
+        pkg_dir.mkdir()
+        model_file = pkg_dir / "model.pkl"
+        model_file.write_bytes(b"model-bytes")
+        published = join_run_artifact(
+            written_uri, model_file.relative_to(write_dir)
+        )
+        parent = artifact_parent_uri(published)
+        pd.DataFrame(
+            {
+                "identifier": ["alpha"],
+                "model_path": [published],
+                "model_package_dir": [parent],
+            }
+        ).to_csv(write_dir / "model_results.csv", index=False)
+        assert str(write_dir) not in published
+        assert published.startswith("memory://results-bucket/runs/")
+
+    fs = fsspec.filesystem("memory")
+    csv_bytes = fs.cat(f"{root}/runs/20251015T120000Z-pubtest/model_results.csv")
+    assert b"memory://results-bucket/runs/" in csv_bytes
+    assert b"alpha_pkg/model.pkl" in csv_bytes
+    assert str(write_dir).encode() not in csv_bytes
 
 
 def test_put_local_tree_to_memory(tmp_path: Path) -> None:

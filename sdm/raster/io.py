@@ -251,15 +251,21 @@ def load_environmental_variables(
     Returns:
         Tuple of (Dataset containing environmental variables, Path to raster file)
     """
-    ev_raster = Path(ev_path)
-    
+    from sdm.utils.model_output_fs import uri_for_rasterio
+
+    ev_ref = str(ev_path)
+    rasterio_path = uri_for_rasterio(ev_ref)
+    ev_raster = Path(ev_ref) if "://" not in ev_ref else Path(ev_ref.split("/")[-1])
+
     try:
-        evs : xr.Dataset = rxr.open_rasterio(ev_raster, masked=True, band_as_variable=True).squeeze() # type: ignore
-        
+        evs: xr.Dataset = rxr.open_rasterio(
+            rasterio_path, masked=True, band_as_variable=True
+        ).squeeze()  # type: ignore
+
         # rename the variables by their long name
         for var in evs.data_vars:
             evs = evs.rename({var: evs[var].attrs["long_name"]})
-        logger.debug("Loaded environmental variables from %s", ev_raster)
+        logger.debug("Loaded environmental variables from %s", ev_ref)
         return evs, ev_raster
     except Exception as e:
         logger.error("Error loading environmental variables: %s", e)
