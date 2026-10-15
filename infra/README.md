@@ -14,9 +14,14 @@ Data isn't stored in this repo.
 | `terraform-deploy` service account | Used by GitHub Actions to apply changes, via Workload Identity Federation (no keys). |
 | Workload identity pool/provider | Trusts only this repository, `main`, in the `production` environment. |
 
-## Bootstrap (owner, once, locally)
+## Bootstrap (owner, once, locally — before merging)
 
-1. Create a project and link billing. Sign in: `gcloud auth application-default login`.
+Project: `habitat-suitability-modelling`, region `europe-west2`.
+
+Do this before the first merge to `main`. The apply job needs the state
+bucket and the workload identity provider, which only the bootstrap creates.
+
+1. Link billing to the project. Sign in: `gcloud auth application-default login`.
 2. `cp terraform.tfvars.example terraform.tfvars` and fill in (gitignored).
 3. Comment out the `backend "gcs"` block in `versions.tf`, then
    `terraform init && terraform apply`.
