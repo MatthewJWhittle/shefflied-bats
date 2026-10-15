@@ -126,41 +126,22 @@ Manual fallback (May 2023 vintage still supported):
 
 Disable live download with `sdm setup --no-live-download` when working fully offline.
 
-## Model-run outputs in GCS
+## Model-run output location
 
-Uploads go under `runs/<UTC timestamp>-<id>/` with object keys equal to paths relative to the local output folder. Uploads never overwrite existing objects (`if_generation_match=0`). List and download use the same bucket and run-account rules.
-
-Shared settings:
+Training writes each run under `runs/<UTC date-time>-<short hex>/` beneath an output **root**. Default root: `paths.models` in `config.yml` (`data/sdm_models`). Override with the CLI `--output-dir` or:
 
 ```bash
-export MODEL_OUTPUT_BUCKET=your-bucket-name
-export MODEL_RUN_SERVICE_ACCOUNT=run-sa@your-project.iam.gserviceaccount.com
+export MODEL_OUTPUT_ROOT=gs://your-bucket/model-outputs
 ```
 
-**Laptop (impersonation):** ADC from `gcloud auth application-default login` is only the impersonation source. Set the run account to impersonate (must match `MODEL_RUN_SERVICE_ACCOUNT` when both are set):
+Remote roots use [fsspec](https://filesystem-spec.readthedocs.io/) / `gcsfs` with normal Google credentials (`gcloud auth application-default login` on a laptop, or `GOOGLE_APPLICATION_CREDENTIALS` on a server). Libraries that need local paths (pickle, GeoTIFF, and similar) write to a temporary directory first; the helper uploads the tree to the run folder.
+
+Browse or copy objects with the gcloud CLI:
 
 ```bash
-gcloud auth application-default login
-export MODEL_RUN_IMPERSONATE_SA=run-sa@your-project.iam.gserviceaccount.com
-
-sdm upload-model-outputs path/to/run/outputs
-sdm list-model-runs
-sdm download-model-outputs 20251015T071700Z-a1b2c3d4 ./restored-outputs
-# or: sdm download-model-outputs gs://your-bucket-name/runs/20251015T071700Z-a1b2c3d4/ ./restored-outputs
+gcloud storage ls gs://your-bucket/model-outputs/runs/
+gcloud storage cp -r gs://your-bucket/model-outputs/runs/20251015T120000Z-a1b2c3d4 ./local-copy
 ```
-
-**Server (service-account key):** point `GOOGLE_APPLICATION_CREDENTIALS` at a JSON key whose `client_email` equals the expected run account (`MODEL_RUN_SERVICE_ACCOUNT`, or `MODEL_RUN_IMPERSONATE_SA` if that is the only run-account variable set). Do not commit key files.
-
-```bash
-export GOOGLE_APPLICATION_CREDENTIALS=/secure/path/run-sa-key.json
-export MODEL_RUN_SERVICE_ACCOUNT=run-sa@your-project.iam.gserviceaccount.com
-
-sdm upload-model-outputs path/to/run/outputs
-sdm list-model-runs
-sdm download-model-outputs runs/20251015T071700Z-a1b2c3d4 ./restored-outputs
-```
-
-Downloads verify size and MD5 from `list_blobs` metadata and refuse to overwrite existing local files.
 
 ## Development
 

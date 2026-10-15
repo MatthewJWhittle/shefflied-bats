@@ -58,6 +58,11 @@ from sdm.utils.io import (
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
 from sdm.commands.modelling.utils import get_model_id
+from sdm.utils.model_output_fs import (
+    build_run_output_uri,
+    model_run_write_context,
+    resolve_output_root,
+)
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=pd.DataFrame)
@@ -1369,7 +1374,7 @@ def train_sdm_models(
             (if provided, configs are loaded from {config_dir}/{latin_name}_{activity_type}/)
         bats_file: Path to bat data file
         ev_file: Path to environmental variables file
-        output_dir: Output directory for models and results
+        output_dir: Model output root (each run writes under ``runs/<timestamp-id>/``)
         min_presence: Minimum number of presence records required
         n_jobs: Number of parallel jobs
         max_threads_per_model: Maximum threads per model
@@ -1424,10 +1429,11 @@ def train_sdm_models(
     bats_path = bats_file or Path(project_config.paths.occurence_data)
     ev_path = ev_file or Path(project_config.paths.ev_tiff)
     boundary_path = Path(project_config.paths.boundary)
-    models_output_dir = output_dir or Path(project_config.paths.models)
-    
-    models_output_dir.mkdir(parents=True, exist_ok=True)
-    
+    output_root = resolve_output_root(
+        cli_output_dir=output_dir,
+        config_models_path=project_config.paths.models,
+    )
+
     logger.debug("Loading bat occurrence data...")
     bats_ant = load_bat_data(bats_path)
     bats_ant = bats_ant[bats_ant.accuracy <= 100]  # Filter by accuracy
@@ -1600,20 +1606,25 @@ def train_sdm_models(
     # Prepare and save results
     logger.info("Saving results...")
     results_df = prepare_results_dataframe(models, training_data)
-    model_paths = save_models(models, training_data, models_output_dir)
+    run_uri = build_run_output_uri(output_root)
+    logger.info("Writing model run to %s", run_uri)
 
-    results_df["model_path"] = [
-        str(model_paths[identifier]) if identifier in model_paths else ""
-        for identifier in results_df["identifier"]
-    ]
-    results_df["model_package_dir"] = [
-        str(Path(p).parent.resolve()) if p else ""
-        for p in results_df["model_path"]
-    ]
-    
-    # Save results and training data
-    save_results(results_df, models_output_dir)
-    save_training_data(training_data, models_output_dir)
+    with model_run_write_context(run_uri) as (models_output_dir, written_uri):
+        model_paths = save_models(models, training_data, models_output_dir)
+
+        results_df["model_path"] = [
+            str(model_paths[identifier]) if identifier in model_paths else ""
+            for identifier in results_df["identifier"]
+        ]
+        results_df["model_package_dir"] = [
+            str(Path(p).parent.resolve()) if p else ""
+            for p in results_df["model_path"]
+        ]
+
+        save_results(results_df, models_output_dir)
+        save_training_data(training_data, models_output_dir)
+
+    logger.info("Model run outputs: %s", written_uri)
     
     # Log to MLflow
     logger.info("Logging to MLflow...")
