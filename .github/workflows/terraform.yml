@@ -78,6 +78,7 @@ jobs:
       TF_VAR_github_repository: ${{ github.repository }}
     steps:
       - name: Check required variables
+        working-directory: .
         run: |
           missing=""
           [ -n "$TF_VAR_project_id" ] || missing="$missing GCP_PROJECT_ID"

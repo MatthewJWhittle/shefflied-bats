@@ -39,13 +39,23 @@ Do this before the first merge to `main`. The apply job needs the state
 bucket and the workload identity provider, which only the bootstrap creates.
 
 1. Link billing to the project. Sign in: `gcloud auth application-default login`.
-2. `cp terraform.tfvars.example terraform.tfvars` and fill in (gitignored).
-3. Comment out the `backend "gcs"` block in `versions.tf`, then
+2. Enable the APIs Terraform needs (replace `<project-id>`):
+
+   ```
+   gcloud services enable --project=<project-id> \
+     cloudresourcemanager.googleapis.com serviceusage.googleapis.com \
+     iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \
+     storage.googleapis.com billingbudgets.googleapis.com \
+     cloudbilling.googleapis.com
+   ```
+
+3. `cp terraform.tfvars.example terraform.tfvars` and fill in (gitignored).
+4. Comment out the `backend "gcs"` block in `versions.tf`, then
    `terraform init && terraform apply`.
-4. Restore the backend block and migrate state:
+5. Restore the backend block and migrate state:
    `terraform init -migrate-state -backend-config="bucket=<state-bucket-name>"`.
-5. Grant the deploy identity `roles/billing.costsManager` on the billing account.
-6. In GitHub, set `production` environment variables from `terraform output`
+6. Grant the deploy identity `roles/billing.costsManager` on the billing account.
+7. In GitHub, set `production` environment variables from `terraform output`
    (`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) plus
    `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_BUCKET_NAME`, `TF_STATE_BUCKET`,
    `GCP_BILLING_ACCOUNT`.
