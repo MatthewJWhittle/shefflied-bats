@@ -40,3 +40,8 @@ variable "github_repository" {
   description = "GitHub repository allowed to deploy, as owner/name."
   type        = string
 }
+
+variable "model_run_impersonator_email" {
+  description = "User allowed to impersonate the model-run service account (token creator)."
+  type        = string
+}

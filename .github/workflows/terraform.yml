@@ -76,6 +76,7 @@ jobs:
       TF_VAR_state_bucket_name: ${{ vars.TF_STATE_BUCKET }}
       TF_VAR_billing_account: ${{ vars.GCP_BILLING_ACCOUNT }}
       TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_model_run_impersonator_email: ${{ vars.MODEL_RUN_IMPERSONATOR_EMAIL }}
     steps:
       - name: Check required variables
         working-directory: .
@@ -88,6 +89,7 @@ jobs:
           [ -n "$TF_VAR_billing_account" ] || missing="$missing GCP_BILLING_ACCOUNT"
           [ -n "${{ vars.GCP_WIF_PROVIDER }}" ] || missing="$missing GCP_WIF_PROVIDER"
           [ -n "${{ vars.GCP_DEPLOY_SA }}" ] || missing="$missing GCP_DEPLOY_SA"
+          [ -n "$TF_VAR_model_run_impersonator_email" ] || missing="$missing MODEL_RUN_IMPERSONATOR_EMAIL"
           if [ -n "$missing" ]; then
             echo "::error::Set these variables on the production environment:$missing"; exit 1
           fi

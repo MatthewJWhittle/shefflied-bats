@@ -11,6 +11,12 @@ resource "google_service_account" "run" {
   display_name = "Model run"
 }
 
+resource "google_service_account_iam_member" "run_impersonator_token_creator" {
+  service_account_id = google_service_account.run.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "user:${var.model_run_impersonator_email}"
+}
+
 resource "google_storage_bucket_iam_member" "run_read_inputs" {
   bucket = google_storage_bucket.data.name
   role   = "roles/storage.objectViewer"

@@ -32,6 +32,7 @@ variables:
 | `GCP_WIF_PROVIDER` | after bootstrap (`terraform output`) | Workload Identity provider for GitHub sign-in |
 | `GCP_DEPLOY_SA` | after bootstrap (`terraform output`) | deploy service account email |
 | `GCP_BUCKET_NAME`, `GCP_BILLING_ACCOUNT` | after bootstrap | `TF_VAR_bucket_name`, `TF_VAR_billing_account` |
+| `MODEL_RUN_IMPERSONATOR_EMAIL` | now | `TF_VAR_model_run_impersonator_email` (token creator on `model-run`) |
 
 The apply job fails with a clear error if any required variable is unset.
 
@@ -58,7 +59,7 @@ bucket and the workload identity provider, which only the bootstrap creates.
 7. In GitHub, set `production` environment variables from `terraform output`
    (`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`) plus
    `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_BUCKET_NAME`, `TF_STATE_BUCKET`,
-   `GCP_BILLING_ACCOUNT`.
+   `GCP_BILLING_ACCOUNT`, `MODEL_RUN_IMPERSONATOR_EMAIL`.
 
 After that, changes go through pull requests and are applied on merge.
 
