@@ -16,7 +16,10 @@ Data isn't stored in this repo.
 
 ## Bootstrap (owner, once, locally — before merging)
 
-Project: `habitat-suitability-modelling`, region `europe-west2`.
+The project ID and region are not committed. They live as GitHub Actions
+variables on the `production` environment (`GCP_PROJECT_ID`, `GCP_REGION`); the
+workflow passes them as `TF_VAR_project_id` / `TF_VAR_region` and fails if unset.
+Locally, put them in your gitignored `terraform.tfvars`.
 
 Do this before the first merge to `main`. The apply job needs the state
 bucket and the workload identity provider, which only the bootstrap creates.

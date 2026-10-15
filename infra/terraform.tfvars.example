@@ -1,5 +1,5 @@
 # Copy to terraform.tfvars (gitignored) and fill in.
-project_id        = "habitat-suitability-modelling"
+project_id        = "your-project-id"
 region            = "europe-west2"
 bucket_name       = "your-data-bucket"
 state_bucket_name = "your-state-bucket"
