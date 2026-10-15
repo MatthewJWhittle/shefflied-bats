@@ -1,7 +1,8 @@
-"""Tests for GCS model-run output upload."""
+"""Tests for GCS model-run output upload, list, and download."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -9,11 +10,16 @@ from google.api_core.exceptions import PreconditionFailed
 
 from sdm.utils.model_run_gcs_upload import (
     MODEL_RUN_IMPERSONATE_SA_ENV,
-    ImpersonationRequiredError,
+    MODEL_RUN_SERVICE_ACCOUNT_ENV,
+    DownloadLocalConflictError,
+    RunCredentialsConfigurationError,
     UploadConflictError,
     UploadVerificationError,
     collect_local_objects,
+    download_model_run_outputs,
     generate_run_prefix,
+    get_gcs_credentials_and_project,
+    list_model_run_folders,
     md5_hash_b64_for_file,
     upload_model_run_outputs,
     verify_upload,
@@ -40,7 +46,17 @@ class FakeBlob:
         digest = base64.b64encode(hashlib.md5(payload).digest()).decode("ascii")
         self.size = len(payload)
         self.md5_hash = digest
-        self._store[self.name] = {"size": self.size, "md5": digest}
+        self._store[self.name] = {
+            "size": self.size,
+            "md5": digest,
+            "data": payload,
+        }
+
+    def download_to_filename(self, filename: str) -> None:
+        entry = self._store.get(self.name)
+        if entry is None:
+            raise FileNotFoundError(self.name)
+        Path(filename).write_bytes(bytes(entry["data"]))
 
     def reload(self) -> None:
         raise AssertionError("reload() must not be called during upload verification")
@@ -70,6 +86,12 @@ def _write_tree(root: Path) -> None:
     (root / "nested").mkdir()
     (root / "nested" / "metrics.json").write_text('{"auc": 0.9}')
     (root / "summary.csv").write_text("id,score\na,1\n")
+
+
+def _seed_run(bucket: FakeBucket, prefix: str, source_dir: Path) -> None:
+    for obj in collect_local_objects(source_dir):
+        blob = bucket.blob(f"{prefix}{obj.relative_path}")
+        blob.upload_from_filename(str(obj.absolute_path), if_generation_match=0)
 
 
 def test_generate_run_prefix_format_and_uniqueness() -> None:
@@ -179,11 +201,12 @@ def test_happy_path_deletes_local_and_prints_links(tmp_path: Path, capsys) -> No
     assert "console.cloud.google.com/storage/browser/test-bucket/" in captured
 
 
-def test_missing_impersonate_sa_fails_before_upload(
+def test_missing_run_account_fails_before_upload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_tree(tmp_path)
     monkeypatch.delenv("MODEL_RUN_IMPERSONATE_SA", raising=False)
+    monkeypatch.delenv("MODEL_RUN_SERVICE_ACCOUNT", raising=False)
     monkeypatch.setenv("MODEL_OUTPUT_BUCKET", "test-bucket")
     uploads_started: list[int] = []
 
@@ -195,10 +218,101 @@ def test_missing_impersonate_sa_fails_before_upload(
         track_upload,
     )
 
-    with pytest.raises(ImpersonationRequiredError, match=MODEL_RUN_IMPERSONATE_SA_ENV):
+    with pytest.raises(RunCredentialsConfigurationError):
         upload_model_run_outputs(tmp_path, bucket_name="test-bucket")
 
     assert not uploads_started
+
+
+def test_credentials_from_matching_service_account_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_sa = "run-sa@test.iam.gserviceaccount.com"
+    monkeypatch.setenv(MODEL_RUN_SERVICE_ACCOUNT_ENV, run_sa)
+    key_path = tmp_path / "run-key.json"
+    key_path.write_text(
+        json.dumps(
+            {
+                "type": "service_account",
+                "client_email": run_sa,
+                "project_id": "test-project",
+            }
+        )
+    )
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key_path))
+
+    sentinel = object()
+
+    def fake_from_file(path: str, scopes: list[str]) -> object:
+        assert path == str(key_path)
+        assert scopes
+        return sentinel
+
+    monkeypatch.setattr(
+        "google.oauth2.service_account.Credentials.from_service_account_file",
+        fake_from_file,
+    )
+
+    creds, project_id = get_gcs_credentials_and_project()
+    assert creds is sentinel
+    assert project_id == "test-project"
+
+
+def test_credentials_reject_mismatched_service_account_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(MODEL_RUN_SERVICE_ACCOUNT_ENV, "expected-sa@test.iam.gserviceaccount.com")
+    key_path = tmp_path / "run-key.json"
+    key_path.write_text(
+        json.dumps(
+            {
+                "type": "service_account",
+                "client_email": "other-sa@test.iam.gserviceaccount.com",
+                "project_id": "test-project",
+            }
+        )
+    )
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key_path))
+
+    with pytest.raises(RunCredentialsConfigurationError, match="client_email"):
+        get_gcs_credentials_and_project()
+
+
+def test_credentials_impersonation_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_sa = "run-sa@test.iam.gserviceaccount.com"
+    monkeypatch.setenv(MODEL_RUN_IMPERSONATE_SA_ENV, run_sa)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+
+    source = object()
+    impersonated = object()
+
+    monkeypatch.setattr(
+        "google.auth.default",
+        lambda scopes: (source, "adc-project"),
+    )
+
+    class FakeImpersonatedCredentials:
+        def __init__(
+            self,
+            *,
+            source_credentials: object,
+            target_principal: str,
+            target_scopes: list[str],
+        ) -> None:
+            assert source_credentials is source
+            assert target_principal == run_sa
+            assert target_scopes
+
+    monkeypatch.setattr(
+        "google.auth.impersonated_credentials.Credentials",
+        FakeImpersonatedCredentials,
+    )
+
+    creds, project_id = get_gcs_credentials_and_project()
+    assert isinstance(creds, FakeImpersonatedCredentials)
+    assert project_id == "adc-project"
 
 
 def test_verify_upload_detects_md5_mismatch(tmp_path: Path) -> None:
@@ -213,3 +327,92 @@ def test_verify_upload_detects_md5_mismatch(tmp_path: Path) -> None:
     bucket._objects[f"{prefix}summary.csv"]["md5"] = "wrong"
     with pytest.raises(UploadVerificationError, match="MD5 mismatch"):
         verify_upload(bucket, prefix, local_objects)
+
+
+def test_list_model_run_folders(tmp_path: Path) -> None:
+    bucket = FakeBucket()
+    _write_tree(tmp_path)
+    _seed_run(bucket, "runs/20251015T071700Z-aaa11111/", tmp_path)
+    _seed_run(bucket, "runs/20251015T071800Z-bbb22222/", tmp_path)
+
+    folders = list_model_run_folders(
+        bucket_name="test-bucket",
+        bucket_handle=bucket,
+    )
+    assert [folder.run_id for folder in folders] == [
+        "20251015T071700Z-aaa11111",
+        "20251015T071800Z-bbb22222",
+    ]
+
+
+def test_download_happy_path(tmp_path: Path, capsys) -> None:
+    source = tmp_path / "source"
+    _write_tree(source)
+    bucket = FakeBucket()
+    prefix = "runs/20251015T071700Z-dl000001/"
+    _seed_run(bucket, prefix, source)
+
+    dest = tmp_path / "dest"
+    result = download_model_run_outputs(
+        prefix,
+        dest,
+        bucket_name="test-bucket",
+        bucket_handle=bucket,
+    )
+
+    assert result.dest_dir == dest.resolve()
+    assert (dest / "summary.csv").is_file()
+    assert (dest / "nested" / "metrics.json").is_file()
+    output = capsys.readouterr().out
+    assert str(dest.resolve()) in output
+
+
+def test_download_refuses_existing_local_file(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_tree(source)
+    bucket = FakeBucket()
+    prefix = "runs/20251015T071700Z-dl000002/"
+    _seed_run(bucket, prefix, source)
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "summary.csv").write_text("existing")
+
+    with pytest.raises(DownloadLocalConflictError):
+        download_model_run_outputs(
+            prefix,
+            dest,
+            bucket_name="test-bucket",
+            bucket_handle=bucket,
+        )
+
+
+def test_download_detects_md5_mismatch_after_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    _write_tree(source)
+    bucket = FakeBucket()
+    prefix = "runs/20251015T071700Z-dl000003/"
+    _seed_run(bucket, prefix, source)
+
+    original = md5_hash_b64_for_file
+
+    def wrong_md5(path: Path) -> str:
+        if path.name == "summary.csv":
+            return "invalid-md5-hash-value"
+        return original(path)
+
+    monkeypatch.setattr(
+        "sdm.utils.model_run_gcs_upload.md5_hash_b64_for_file",
+        wrong_md5,
+    )
+
+    dest = tmp_path / "dest"
+    with pytest.raises(UploadVerificationError, match="MD5 mismatch"):
+        download_model_run_outputs(
+            prefix,
+            dest,
+            bucket_name="test-bucket",
+            bucket_handle=bucket,
+        )

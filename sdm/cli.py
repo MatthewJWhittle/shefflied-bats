@@ -320,6 +320,51 @@ def upload_model_outputs(
     )
 
 
+@app.command("list-model-runs")
+def list_model_runs(
+    bucket: Optional[str] = typer.Option(
+        None,
+        envvar="MODEL_OUTPUT_BUCKET",
+        help="GCS bucket (defaults to MODEL_OUTPUT_BUCKET).",
+    ),
+    verbose: bool = False,
+) -> None:
+    """List model-run folders under runs/ in the output bucket."""
+    from sdm.utils.model_run_gcs_upload import list_model_run_folders, print_model_run_list
+
+    setup_logging(verbose=verbose)
+    folders = list_model_run_folders(bucket_name=bucket)
+    print_model_run_list(folders)
+
+
+@app.command("download-model-outputs")
+def download_model_outputs(
+    run_id_or_gs_path: str = typer.Argument(
+        ...,
+        help="Run id, runs/… prefix, or gs://bucket/runs/… URI.",
+    ),
+    dest_dir: Path = typer.Argument(
+        ...,
+        help="Local directory to write downloaded files.",
+    ),
+    bucket: Optional[str] = typer.Option(
+        None,
+        envvar="MODEL_OUTPUT_BUCKET",
+        help="GCS bucket when run_id_or_gs_path is not a gs:// URI.",
+    ),
+    verbose: bool = False,
+) -> None:
+    """Download a model-run folder from GCS with verified size and MD5."""
+    from sdm.utils.model_run_gcs_upload import download_model_run_outputs
+
+    setup_logging(verbose=verbose)
+    download_model_run_outputs(
+        run_id_or_gs_path,
+        dest_dir,
+        bucket_name=bucket,
+    )
+
+
 @app.command()
 def predict(
     ev_path: Path = typer.Option(
