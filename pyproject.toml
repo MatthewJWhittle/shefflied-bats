@@ -33,6 +33,8 @@ dependencies = [
     "optuna>=4.6.0",
     "shap>=0.49.1",
     "plotnine>=0.15.3",
+    "fsspec>=2025.3.0",
+    "gcsfs>=2025.3.0",
 ]
 
 [project.scripts]

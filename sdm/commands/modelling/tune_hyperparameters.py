@@ -44,6 +44,8 @@ from sdm.occurrence.sampling import (
     TransformMethod,
 )
 from sdm.raster.io import load_environmental_variables
+from sdm.utils.fs import local_materialized_path
+from sdm.utils.model_runs import resolve_data_path
 from sdm.utils.io import (
     load_model_config,
     load_project_config,
@@ -1051,7 +1053,7 @@ def tune_hyperparameters(
     
     # Load base configs
     project_config = load_project_config(project_config_path)
-    base_model_config = load_model_config(model_config_path)
+    base_model_config = load_model_config(resolve_data_path(model_config_path))
     
     # Get background config from model config (use provided values as overrides)
     bg_config = base_model_config.background or BackgroundConfig()
@@ -1087,7 +1089,11 @@ def tune_hyperparameters(
     logger.info("Loading input data for hyperparameter tuning...")
     
     # Load raw bat occurrence data (presence-only)
-    occurrence_gdf = load_bat_data(bats_file)
+    bats_uri = resolve_data_path(
+        bats_file if bats_file is not None else project_config.paths.occurence_data
+    )
+    with local_materialized_path(bats_uri) as bats_path:
+        occurrence_gdf = load_bat_data(bats_path)
     occurrence_gdf = occurrence_gdf[occurrence_gdf.accuracy <= 100]
     
     # Optional filtering of occurrence records
@@ -1100,14 +1106,17 @@ def tune_hyperparameters(
         occurrence_gdf = occurrence_gdf[occurrence_gdf.activity_type.isin(activity_types)]
     
     # Load boundary
-    boundary_path = Path(project_config.paths.boundary)
-    boundary = load_boundary(
-        filepath=boundary_path, buffer_distance=0, target_crs=27700
-    )
+    boundary_uri = resolve_data_path(project_config.paths.boundary)
+    with local_materialized_path(boundary_uri) as boundary_path:
+        boundary = load_boundary(
+            filepath=boundary_path, buffer_distance=0, target_crs=27700
+        )
     boundary = simplify_boundary(boundary, tolerance=100)
-    
-    # Load environmental variables
-    evs_to_model, _ = load_environmental_variables(ev_file)
+
+    ev_uri = resolve_data_path(
+        ev_file if ev_file is not None else project_config.paths.ev_tiff
+    )
+    evs_to_model, _ = load_environmental_variables(ev_uri)
     
     # ========================================================================
     # ONE-TIME STUDY DATA PREPARATION (IN-MEMORY)

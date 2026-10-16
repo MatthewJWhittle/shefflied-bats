@@ -215,7 +215,7 @@ def train(
     ),
     output_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.models),
-        help="Directory to write trained models and results.",
+        help="Model output root; each train run writes under runs/<timestamp-id>/ here.",
     ),
     model_config_path: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.model_config_path),
@@ -289,6 +289,7 @@ def train(
     )
     
     logging.info("Model training complete!")
+
 
 @app.command()
 def predict(

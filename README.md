@@ -126,6 +126,37 @@ Manual fallback (May 2023 vintage still supported):
 
 Disable live download with `sdm setup --no-live-download` when working fully offline.
 
+## Cloud bucket layout
+
+See [docs/data-layout.md](docs/data-layout.md) for every train/tune input and output path under `gs://habitat-suitability-modelling-data` (`inputs/` and `runs/`).
+
+## Model-run output location
+
+Training writes each run under `runs/<UTC date-time>-<short hex>/` beneath an output **root**. Default root: `paths.models` in `config.yml` (`data/sdm_models`). Override with the CLI `--output-dir` or:
+
+```bash
+export MODEL_OUTPUT_ROOT=gs://habitat-suitability-modelling-data
+```
+
+The bucket URI is the root; each train run creates `gs://habitat-suitability-modelling-data/runs/<timestamp-id>/`. Service accounts used for upload typically need permission to write only under the bucket’s top-level `runs/` prefix.
+
+Remote roots use [fsspec](https://filesystem-spec.readthedocs.io/) / `gcsfs` with normal Google credentials (`gcloud auth application-default login` on a laptop, or `GOOGLE_APPLICATION_CREDENTIALS` on a server). Libraries that need local paths (pickle, GeoTIFF, and similar) write to a temporary directory first; the helper uploads the tree to the run folder. `model_results.csv` records final `gs://` paths for packages, not staging directories.
+
+**Inputs from GCS (optional):** set a prefix for config-relative paths such as occurrence GeoJSON, boundary, and the environmental stack:
+
+```bash
+export INPUT_DATA_ROOT=gs://habitat-suitability-modelling-data/inputs
+```
+
+Vector inputs are fetched via fsspec; the environmental GeoTIFF is read through GDAL `/vsigs/` (requires GDAL Google Cloud access in the runtime environment).
+
+Browse or copy outputs with the gcloud CLI:
+
+```bash
+gcloud storage ls gs://habitat-suitability-modelling-data/runs/
+gcloud storage cp -r gs://habitat-suitability-modelling-data/runs/20251015T120000Z-a1b2c3d4 ./local-copy
+```
+
 ## Development
 
 ```bash

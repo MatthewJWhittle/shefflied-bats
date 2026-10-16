@@ -58,6 +58,15 @@ from sdm.utils.io import (
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
 from sdm.commands.modelling.utils import get_model_id
+from sdm.utils.fs import join_uri_path, local_materialized_path, uri_exists
+from sdm.utils.model_runs import (
+    artifact_parent_uri,
+    build_run_output_uri,
+    join_run_artifact,
+    model_run_write_context,
+    resolve_data_path,
+    resolve_output_root,
+)
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=pd.DataFrame)
@@ -1161,23 +1170,37 @@ def setup_training_data(
     # Resolve variables config path
     if variables_config_path is None:
         variables_config_path = Path(project_config.paths.variables_config_path)
-    variables_cfg = load_variables_config(variables_config_path)
+    variables_cfg = load_variables_config(resolve_data_path(variables_config_path))
     
     # Resolve data paths from config if not explicitly provided
-    bats_path = bats_file or Path(project_config.paths.occurence_data)
-    background_path = background_file or Path(project_config.paths.background_points)
-    ev_path = ev_file or Path(project_config.paths.ev_tiff)
-    grid_points_path = grid_points_file or Path(project_config.paths.grid_points)
-    
+    bats_uri = resolve_data_path(
+        bats_file if bats_file is not None else project_config.paths.occurence_data
+    )
+    background_uri = resolve_data_path(
+        background_file
+        if background_file is not None
+        else project_config.paths.background_points
+    )
+    ev_uri = resolve_data_path(
+        ev_file if ev_file is not None else project_config.paths.ev_tiff
+    )
+    grid_points_uri = resolve_data_path(
+        grid_points_file
+        if grid_points_file is not None
+        else project_config.paths.grid_points
+    )
+
     # Load data
     logger.debug("Loading bat occurrence data...")
-    bats_ant = load_bat_data(bats_path)
-    
+    with local_materialized_path(bats_uri) as bats_path:
+        bats_ant = load_bat_data(bats_path)
+
     logger.debug("Loading background points...")
-    background, background_density = load_background_points(background_path)
-    
+    with local_materialized_path(background_uri) as background_path:
+        background, background_density = load_background_points(background_path)
+
     logger.debug("Loading environmental variables...")
-    ev_data, ev_raster_path = load_environmental_variables(ev_path)
+    ev_data, ev_raster_path = load_environmental_variables(ev_uri)
     all_ev_columns = list(ev_data.data_vars.keys())
     
     # Filter environmental variables based on roster
@@ -1202,10 +1225,11 @@ def setup_training_data(
     
     # Load grid points
     logger.debug("Loading grid points...")
-    if grid_points_path is None or not Path(grid_points_path).exists():
+    if not grid_points_uri or not uri_exists(grid_points_uri):
         grid_points = extract_grid_points(ev_data)
     else:
-        grid_points = gpd.read_parquet(grid_points_path)
+        with local_materialized_path(grid_points_uri) as grid_points_path:
+            grid_points = gpd.read_parquet(grid_points_path)
     
     # Annotate points with environmental variables (skip if already annotated)
     logger.debug("Annotating points with environmental variables...")
@@ -1369,7 +1393,7 @@ def train_sdm_models(
             (if provided, configs are loaded from {config_dir}/{latin_name}_{activity_type}/)
         bats_file: Path to bat data file
         ev_file: Path to environmental variables file
-        output_dir: Output directory for models and results
+        output_dir: Model output root (each run writes under ``runs/<timestamp-id>/``)
         min_presence: Minimum number of presence records required
         n_jobs: Number of parallel jobs
         max_threads_per_model: Maximum threads per model
@@ -1396,7 +1420,7 @@ def train_sdm_models(
     
     # Load configs
     project_config = load_project_config(project_config_path)
-    base_model_cfg = load_model_config(model_config_path)
+    base_model_cfg = load_model_config(resolve_data_path(model_config_path))
     
     # Get background config from model config (with defaults if not present)
     background_config = base_model_cfg.background or BackgroundConfig()
@@ -1421,25 +1445,32 @@ def train_sdm_models(
     # Load data
     logger.info("Loading input data...")
     
-    bats_path = bats_file or Path(project_config.paths.occurence_data)
-    ev_path = ev_file or Path(project_config.paths.ev_tiff)
-    boundary_path = Path(project_config.paths.boundary)
-    models_output_dir = output_dir or Path(project_config.paths.models)
-    
-    models_output_dir.mkdir(parents=True, exist_ok=True)
-    
-    logger.debug("Loading bat occurrence data...")
-    bats_ant = load_bat_data(bats_path)
-    bats_ant = bats_ant[bats_ant.accuracy <= 100]  # Filter by accuracy
-    
-    logger.debug("Loading boundary...")
-    boundary = load_boundary(
-        filepath=boundary_path, buffer_distance=0, target_crs=27700
+    bats_uri = resolve_data_path(
+        bats_file if bats_file is not None else project_config.paths.occurence_data
     )
+    ev_uri = resolve_data_path(
+        ev_file if ev_file is not None else project_config.paths.ev_tiff
+    )
+    boundary_uri = resolve_data_path(project_config.paths.boundary)
+    output_root = resolve_output_root(
+        cli_output_dir=output_dir,
+        config_models_path=project_config.paths.models,
+    )
+
+    logger.debug("Loading bat occurrence data...")
+    with local_materialized_path(bats_uri) as bats_path:
+        bats_ant = load_bat_data(bats_path)
+    bats_ant = bats_ant[bats_ant.accuracy <= 100]  # Filter by accuracy
+
+    logger.debug("Loading boundary...")
+    with local_materialized_path(boundary_uri) as boundary_path:
+        boundary = load_boundary(
+            filepath=boundary_path, buffer_distance=0, target_crs=27700
+        )
     boundary = simplify_boundary(boundary, tolerance=100)
-    
+
     logger.debug("Loading environmental variables...")
-    evs_to_model, _ = load_environmental_variables(ev_path)
+    evs_to_model, _ = load_environmental_variables(ev_uri)
     
     # Filter species and activity types if specified
     if species is not None:
@@ -1536,10 +1567,12 @@ def train_sdm_models(
         model_features_config : VariablesConfig = VariablesConfig(variables=ev_columns)
         maxent_model_config : DefaultMaxentConfig = default_model_config
         if config_dir is not None:
-            config_dir_path = Path(config_dir)
-            if config_dir_path.exists():
+            config_dir_uri = resolve_data_path(config_dir)
+            if uri_exists(config_dir_uri):
                 try:
-                    model_config_path = config_dir_path / identifier / "model_config.yml"
+                    model_config_path = join_uri_path(
+                        config_dir_uri, identifier, "model_config.yml"
+                    )
                     model_config = load_model_config(model_config_path)
                     # Convert ModelConfig to DefaultMaxentConfig
                     maxent_model_config = DefaultMaxentConfig.from_config(
@@ -1555,7 +1588,9 @@ def train_sdm_models(
                     raise Exception(f"Error loading model config for {identifier}: {e}")
                 
                 try:
-                    variables_config_path = config_dir_path / identifier / "variables_config.yml"
+                    variables_config_path = join_uri_path(
+                        config_dir_uri, identifier, "variables_config.yml"
+                    )
                     variables_config = load_variables_config(variables_config_path)
                     # This will raise an error if the variables config contains features that are not in the data
                     model_features_config = variables_config.validate_features(ev_columns)
@@ -1569,7 +1604,9 @@ def train_sdm_models(
                 except Exception as e:
                     raise Exception(f"Error loading variables config for {identifier}: {e}")
             else:
-                raise FileNotFoundError(f"Tuning directory {config_dir_path} does not exist")
+                raise FileNotFoundError(
+                    f"Tuning directory {config_dir_uri} does not exist"
+                )
         else:
             logger.debug(f"No config_dir provided, using default configs for {identifier}")
         
@@ -1600,20 +1637,32 @@ def train_sdm_models(
     # Prepare and save results
     logger.info("Saving results...")
     results_df = prepare_results_dataframe(models, training_data)
-    model_paths = save_models(models, training_data, models_output_dir)
+    run_uri = build_run_output_uri(output_root)
+    logger.info("Writing model run to %s", run_uri)
 
-    results_df["model_path"] = [
-        str(model_paths[identifier]) if identifier in model_paths else ""
-        for identifier in results_df["identifier"]
-    ]
-    results_df["model_package_dir"] = [
-        str(Path(p).parent.resolve()) if p else ""
-        for p in results_df["model_path"]
-    ]
-    
-    # Save results and training data
-    save_results(results_df, models_output_dir)
-    save_training_data(training_data, models_output_dir)
+    with model_run_write_context(run_uri) as (models_output_dir, written_uri):
+        model_paths = save_models(models, training_data, models_output_dir)
+
+        published_paths = {
+            identifier: join_run_artifact(
+                written_uri,
+                Path(path).relative_to(models_output_dir),
+            )
+            for identifier, path in model_paths.items()
+        }
+        results_df["model_path"] = [
+            published_paths.get(identifier, "")
+            for identifier in results_df["identifier"]
+        ]
+        results_df["model_package_dir"] = [
+            artifact_parent_uri(p) if p else ""
+            for p in results_df["model_path"]
+        ]
+
+        save_results(results_df, models_output_dir)
+        save_training_data(training_data, models_output_dir)
+
+    logger.info("Model run outputs: %s", written_uri)
     
     # Log to MLflow
     logger.info("Logging to MLflow...")

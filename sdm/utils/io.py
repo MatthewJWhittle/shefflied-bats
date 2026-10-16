@@ -13,6 +13,9 @@ import pandas as pd
 
 from sdm.raster.utils import construct_transform_shift_bounds
 from sdm.types import ProjectConfig, ModelConfig, VariablesConfig
+from sdm.utils.fs import join_uri_path, uri_exists
+
+import fsspec
 
 
 def set_project_wd(verbose=True):
@@ -93,14 +96,14 @@ def load_input_variables() -> list:
 
 def load_model_config(config_path: Union[str, Path] = MODEL_CONFIG_PATH) -> ModelConfig:
     """Load model configuration from model_config.yml as a Pydantic model."""
-    config_path = Path(config_path)
-    if not config_path.exists():
+    config_ref = str(config_path)
+    if not uri_exists(config_ref):
         raise FileNotFoundError(
-            f"Model config file not found at {config_path}. "
+            f"Model config file not found at {config_ref}. "
             "Create a model_config.yml file in the root of the project."
         )
 
-    with open(config_path, "r") as f:
+    with fsspec.open(config_ref, "r") as f:
         raw = yaml.safe_load(f) or {}
 
     model_section = raw.get("model")
@@ -114,14 +117,14 @@ def load_variables_config(
     config_path: Union[str, Path] = VARIABLES_CONFIG_PATH,
 ) -> VariablesConfig:
     """Load variables configuration for tuning and feature selection."""
-    config_path = Path(config_path)
-    if not config_path.exists():
+    config_ref = str(config_path)
+    if not uri_exists(config_ref):
         raise FileNotFoundError(
-            f"Variables config file not found at {config_path}. "
+            f"Variables config file not found at {config_ref}. "
             "Create variables_config.yml or provide a custom path."
         )
 
-    with open(config_path, "r") as f:
+    with fsspec.open(config_ref, "r") as f:
         raw = yaml.safe_load(f) or {}
     
     return VariablesConfig.model_validate(raw)
@@ -143,8 +146,7 @@ def get_tuning_config_path(
     Returns:
         Path to the species-activity specific config directory
     """
-    base_dir = Path(base_dir)
-    return base_dir / model_id
+    return join_uri_path(base_dir, model_id)
 
 
 def load_tuning_variables_config(
@@ -162,18 +164,18 @@ def load_tuning_variables_config(
         FileNotFoundError: If config file is not found
         KeyError: If 'variables' key is not found
     """
-    config_path = Path(config_path)
-    if not config_path.exists():
+    config_ref = str(config_path)
+    if not uri_exists(config_ref):
         raise FileNotFoundError(
-            f"Variables config file not found at {config_path}"
+            f"Variables config file not found at {config_ref}"
         )
-    
-    with open(config_path, "r") as f:
+
+    with fsspec.open(config_ref, "r") as f:
         raw = yaml.safe_load(f) or {}
-    
+
     variables = raw.get("variables")
     if variables is None:
-        raise KeyError(f"No 'variables' key found in {config_path}")
+        raise KeyError(f"No 'variables' key found in {config_ref}")
     
     # Handle both list format and dict format (for backward compatibility)
     if isinstance(variables, list):
@@ -186,7 +188,7 @@ def load_tuning_variables_config(
             activity_sets = variables["activity_feature_sets"]
             if activity_sets:
                 return list(activity_sets.values())[0]
-        raise ValueError(f"Unexpected variables config format in {config_path}")
+            raise ValueError(f"Unexpected variables config format in {config_ref}")
     else:
         raise ValueError(f"Variables must be a list, got {type(variables)}")
 
@@ -206,18 +208,18 @@ def load_tuning_model_config(
     Returns:
         ModelConfig object
     """
-    config_path = Path(config_path)
-    if not config_path.exists():
+    config_ref = str(config_path)
+    if not uri_exists(config_ref):
         raise FileNotFoundError(
-            f"Model config file not found at {config_path}"
+            f"Model config file not found at {config_ref}"
         )
-    
-    with open(config_path, "r") as f:
+
+    with fsspec.open(config_ref, "r") as f:
         raw = yaml.safe_load(f) or {}
-    
+
     model_section = raw.get("model")
     if model_section is None:
-        raise KeyError(f"No 'model' section found in {config_path}")
+        raise KeyError(f"No 'model' section found in {config_ref}")
     
     return ModelConfig(**model_section)
 
@@ -240,22 +242,22 @@ def load_tuning_configs(
         FileNotFoundError: If config files are not found
     """
     config_dir = get_tuning_config_path(tuning_dir, model_id)
-    
-    model_config_path = config_dir / "model_config.yml"
-    variables_config_path = config_dir / "variables_config.yml"
-    
-    if not model_config_path.exists():
+
+    model_config_path = join_uri_path(config_dir, "model_config.yml")
+    variables_config_path = join_uri_path(config_dir, "variables_config.yml")
+
+    if not uri_exists(model_config_path):
         raise FileNotFoundError(
             f"Model config not found at {model_config_path}. "
             f"Expected tuning configs in {config_dir}"
         )
-    
-    if not variables_config_path.exists():
+
+    if not uri_exists(variables_config_path):
         raise FileNotFoundError(
             f"Variables config not found at {variables_config_path}. "
             f"Expected tuning configs in {config_dir}"
         )
-    
+
     model_config = load_tuning_model_config(model_config_path)
     selected_features = load_tuning_variables_config(variables_config_path)
     

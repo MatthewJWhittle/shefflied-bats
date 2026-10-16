@@ -1,38 +1,17 @@
-locals {
-  objects_prefix = "projects/_/buckets/${var.bucket_name}/objects"
-}
-
 # ---------------------------------------------------------------------------
-# Run identity: reads inputs/, writes new objects under runs/.
-# Can list file names in published/ but can't read or change anything there. No delete, so existing objects cannot be overwritten.
+# Run identity: read/write objects in the data bucket (inputs/ and runs/).
+# roles/storage.objectAdmin allows create, read, update, and delete of objects
+# (overwrite implies delete of the current generation; bucket IAM is not granted).
 # ---------------------------------------------------------------------------
 resource "google_service_account" "run" {
   account_id   = "model-run"
   display_name = "Model run"
 }
 
-resource "google_storage_bucket_iam_member" "run_read_inputs" {
+resource "google_storage_bucket_iam_member" "run_object_admin" {
   bucket = google_storage_bucket.data.name
-  role   = "roles/storage.objectViewer"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.run.email}"
-
-  # Listing is checked against the bucket, not a prefix, so object names
-  # across the bucket are listable; object contents are readable only under inputs/.
-  condition {
-    title      = "inputs-read"
-    expression = "resource.type == \"storage.googleapis.com/Bucket\" || resource.name.startsWith(\"${local.objects_prefix}/inputs/\")"
-  }
-}
-
-resource "google_storage_bucket_iam_member" "run_create_runs" {
-  bucket = google_storage_bucket.data.name
-  role   = "roles/storage.objectCreator"
-  member = "serviceAccount:${google_service_account.run.email}"
-
-  condition {
-    title      = "runs-create"
-    expression = "resource.name.startsWith(\"${local.objects_prefix}/runs/\")"
-  }
 }
 
 # ---------------------------------------------------------------------------
