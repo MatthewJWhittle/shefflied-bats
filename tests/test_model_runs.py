@@ -1,4 +1,4 @@
-"""Tests for fsspec model output run directories."""
+"""Tests for model run output path helpers."""
 
 from __future__ import annotations
 
@@ -6,11 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import fsspec
+import pandas as pd
 import pytest
 
-import pandas as pd
-
-from sdm.utils.model_output_fs import (
+from sdm.utils.model_runs import (
     INPUT_DATA_ROOT_ENV,
     MODEL_OUTPUT_ROOT_ENV,
     artifact_parent_uri,
@@ -18,10 +17,8 @@ from sdm.utils.model_output_fs import (
     generate_run_segment,
     join_run_artifact,
     model_run_write_context,
-    put_local_tree,
     resolve_data_path,
     resolve_output_root,
-    uri_for_rasterio,
 )
 
 
@@ -104,11 +101,6 @@ def test_resolve_data_path_with_input_root(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
 
-def test_uri_for_rasterio_maps_gs_to_vsigs() -> None:
-    assert uri_for_rasterio("gs://bucket/evs/stack.tif") == "/vsigs/bucket/evs/stack.tif"
-    assert uri_for_rasterio("/data/local.tif") == "/data/local.tif"
-
-
 def test_published_paths_in_model_results_use_run_uri() -> None:
     root = "memory://results-bucket"
     run_uri = build_run_output_uri(root, run_segment="20251015T120000Z-pubtest")
@@ -137,20 +129,3 @@ def test_published_paths_in_model_results_use_run_uri() -> None:
     assert b"memory://results-bucket/runs/" in csv_bytes
     assert b"alpha_pkg/model.pkl" in csv_bytes
     assert str(write_dir).encode() not in csv_bytes
-
-
-def test_put_local_tree_to_memory(tmp_path: Path) -> None:
-    local = tmp_path / "staging"
-    local.mkdir()
-    (local / "a.txt").write_text("alpha")
-    nested = local / "nested"
-    nested.mkdir()
-    (nested / "b.txt").write_text("beta")
-
-    fs = fsspec.filesystem("memory")
-    remote = "memory://dest/run"
-    fs.makedirs(remote, exist_ok=True)
-    put_local_tree(fs, local, remote)
-
-    assert fs.cat(f"{remote}/a.txt") == b"alpha"
-    assert fs.cat(f"{remote}/nested/b.txt") == b"beta"

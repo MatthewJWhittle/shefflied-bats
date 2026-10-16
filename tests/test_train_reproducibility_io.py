@@ -14,7 +14,7 @@ from sdm.commands.modelling.train_sdm_models import save_models, train_single_mo
 from sdm.models.maxent.maxent_model import DefaultMaxentConfig
 from sdm.types import TrainingData
 from sdm.utils.io import load_model_config
-from sdm.utils.model_output_fs import (
+from sdm.utils.model_runs import (
     build_run_output_uri,
     join_run_artifact,
     model_run_write_context,

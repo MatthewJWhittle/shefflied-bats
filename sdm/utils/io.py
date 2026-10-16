@@ -13,7 +13,7 @@ import pandas as pd
 
 from sdm.raster.utils import construct_transform_shift_bounds
 from sdm.types import ProjectConfig, ModelConfig, VariablesConfig
-from sdm.utils.model_output_fs import join_uri_path, uri_exists
+from sdm.utils.fs import join_uri_path, uri_exists
 
 import fsspec
 

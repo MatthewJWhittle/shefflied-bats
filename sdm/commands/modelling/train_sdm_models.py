@@ -58,16 +58,14 @@ from sdm.utils.io import (
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
 from sdm.commands.modelling.utils import get_model_id
-from sdm.utils.model_output_fs import (
+from sdm.utils.fs import join_uri_path, local_materialized_path, uri_exists
+from sdm.utils.model_runs import (
     artifact_parent_uri,
     build_run_output_uri,
     join_run_artifact,
-    join_uri_path,
-    local_materialized_path,
     model_run_write_context,
     resolve_data_path,
     resolve_output_root,
-    uri_exists,
 )
 logger = logging.getLogger(__name__)
 

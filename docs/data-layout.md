@@ -66,3 +66,10 @@ Example: `gs://habitat-suitability-modelling-data/runs/20251016T120000Z-a1b2c3d4
 | `MODEL_OUTPUT_ROOT` | Bucket or directory root for run folders (e.g. `gs://habitat-suitability-modelling-data`) |
 
 Authentication is standard **gcsfs** / Application Default Credentials or `GOOGLE_APPLICATION_CREDENTIALS` (no custom checks in application code).
+
+## Code modules
+
+| Module | Role |
+| --- | --- |
+| `sdm/utils/fs.py` | Storage-agnostic helpers: path joining, existence checks, GDAL `/vsigs/` mapping, downloading remote files for local-only libraries, idempotent byte/text writes, and `staged_directory_context` for publishing a local staging tree to local or remote storage. |
+| `sdm/utils/model_runs.py` | Run layout only: `INPUT_DATA_ROOT` / `MODEL_OUTPUT_ROOT` resolution, `runs/<UTC>-<id>/` URIs, and published artifact paths for `model_results.csv`. |

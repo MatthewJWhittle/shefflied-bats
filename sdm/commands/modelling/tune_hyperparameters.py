@@ -44,7 +44,8 @@ from sdm.occurrence.sampling import (
     TransformMethod,
 )
 from sdm.raster.io import load_environmental_variables
-from sdm.utils.model_output_fs import local_materialized_path, resolve_data_path
+from sdm.utils.fs import local_materialized_path
+from sdm.utils.model_runs import resolve_data_path
 from sdm.utils.io import (
     load_model_config,
     load_project_config,
