@@ -62,10 +62,12 @@ from sdm.utils.model_output_fs import (
     artifact_parent_uri,
     build_run_output_uri,
     join_run_artifact,
+    join_uri_path,
     local_materialized_path,
     model_run_write_context,
     resolve_data_path,
     resolve_output_root,
+    uri_exists,
 )
 logger = logging.getLogger(__name__)
 
@@ -1170,23 +1172,37 @@ def setup_training_data(
     # Resolve variables config path
     if variables_config_path is None:
         variables_config_path = Path(project_config.paths.variables_config_path)
-    variables_cfg = load_variables_config(variables_config_path)
+    variables_cfg = load_variables_config(resolve_data_path(variables_config_path))
     
     # Resolve data paths from config if not explicitly provided
-    bats_path = bats_file or Path(project_config.paths.occurence_data)
-    background_path = background_file or Path(project_config.paths.background_points)
-    ev_path = ev_file or Path(project_config.paths.ev_tiff)
-    grid_points_path = grid_points_file or Path(project_config.paths.grid_points)
-    
+    bats_uri = resolve_data_path(
+        bats_file if bats_file is not None else project_config.paths.occurence_data
+    )
+    background_uri = resolve_data_path(
+        background_file
+        if background_file is not None
+        else project_config.paths.background_points
+    )
+    ev_uri = resolve_data_path(
+        ev_file if ev_file is not None else project_config.paths.ev_tiff
+    )
+    grid_points_uri = resolve_data_path(
+        grid_points_file
+        if grid_points_file is not None
+        else project_config.paths.grid_points
+    )
+
     # Load data
     logger.debug("Loading bat occurrence data...")
-    bats_ant = load_bat_data(bats_path)
-    
+    with local_materialized_path(bats_uri) as bats_path:
+        bats_ant = load_bat_data(bats_path)
+
     logger.debug("Loading background points...")
-    background, background_density = load_background_points(background_path)
-    
+    with local_materialized_path(background_uri) as background_path:
+        background, background_density = load_background_points(background_path)
+
     logger.debug("Loading environmental variables...")
-    ev_data, ev_raster_path = load_environmental_variables(ev_path)
+    ev_data, ev_raster_path = load_environmental_variables(ev_uri)
     all_ev_columns = list(ev_data.data_vars.keys())
     
     # Filter environmental variables based on roster
@@ -1211,10 +1227,11 @@ def setup_training_data(
     
     # Load grid points
     logger.debug("Loading grid points...")
-    if grid_points_path is None or not Path(grid_points_path).exists():
+    if not grid_points_uri or not uri_exists(grid_points_uri):
         grid_points = extract_grid_points(ev_data)
     else:
-        grid_points = gpd.read_parquet(grid_points_path)
+        with local_materialized_path(grid_points_uri) as grid_points_path:
+            grid_points = gpd.read_parquet(grid_points_path)
     
     # Annotate points with environmental variables (skip if already annotated)
     logger.debug("Annotating points with environmental variables...")
@@ -1405,7 +1422,7 @@ def train_sdm_models(
     
     # Load configs
     project_config = load_project_config(project_config_path)
-    base_model_cfg = load_model_config(model_config_path)
+    base_model_cfg = load_model_config(resolve_data_path(model_config_path))
     
     # Get background config from model config (with defaults if not present)
     background_config = base_model_cfg.background or BackgroundConfig()
@@ -1552,10 +1569,12 @@ def train_sdm_models(
         model_features_config : VariablesConfig = VariablesConfig(variables=ev_columns)
         maxent_model_config : DefaultMaxentConfig = default_model_config
         if config_dir is not None:
-            config_dir_path = Path(config_dir)
-            if config_dir_path.exists():
+            config_dir_uri = resolve_data_path(config_dir)
+            if uri_exists(config_dir_uri):
                 try:
-                    model_config_path = config_dir_path / identifier / "model_config.yml"
+                    model_config_path = join_uri_path(
+                        config_dir_uri, identifier, "model_config.yml"
+                    )
                     model_config = load_model_config(model_config_path)
                     # Convert ModelConfig to DefaultMaxentConfig
                     maxent_model_config = DefaultMaxentConfig.from_config(
@@ -1571,7 +1590,9 @@ def train_sdm_models(
                     raise Exception(f"Error loading model config for {identifier}: {e}")
                 
                 try:
-                    variables_config_path = config_dir_path / identifier / "variables_config.yml"
+                    variables_config_path = join_uri_path(
+                        config_dir_uri, identifier, "variables_config.yml"
+                    )
                     variables_config = load_variables_config(variables_config_path)
                     # This will raise an error if the variables config contains features that are not in the data
                     model_features_config = variables_config.validate_features(ev_columns)
@@ -1585,7 +1606,9 @@ def train_sdm_models(
                 except Exception as e:
                     raise Exception(f"Error loading variables config for {identifier}: {e}")
             else:
-                raise FileNotFoundError(f"Tuning directory {config_dir_path} does not exist")
+                raise FileNotFoundError(
+                    f"Tuning directory {config_dir_uri} does not exist"
+                )
         else:
             logger.debug(f"No config_dir provided, using default configs for {identifier}")
         

@@ -126,6 +126,10 @@ Manual fallback (May 2023 vintage still supported):
 
 Disable live download with `sdm setup --no-live-download` when working fully offline.
 
+## Cloud bucket layout
+
+See [docs/data-layout.md](docs/data-layout.md) for every train/tune input and output path under `gs://habitat-suitability-modelling-data` (`inputs/` and `runs/`).
+
 ## Model-run output location
 
 Training writes each run under `runs/<UTC date-time>-<short hex>/` beneath an output **root**. Default root: `paths.models` in `config.yml` (`data/sdm_models`). Override with the CLI `--output-dir` or:

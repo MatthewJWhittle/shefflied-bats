@@ -18,6 +18,27 @@ logger = logging.getLogger(__name__)
 MODEL_OUTPUT_ROOT_ENV = "MODEL_OUTPUT_ROOT"
 INPUT_DATA_ROOT_ENV = "INPUT_DATA_ROOT"
 RUNS_DIR_NAME = "runs"
+DEFAULT_GCS_BUCKET = "gs://habitat-suitability-modelling-data"
+DEFAULT_INPUTS_PREFIX = f"{DEFAULT_GCS_BUCKET}/inputs"
+DEFAULT_RUNS_PREFIX = f"{DEFAULT_GCS_BUCKET}/runs"
+
+
+def join_uri_path(base: str | Path, *parts: str) -> str:
+    base_str = str(base).rstrip("/")
+    suffix = "/".join(part.strip("/") for part in parts if part)
+    if not suffix:
+        return base_str
+    if "://" in base_str:
+        return f"{base_str}/{suffix}"
+    return str(Path(base_str) / suffix)
+
+
+def uri_exists(uri_or_path: str | Path) -> bool:
+    ref = str(uri_or_path)
+    if "://" not in ref:
+        return Path(ref).exists()
+    fs, path = filesystem_for_uri(ref)
+    return bool(fs.exists(path))
 
 
 def resolve_data_path(config_or_cli_path: str | Path) -> str:

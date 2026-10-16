@@ -477,7 +477,7 @@ class TestTuningConfigLoading:
         model_id = get_model_id([latin_name, activity_type])
 
         expected_path = get_tuning_config_path(tuning_dir, model_id)
-        assert expected_path == tuning_dir / model_id
+        assert expected_path == str(tuning_dir / model_id)
     
     def test_feature_filtering_logic(self):
         """Test the feature filtering logic used when loading tuning configs."""
