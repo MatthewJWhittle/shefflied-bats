@@ -37,8 +37,9 @@ class SpatialConfig(BaseModel):
 
 
 class MlflowConfig(BaseModel):
-    tracking_uri: str
-    experiment_name: str
+    enabled: bool = True
+    tracking_uri: str = "sqlite:///mlflow.db"
+    experiment_name: str = "species_sdm_experiment"
 
 
 class ProjectConfig(BaseModel):

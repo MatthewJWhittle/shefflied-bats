@@ -80,6 +80,8 @@ From `config.yml`:
 | Models | `data/sdm_models/` |
 | Predictions | `data/sdm_predictions/` |
 
+MLflow tracking defaults and the UI workflow are documented in the [repository README](../README.md#mlflow-experiment-tracking).
+
 ## Adding commands
 
 1. Implement the command under `sdm/commands/`

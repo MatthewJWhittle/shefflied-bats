@@ -15,7 +15,6 @@ from datetime import datetime
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import mlflow
 import numpy as np
 import optuna
 import optuna.visualization as vis
@@ -30,7 +29,13 @@ from sdm.commands.modelling.train_sdm_models import (
     prepare_species_training_data,
     prepare_training_data,
     _summarize_cv_scores,
-    _configure_mlflow_from_config,
+)
+from sdm.utils.mlflow_tracking import (
+    TrainingSessionMetadata,
+    configure_mlflow,
+    log_tuning_session_tags,
+    mlflow_session_run,
+    resolve_mlflow_config,
 )
 from sdm.data.loaders.vector import load_bat_data
 from sdm.models.maxent.maxent_model import (
@@ -1080,8 +1085,8 @@ def tune_hyperparameters(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Configure MLflow
-    _configure_mlflow_from_config(project_config)
+    mlflow_cfg = resolve_mlflow_config(project_config)
+    mlflow_enabled = configure_mlflow(mlflow_cfg)
     
     # ========================================================================
     # LOAD CORE DATA (IN-MEMORY OBJECTS)
@@ -1143,23 +1148,39 @@ def tune_hyperparameters(
     # OPTUNA TUNING - PER SPECIES-ACTIVITY COMBINATION
     # ========================================================================
     parent_run_name = f"Hyperparameter_Tuning_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    _parent_run = mlflow.start_run(run_name=parent_run_name)
-    logger.info(f"Started MLflow parent run: {parent_run_name}")
-    
+    tuning_session = TrainingSessionMetadata(
+        occurrence_data=str(bats_uri),
+        ev_data=str(ev_uri),
+        model_config_path=str(model_config_path),
+    )
+
     # Aggregate results across all combinations
     all_results: List[TuningResult] = []
     
-    try:
-        # Log tuning configuration
-        mlflow.log_params({
+    session_cm = mlflow_session_run(
+        parent_run_name,
+        enabled=mlflow_enabled,
+        params={
             "tuning_n_trials": n_trials,
             "tuning_approach": "per_species_activity",
-        })
-        if species:
-            mlflow.log_param("tuning_species", ",".join(species))
-        if activity_types:
-            mlflow.log_param("tuning_activity_types", ",".join(activity_types))
-        
+            **(
+                {"tuning_species": ",".join(species)}
+                if species
+                else {}
+            ),
+            **(
+                {"tuning_activity_types": ",".join(activity_types)}
+                if activity_types
+                else {}
+            ),
+        },
+    )
+
+    with session_cm:
+        if mlflow_enabled:
+            logger.info("Started MLflow parent run: %s", parent_run_name)
+            log_tuning_session_tags(tuning_session)
+
         # Get all species-activity combinations present in the (annotated) data
         combinations_df = (
             presence_with_evs_gdf[["latin_name", "activity_type"]]
@@ -1369,8 +1390,7 @@ def tune_hyperparameters(
             results_df.to_csv(csv_path, index=False)
             logger.info(f"Wrote tuning summary CSV to {csv_path}")
 
-        logger.info(f"Results logged to MLflow parent run: {parent_run_name}")
-        
-    finally:
-        # End parent run
-        mlflow.end_run()
+        if mlflow_enabled:
+            logger.info(
+                "Results logged to MLflow parent run: %s", parent_run_name
+            )
