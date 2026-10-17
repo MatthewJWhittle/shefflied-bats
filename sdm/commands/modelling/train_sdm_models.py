@@ -1174,7 +1174,9 @@ def setup_training_data(
     # Resolve variables config path
     if variables_config_path is None:
         variables_config_path = Path(project_config.paths.variables_config_path)
-    variables_cfg = load_variables_config(resolve_data_path(variables_config_path))
+    variables_cfg = load_variables_config(
+        resolve_sdm_config_root(variables_config_path)
+    )
     
     # Resolve data paths from config if not explicitly provided
     bats_uri = resolve_data_path(
@@ -1427,7 +1429,7 @@ def train_sdm_models(
     
     # Load configs
     project_config = load_project_config(project_config_path)
-    base_model_cfg = load_model_config(resolve_data_path(model_config_path))
+    base_model_cfg = load_model_config(resolve_sdm_config_root(model_config_path))
 
     if variables_config_path is None:
         variables_config_path = Path(project_config.paths.variables_config_path)

@@ -29,6 +29,21 @@ def test_resolve_sdm_config_root_ignores_input_data_root(
     assert Path(resolved).is_dir()
 
 
+def test_base_model_config_ignores_input_data_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        INPUT_DATA_ROOT_ENV, "gs://habitat-suitability-modelling-data/inputs"
+    )
+    resolved = resolve_sdm_config_root("model_config.yml")
+    assert resolved.endswith("model_config.yml")
+    assert "gs://" not in resolved
+    assert Path(resolved).is_file()
+    cfg = load_model_config(resolved)
+    assert cfg.background is not None
+    assert cfg.background.n_background_points > 0
+
+
 def test_capitalised_folder_found_from_lowercase_model_id() -> None:
     model_id = get_model_id(["Plecotus auritus", "Roost"])
     assert model_id == "plecotus_auritus_roost"

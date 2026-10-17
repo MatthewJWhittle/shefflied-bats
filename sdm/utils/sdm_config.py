@@ -1,4 +1,4 @@
-"""Resolve hand-maintained per-model SDM configs from the git checkout."""
+"""Resolve hand-maintained SDM YAML configs from the git checkout."""
 
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_sdm_config_root(config_or_cli_path: str | Path) -> str:
-    """Resolve an SDM config directory without ``INPUT_DATA_ROOT`` rewriting.
+    """Resolve a repo-managed config path without ``INPUT_DATA_ROOT`` rewriting.
 
-    Absolute paths and ``gs://`` URIs are returned unchanged. Relative paths are
-    resolved against the project root (the git checkout), not cloud input data.
+    Applies to the shared ``model_config.yml``, ``variables_config.yml``, and
+    ``data/sdm_config/`` trees. Absolute paths and ``gs://`` URIs are returned
+    unchanged. Relative paths resolve against the project root (git checkout),
+    not cloud input data.
     """
     path_str = str(config_or_cli_path)
     if "://" in path_str:
