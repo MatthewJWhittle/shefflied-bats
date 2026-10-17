@@ -465,19 +465,22 @@ class TestTuningConfigLoading:
     """Tests for tuning config loading and path resolution utilities."""
     
     def test_tuning_config_path_resolution(self):
-        """Test that path resolution works correctly for tuning configs."""
+        """Test that path resolution finds capitalised tuning folders on Linux."""
         from pathlib import Path
 
         from sdm.commands.modelling.utils import get_model_id
         from sdm.utils.io import get_tuning_config_path
+        from sdm.utils.sdm_config import resolve_sdm_config_root
 
         latin_name = "Nyctalus noctula"
         activity_type = "In flight"
         tuning_dir = Path("data/sdm_tuning")
         model_id = get_model_id([latin_name, activity_type])
 
-        expected_path = get_tuning_config_path(tuning_dir, model_id)
-        assert expected_path == str(tuning_dir / model_id)
+        resolved_path = get_tuning_config_path(tuning_dir, model_id)
+        assert resolved_path.endswith("Nyctalus_noctula_In_flight")
+        assert Path(resolved_path).is_dir()
+        assert resolve_sdm_config_root(tuning_dir) in resolved_path
     
     def test_feature_filtering_logic(self):
         """Test the feature filtering logic used when loading tuning configs."""

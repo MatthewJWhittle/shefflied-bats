@@ -256,6 +256,13 @@ def train(
         10,
         help="Number of neighbors for sample weighting.",
     ),
+    allow_config_fallback: bool = typer.Option(
+        False,
+        help=(
+            "Allow missing per-model config folders to fall back to the base "
+            "variables_config.yml roster (default: fail with a clear error)."
+        ),
+    ),
     verbose: bool = False,
 ) -> None:
     """Train SDM models using the new modular approach.
@@ -286,6 +293,7 @@ def train(
         d_min=d_min,
         d_max=d_max_value,
         sample_weight_n_neighbors=sample_weight_n_neighbors,
+        allow_config_fallback=allow_config_fallback,
     )
     
     logging.info("Model training complete!")

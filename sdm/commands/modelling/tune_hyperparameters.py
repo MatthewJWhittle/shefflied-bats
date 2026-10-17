@@ -1281,7 +1281,12 @@ def tune_hyperparameters(
             
             if n_completed > 0:
                 # Write best configs for this combination
-                combination_dir = get_tuning_config_path(output_dir, get_model_id([latin_name, activity_type]))
+                combination_dir = Path(
+                    get_tuning_config_path(
+                        output_dir,
+                        get_model_id([latin_name, activity_type]),
+                    )
+                )
                 combination_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Use consistent file names (not "best_*") for easy loading

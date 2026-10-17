@@ -14,6 +14,7 @@ import pandas as pd
 from sdm.raster.utils import construct_transform_shift_bounds
 from sdm.types import ProjectConfig, ModelConfig, VariablesConfig
 from sdm.utils.fs import join_uri_path, uri_exists
+from sdm.utils.sdm_config import model_config_file_paths, resolve_model_config_dir
 
 import fsspec
 
@@ -131,22 +132,18 @@ def load_variables_config(
 
 
 def get_tuning_config_path(
-    base_dir: Union[str, Path], model_id: str
-) -> Path:
-    """Get the path to config directory for a species-activity combination.
-    
-    This function provides a consistent way to determine config paths for both
-    writing (during tuning) and reading (during training).
-    
-    Args:
-        base_dir: Base directory containing tuning results
-        latin_name: Species latin name (e.g., "Myotis mystacinus")
-        activity_type: Activity type (e.g., "In flight")
-        
-    Returns:
-        Path to the species-activity specific config directory
+    base_dir: Union[str, Path],
+    model_id: str,
+    *,
+    must_exist: bool = False,
+) -> str:
+    """Get the path to a species-activity config directory.
+
+    Uses case-insensitive folder matching when reading existing configs.
+    Relative ``base_dir`` values resolve from the project root, not
+    ``INPUT_DATA_ROOT``.
     """
-    return join_uri_path(base_dir, model_id)
+    return resolve_model_config_dir(base_dir, model_id, must_exist=must_exist)
 
 
 def load_tuning_variables_config(
@@ -241,10 +238,8 @@ def load_tuning_configs(
     Raises:
         FileNotFoundError: If config files are not found
     """
-    config_dir = get_tuning_config_path(tuning_dir, model_id)
-
-    model_config_path = join_uri_path(config_dir, "model_config.yml")
-    variables_config_path = join_uri_path(config_dir, "variables_config.yml")
+    config_dir = resolve_model_config_dir(tuning_dir, model_id, must_exist=True)
+    model_config_path, variables_config_path = model_config_file_paths(config_dir)
 
     if not uri_exists(model_config_path):
         raise FileNotFoundError(
