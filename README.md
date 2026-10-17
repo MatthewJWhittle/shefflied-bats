@@ -61,6 +61,33 @@ package.json   # schema_version 1, ordered feature_names, metrics, …
 sdm config
 ```
 
+## MLflow experiment tracking
+
+Training (`sdm train`) and tuning (`sdm tune`) log parameters, cross-validation metrics, MaxEnt configuration, feature lists, and sklearn model artefacts to MLflow. Each training session creates a parent run with nested runs per species × activity. Runs are tagged with the git commit (when available) and the occurrence / environmental data paths used for that session.
+
+**Local defaults** (in `config.yml`): SQLite backend at `mlflow.db` in the project root and experiment `species_sdm_experiment`. Tracking databases and `mlruns/` are gitignored.
+
+**Environment overrides** (no paid hosting required):
+
+| Variable | Purpose |
+|----------|---------|
+| `MLFLOW_ENABLED` | Set to `false` to skip tracking entirely |
+| `MLFLOW_TRACKING_URI` | e.g. `sqlite:///mlflow.db` or a remote tracking server URI |
+| `MLFLOW_EXPERIMENT_NAME` | Experiment name in the tracking store |
+
+```bash
+export MLFLOW_TRACKING_URI=sqlite:///mlflow.db
+sdm train
+```
+
+**Compare runs:** start the MLflow UI against the same tracking URI you used for training:
+
+```bash
+uv run mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+Open the URL printed in the terminal (typically http://127.0.0.1:5000), select the experiment, and sort or filter runs by metrics such as `mean_auc` or parameters such as `latin_name`.
+
 ## Occurrence data
 
 GeoJSON at `data/processed/bats-tidy.geojson` (or point `config.yml` with `sdm set-occurrence`). Expected columns:
