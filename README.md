@@ -150,6 +150,17 @@ export INPUT_DATA_ROOT=gs://habitat-suitability-modelling-data/inputs
 
 Vector inputs are fetched via fsspec; the environmental GeoTIFF is read through GDAL `/vsigs/` (requires GDAL Google Cloud access in the runtime environment).
 
+**Inputs from a local mirror (recommended for large rasters on a laptop):** sync the bucket `inputs/` tree once (or when it changes), then point `INPUT_DATA_ROOT` at the local directory while keeping run outputs on GCS:
+
+```bash
+gcloud storage rsync gs://habitat-suitability-modelling-data/inputs ~/hsm-inputs --recursive
+export INPUT_DATA_ROOT=~/hsm-inputs
+export MODEL_OUTPUT_ROOT=gs://habitat-suitability-modelling-data
+sdm train
+```
+
+Use `--dry-run` first to preview transfers. Add `--delete-unmatched-destination-objects` only if you want the local folder to match the bucket exactly (destroys local files that are not in the bucket prefix). Tilde in `INPUT_DATA_ROOT` is expanded to your home directory.
+
 Browse or copy outputs with the gcloud CLI:
 
 ```bash

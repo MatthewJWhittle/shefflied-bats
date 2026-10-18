@@ -101,6 +101,53 @@ def test_resolve_data_path_with_input_root(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
 
+def test_resolve_data_path_leaves_absolute_local_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(
+        INPUT_DATA_ROOT_ENV, "gs://habitat-suitability-modelling-data/inputs"
+    )
+    local_ev = tmp_path / "evs-to-model.tif"
+    resolved = resolve_data_path(local_ev)
+    assert resolved == str(local_ev)
+
+
+def test_resolve_data_path_leaves_file_uri_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        INPUT_DATA_ROOT_ENV, "gs://habitat-suitability-modelling-data/inputs"
+    )
+    uri = "file:///tmp/evs-to-model.tif"
+    assert resolve_data_path(uri) == uri
+
+
+def test_resolve_data_path_expands_tilde_in_local_input_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(INPUT_DATA_ROOT_ENV, "~/hsm-inputs")
+    resolved = resolve_data_path("data/evs/evs-to-model.tif")
+    expected = Path("~/hsm-inputs").expanduser() / "data/evs/evs-to-model.tif"
+    assert resolved == str(expected)
+
+
+def test_local_input_root_with_gcs_output_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    local_inputs = tmp_path / "hsm-inputs"
+    monkeypatch.setenv(INPUT_DATA_ROOT_ENV, str(local_inputs))
+    monkeypatch.setenv(MODEL_OUTPUT_ROOT_ENV, "gs://habitat-suitability-modelling-data")
+
+    ev_path = resolve_data_path("data/evs/evs-to-model.tif")
+    assert ev_path == str(local_inputs / "data/evs/evs-to-model.tif")
+
+    output_root = resolve_output_root(
+        cli_output_dir=None,
+        config_models_path=tmp_path / "data/sdm_models",
+    )
+    assert output_root == "gs://habitat-suitability-modelling-data"
+
+
 def test_published_paths_in_model_results_use_run_uri() -> None:
     root = "memory://results-bucket"
     run_uri = build_run_output_uri(root, run_segment="20251015T120000Z-pubtest")
