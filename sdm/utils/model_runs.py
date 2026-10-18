@@ -12,9 +12,6 @@ from sdm.utils.fs import join_uri_path, resolve_under_env_root, staged_directory
 MODEL_OUTPUT_ROOT_ENV = "MODEL_OUTPUT_ROOT"
 INPUT_DATA_ROOT_ENV = "INPUT_DATA_ROOT"
 RUNS_DIR_NAME = "runs"
-DEFAULT_GCS_BUCKET = "gs://habitat-suitability-modelling-data"
-DEFAULT_INPUTS_PREFIX = f"{DEFAULT_GCS_BUCKET}/inputs"
-DEFAULT_RUNS_PREFIX = f"{DEFAULT_GCS_BUCKET}/runs"
 
 
 def resolve_data_path(config_or_cli_path: str | Path) -> str:

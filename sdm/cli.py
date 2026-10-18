@@ -205,13 +205,13 @@ def background(
 
 @app.command()
 def train(
-    bats_file: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.occurence_data),
-        help="Path to bat occurrence data.",
+    bats_file: str = typer.Option(
+        PROJECT_CONFIG.paths.occurence_data,
+        help="Path to bat occurrence data (local path or URI such as file:// or gs://).",
     ),
-    ev_file: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.ev_tiff),
-        help="Path to environmental variables raster.",
+    ev_file: str = typer.Option(
+        PROJECT_CONFIG.paths.ev_tiff,
+        help="Path to environmental variables raster (local path or URI such as file:// or gs://).",
     ),
     output_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.models),
@@ -301,9 +301,9 @@ def train(
 
 @app.command()
 def predict(
-    ev_path: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.ev_tiff),
-        help="Path to environmental variables raster.",
+    ev_path: str = typer.Option(
+        PROJECT_CONFIG.paths.ev_tiff,
+        help="Path to environmental variables raster (local path or URI such as file:// or gs://).",
     ),
     models_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.models),
@@ -443,9 +443,9 @@ def visualize(
 
 @app.command()
 def explain(
-    ev_path: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.ev_tiff),
-        help="Path to environmental variables raster.",
+    ev_path: str = typer.Option(
+        PROJECT_CONFIG.paths.ev_tiff,
+        help="Path to environmental variables raster (local path or URI such as file:// or gs://).",
     ),
     models_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.models),
@@ -596,13 +596,13 @@ def config(
 
 @app.command()
 def tune(
-    bats_file: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.occurence_data),
-        help="Path to bat occurrence data.",
+    bats_file: str = typer.Option(
+        PROJECT_CONFIG.paths.occurence_data,
+        help="Path to bat occurrence data (local path or URI such as file:// or gs://).",
     ),
-    ev_file: Path = typer.Option(
-        Path(PROJECT_CONFIG.paths.ev_tiff),
-        help="Path to environmental variables raster.",
+    ev_file: str = typer.Option(
+        PROJECT_CONFIG.paths.ev_tiff,
+        help="Path to environmental variables raster (local path or URI such as file:// or gs://).",
     ),
     output_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.tuning_dir),

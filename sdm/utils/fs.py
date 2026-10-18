@@ -62,10 +62,14 @@ def resolve_under_env_root(config_or_cli_path: str | Path, env_var: str) -> str:
     path_str = str(config_or_cli_path)
     if "://" in path_str:
         return path_str
+    if os.path.isabs(path_str):
+        return path_str
     root = os.environ.get(env_var, "").strip()
-    if root:
+    if not root:
+        return path_str
+    if "://" in root:
         return join_uri_path(root, path_str)
-    return path_str
+    return join_uri_path(os.path.expanduser(root), path_str)
 
 
 def ensure_directory(uri: str) -> None:
