@@ -20,7 +20,7 @@ The goal is to train models on a developer laptop or on remote machines from the
 This is the simplest setup that meets the goal: keep it simple; no tight control. Versioning makes broad access safe enough for a small team.
 
 ## How it's judged
-One training run on each machine with the same config and inputs gives broadly the same results, and both runs are readable from the bucket. Reproducible RNG for train and tune is controlled by the integer `seed` in the repo’s base `model_config.yml` (also recorded in each run’s `run_metadata.json`).
+One training run on each machine with the same config and inputs gives broadly the same results, and both runs are readable from the bucket. Reproducible random number generator behaviour for train and tune is controlled by the integer `seed` in the repo’s base `model_config.yml` (also recorded in each run’s `run_metadata.json`).
 
 ## Revisit when
 - Cloud compute is added.

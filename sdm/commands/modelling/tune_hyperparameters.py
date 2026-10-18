@@ -197,7 +197,7 @@ def precompute_correlation_matrix(
     available_features: List[str],
     sample_size: int = 3000,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> Optional[pd.DataFrame]:
     """Precompute correlation matrix for all available features.
     
@@ -350,7 +350,7 @@ def eval_model(
     max_threads_per_model: int = 1,
     n_cv_folds: int = 3,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> Tuple[float, float]:
     """Evaluate a model and return CV scores and stability for tuning."""
     apply_training_seed(seed)

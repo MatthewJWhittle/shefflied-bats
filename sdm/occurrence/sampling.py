@@ -151,7 +151,7 @@ def sample_probability_surface(
     prob_surface: xr.DataArray,
     n_background_points: int,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Sample background points from a probability surface.
@@ -308,7 +308,7 @@ def generate_background_points_from_data(
     reverse_weights: bool = False,
     clip_to_boundary: bool = True,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> Tuple[gpd.GeoDataFrame, xr.DataArray]:
     """Generate background points based on density-smoothed occurrence data.
 
@@ -508,6 +508,8 @@ def generate_background_points(
     region_weighting_factor: float = 1.0,
     write_parameters: bool = False,
     reverse_weights: bool = False,
+    *,
+    seed: int,
 ) -> Tuple[Path, Path]:
     """
     A wrapper around generate_background_points_from_data that has a file interface and output
@@ -552,6 +554,7 @@ def generate_background_points(
         cap_percentile=cap_percentile,
         region_weighting_factor=region_weighting_factor,
         reverse_weights=reverse_weights,
+        seed=seed,
     )
 
     background_points_path = output_dir_for_density_raster / "background_points.geojson"

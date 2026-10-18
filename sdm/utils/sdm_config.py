@@ -94,3 +94,20 @@ def model_config_file_paths(config_dir: str) -> tuple[str, str]:
     model_path = join_uri_path(config_dir, "model_config.yml")
     variables_path = join_uri_path(config_dir, "variables_config.yml")
     return model_path, variables_path
+
+
+def repo_relative_config_path(config_or_cli_path: str | Path) -> str:
+    """Return a config path relative to the repo root when it lives in the checkout."""
+    path_str = str(config_or_cli_path)
+    if "://" in path_str:
+        return path_str
+    path = Path(path_str)
+    repo_root = Path(here(".")).resolve()
+    if path.is_absolute():
+        resolved = path.resolve()
+    else:
+        resolved = (repo_root / path).resolve()
+    try:
+        return resolved.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path_str

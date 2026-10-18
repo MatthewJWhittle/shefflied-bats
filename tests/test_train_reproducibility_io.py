@@ -101,7 +101,7 @@ def test_run_outputs_match_local_and_memory_roots(
         maxent_config=DefaultMaxentConfig(),
         model_features=feature_names[:4],
     )
-    result = train_single_model(training_data, max_threads_per_model=1)
+    result = train_single_model(training_data, max_threads_per_model=1, seed=42)
     if not result.success:
         pytest.skip(result.error)
 

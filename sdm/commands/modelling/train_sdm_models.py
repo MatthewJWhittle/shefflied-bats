@@ -57,6 +57,7 @@ from sdm.utils.io import (
 )
 from sdm.utils.sdm_config import (
     model_config_file_paths,
+    repo_relative_config_path,
     resolve_model_config_dir,
     resolve_sdm_config_root,
 )
@@ -167,7 +168,7 @@ def prepare_training_data(
     sigma: float,
     transform_method: TransformMethod,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, List[str]]:
     """
     Prepare study-level training data shared across all species-activity combinations.
@@ -333,7 +334,8 @@ def grid_sample_points(
     stratify_cols: Optional[List[str]] = None,
     grid_size_x: float = 100,
     grid_size_y: float = 100,
-    random_state: int = 42,
+    *,
+    random_state: int,
 ) -> gpd.GeoDataFrame:
     """
     Sample one point per grid cell, optionally stratified by columns.
@@ -402,7 +404,8 @@ def prepare_species_training_data(
     n_max_background: Optional[int] = None,
     sort_density: bool = False,
     sample_weight_n_neighbors: int = 10,
-    random_state: int = 42,
+    *,
+    random_state: int,
 ) -> gpd.GeoDataFrame:
     """
     Prepare training data for a single species-activity combination.
@@ -511,7 +514,7 @@ def generate_training_data(
     feature_selection: Dict[ActivityType, List[str]],
     grid_size_m: float = 2000,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> List[TrainingData]:
     """Build ``TrainingData`` rows for each species × activity (shared annotated tables)."""
     _ = grid_points, subset, subset_background, background_density_series  # reserved / future use
@@ -606,7 +609,7 @@ def train_single_model(
     n_cv_folds: int = 3,
     min_presence: int = 15,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> TrainingResults:
     """Train a single MaxEnt model for a given set of training data."""
     try:
@@ -705,7 +708,7 @@ def train_models_parallel(
     max_threads_per_model: int = 1,
     n_jobs: Optional[int] = None,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> List[TrainingResults]:
     """Train MaxEnt models in parallel for each set of training data.
     
@@ -1329,7 +1332,7 @@ def train_models_with_setup(
     n_cv_folds: int = 3,
     verbose: bool = False,
     *,
-    seed: int = 42,
+    seed: int,
 ) -> tuple[List[TrainingResults], List[TrainingData]]:
     """Train models using pre-setup shared data.
     
@@ -1724,7 +1727,7 @@ def train_sdm_models(
         save_run_metadata(
             models_output_dir,
             seed=training_seed,
-            model_config_path=str(resolve_sdm_config_root(model_config_path)),
+            model_config_path=repo_relative_config_path(model_config_path),
         )
 
     logger.info("Model run outputs: %s", written_uri)

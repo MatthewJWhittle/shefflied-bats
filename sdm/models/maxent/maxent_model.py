@@ -198,7 +198,8 @@ def cross_validate_maxent_model(
     n_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
     collect_validation_scores: bool = False,
-    random_state: int = 42,
+    *,
+    random_state: int,
 ) -> Tuple[List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     # Note: Returns only valid models (None values filtered out)
     """
@@ -345,7 +346,8 @@ def evaluate_and_train_maxent_model(
     n_cv_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
     collect_validation_scores: bool = False,
-    random_state: int = 42,
+    *,
+    random_state: int,
 ) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     """
     Performs cross-validation and then trains a final model on all data.

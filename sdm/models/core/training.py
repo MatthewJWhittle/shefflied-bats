@@ -18,6 +18,7 @@ from sdm.models.maxent_model import (
 )
 from sdm.models.utils import prepare_occurrence_data
 from sdm.occurrence.processing import filter_bats_data
+from sdm.utils.io import load_model_config
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +234,7 @@ def train_single_model(
                     occurrence_gdf=training_data_gdf, 
                     n_cv_folds=3, 
                     feature_columns=current_feature_names,
+                    random_state=load_model_config().seed,
                 )
                 
                 mean_cv_score = np.nanmean(cv_scores) if cv_scores.size > 0 else np.nan
