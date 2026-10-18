@@ -46,6 +46,7 @@ from sdm.occurrence.sampling import (
     TransformMethod,
 )
 from sdm.raster.io import load_environmental_variables
+from sdm.utils.rng import apply_training_seed
 from sdm.utils.io import (
     load_project_config,
     load_model_config,
@@ -56,6 +57,7 @@ from sdm.utils.io import (
 )
 from sdm.utils.sdm_config import (
     model_config_file_paths,
+    repo_relative_config_path,
     resolve_model_config_dir,
     resolve_sdm_config_root,
 )
@@ -165,6 +167,8 @@ def prepare_training_data(
     background_value: float,
     sigma: float,
     transform_method: TransformMethod,
+    *,
+    seed: int,
 ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, List[str]]:
     """
     Prepare study-level training data shared across all species-activity combinations.
@@ -206,6 +210,7 @@ def prepare_training_data(
         sigma=sigma,
         transform_method=transform_method,
         clip_to_boundary=True,
+        seed=seed,
     )
 
     # Annotate background points with EVs
@@ -329,7 +334,8 @@ def grid_sample_points(
     stratify_cols: Optional[List[str]] = None,
     grid_size_x: float = 100,
     grid_size_y: float = 100,
-    random_state: int = 42,
+    *,
+    random_state: int,
 ) -> gpd.GeoDataFrame:
     """
     Sample one point per grid cell, optionally stratified by columns.
@@ -398,7 +404,8 @@ def prepare_species_training_data(
     n_max_background: Optional[int] = None,
     sort_density: bool = False,
     sample_weight_n_neighbors: int = 10,
-    random_state: int = 42,
+    *,
+    random_state: int,
 ) -> gpd.GeoDataFrame:
     """
     Prepare training data for a single species-activity combination.
@@ -506,6 +513,8 @@ def generate_training_data(
     model_config: MaxentConfig,
     feature_selection: Dict[ActivityType, List[str]],
     grid_size_m: float = 2000,
+    *,
+    seed: int,
 ) -> List[TrainingData]:
     """Build ``TrainingData`` rows for each species × activity (shared annotated tables)."""
     _ = grid_points, subset, subset_background, background_density_series  # reserved / future use
@@ -541,7 +550,7 @@ def generate_training_data(
             n_max_background=n_max_background,
             sort_density=order_by_density_for_subset,
             sample_weight_n_neighbors=sample_weight_n_neighbors,
-            random_state=42,
+            random_state=seed,
         )
         if len(species_data) == 0 or "class" not in species_data.columns:
             continue
@@ -599,9 +608,12 @@ def train_single_model(
     max_threads_per_model: int,
     n_cv_folds: int = 3,
     min_presence: int = 15,
+    *,
+    seed: int,
 ) -> TrainingResults:
     """Train a single MaxEnt model for a given set of training data."""
     try:
+        apply_training_seed(seed)
         activity_type = ActivityType(data.activity_type)
         latin_name = data.latin_name
         logger.debug(f"Training model for {latin_name} ({activity_type.value})...")
@@ -643,6 +655,7 @@ def train_single_model(
             metric_fn=roc_auc_score,
             feature_columns=model_features,  # Explicitly pass feature columns to avoid using extra columns as features
             collect_validation_scores=True,
+            random_state=seed,
         )
         
         if final_model is None:
@@ -694,6 +707,8 @@ def train_models_parallel(
     training_data: List[TrainingData],
     max_threads_per_model: int = 1,
     n_jobs: Optional[int] = None,
+    *,
+    seed: int,
 ) -> List[TrainingResults]:
     """Train MaxEnt models in parallel for each set of training data.
     
@@ -731,6 +746,7 @@ def train_models_parallel(
                     train_single_model,
                     data,
                     max_threads_per_model,
+                    seed=seed,
                 )
             )
         
@@ -1000,6 +1016,24 @@ def save_results(results_df: pd.DataFrame, output_dir: Path) -> None:
         None
     """
     results_df.to_csv(output_dir / "model_results.csv", index=False)
+
+
+def save_run_metadata(
+    output_dir: Path,
+    *,
+    seed: int,
+    model_config_path: str,
+) -> Path:
+    """Write run-level metadata (including the training seed) into the run folder."""
+    metadata = {
+        "schema_version": 1,
+        "seed": seed,
+        "model_config_path": model_config_path,
+    }
+    path = output_dir / "run_metadata.json"
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, indent=2)
+    return path
 
 
 def log_models_to_mlflow(
@@ -1297,6 +1331,8 @@ def train_models_with_setup(
     n_jobs: Optional[int] = None,
     n_cv_folds: int = 3,
     verbose: bool = False,
+    *,
+    seed: int,
 ) -> tuple[List[TrainingResults], List[TrainingData]]:
     """Train models using pre-setup shared data.
     
@@ -1352,6 +1388,7 @@ def train_models_with_setup(
         model_config=model_config,
         feature_selection=filtered_feature_selection,
         grid_size_m=float(sampling_params.get("grid_size_m", 2000)),
+        seed=seed,
     )
 
     logger.debug("Training %d models...", len(training_data))
@@ -1359,6 +1396,7 @@ def train_models_with_setup(
         training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
+        seed=seed,
     )
     
     return models, training_data
@@ -1452,7 +1490,9 @@ def train_sdm_models(
     # Get sampling config from model config (with defaults if not present)
     sampling_config = base_model_cfg.sampling or SamplingConfig()
     grid_size_m = sampling_config.grid_size_m
+    training_seed = base_model_cfg.seed
     logger.info(f"Sampling config: grid_size_m={grid_size_m}")
+    logger.info("Training seed (from model_config.yml): %s", training_seed)
     
     # Configure MLflow
     _configure_mlflow_from_config(project_config)
@@ -1520,6 +1560,7 @@ def train_sdm_models(
         background_value=background_config.background_value,
         sigma=background_config.sigma,
         transform_method=background_config.transform_method,
+        seed=training_seed,
     )
     
     # Create default model config from base config (used as fallback)
@@ -1550,7 +1591,7 @@ def train_sdm_models(
             d_min=d_min,
             d_max=d_max,
             sample_weight_n_neighbors=sample_weight_n_neighbors,
-            random_state=42,
+            random_state=training_seed,
         )
         
         # Check if training data was generated
@@ -1605,7 +1646,10 @@ def train_sdm_models(
                 per_model_config_path, per_model_variables_path = (
                     model_config_file_paths(model_subdir)
                 )
-                model_config = load_model_config(per_model_config_path)
+                model_config = load_model_config(
+                    per_model_config_path,
+                    fallback_seed=base_model_cfg.seed,
+                )
                 maxent_model_config = DefaultMaxentConfig.from_config(
                     config=model_config
                 )
@@ -1653,6 +1697,7 @@ def train_sdm_models(
         training_data=training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
+        seed=training_seed,
     )
     
     # Prepare and save results
@@ -1682,6 +1727,11 @@ def train_sdm_models(
 
         save_results(results_df, models_output_dir)
         save_training_data(training_data, models_output_dir)
+        save_run_metadata(
+            models_output_dir,
+            seed=training_seed,
+            model_config_path=repo_relative_config_path(model_config_path),
+        )
 
     logger.info("Model run outputs: %s", written_uri)
     

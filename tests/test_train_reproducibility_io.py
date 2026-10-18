@@ -10,7 +10,11 @@ import numpy as np
 import pytest
 from shapely.geometry import Point
 
-from sdm.commands.modelling.train_sdm_models import save_models, train_single_model
+from sdm.commands.modelling.train_sdm_models import (
+    _summarize_cv_scores,
+    save_models,
+    train_single_model,
+)
 from sdm.models.maxent.maxent_model import DefaultMaxentConfig
 from sdm.types import TrainingData
 from sdm.utils.io import load_model_config
@@ -45,14 +49,16 @@ def test_train_single_model_metrics_reproducible(synthetic_training_frame) -> No
         model_features=feature_names[:4],
     )
 
-    first = train_single_model(training_data, max_threads_per_model=1)
-    second = train_single_model(training_data, max_threads_per_model=1)
+    first = train_single_model(training_data, max_threads_per_model=1, seed=42)
+    second = train_single_model(training_data, max_threads_per_model=1, seed=42)
 
     if not first.success or not second.success:
         pytest.skip(f"training failed: {first.error} / {second.error}")
 
-    assert first.mean_cv_score == pytest.approx(second.mean_cv_score, rel=0, abs=1e-9)
-    assert first.std_cv_score == pytest.approx(second.std_cv_score, rel=0, abs=1e-9)
+    mean_a, std_a, _, _ = _summarize_cv_scores(first.cv_scores)
+    mean_b, std_b, _, _ = _summarize_cv_scores(second.cv_scores)
+    assert mean_a == pytest.approx(mean_b, rel=0, abs=1e-9)
+    assert std_a == pytest.approx(std_b, rel=0, abs=1e-9)
 
 
 def test_model_config_loads_from_memory_filesystem() -> None:
@@ -60,6 +66,7 @@ def test_model_config_loads_from_memory_filesystem() -> None:
     uri = "memory://cfg-root/model_config.yml"
     yaml_text = """
 model:
+  seed: 1
   record_age_years: 1
   maxent:
     feature_types: [linear]
@@ -95,7 +102,7 @@ def test_run_outputs_match_local_and_memory_roots(
         maxent_config=DefaultMaxentConfig(),
         model_features=feature_names[:4],
     )
-    result = train_single_model(training_data, max_threads_per_model=1)
+    result = train_single_model(training_data, max_threads_per_model=1, seed=42)
     if not result.success:
         pytest.skip(result.error)
 

@@ -12,6 +12,8 @@ import pickle
 import pandas as pd
 
 from sdm.raster.utils import construct_transform_shift_bounds
+from pydantic import ValidationError
+
 from sdm.types import ProjectConfig, ModelConfig, VariablesConfig
 from sdm.utils.fs import join_uri_path, uri_exists
 from sdm.utils.sdm_config import model_config_file_paths, resolve_model_config_dir
@@ -95,7 +97,37 @@ def load_input_variables() -> list:
         "Use load_variables_config() instead."
     )
 
-def load_model_config(config_path: Union[str, Path] = MODEL_CONFIG_PATH) -> ModelConfig:
+def _model_config_from_section(
+    model_section: dict[str, Any],
+    config_ref: str,
+    *,
+    fallback_seed: int | None = None,
+) -> ModelConfig:
+    section = dict(model_section)
+    if "seed" not in section:
+        if fallback_seed is not None:
+            section["seed"] = fallback_seed
+        else:
+            raise ValueError(
+                f"Missing required 'seed' in the model section of {config_ref}. "
+                "Add an integer seed under model: in model_config.yml."
+            )
+    try:
+        return ModelConfig.model_validate(section)
+    except ValidationError as exc:
+        if any(error.get("loc") == ("seed",) for error in exc.errors()):
+            raise ValueError(
+                f"Missing required 'seed' in the model section of {config_ref}. "
+                "Add an integer seed under model: in model_config.yml."
+            ) from exc
+        raise
+
+
+def load_model_config(
+    config_path: Union[str, Path] = MODEL_CONFIG_PATH,
+    *,
+    fallback_seed: int | None = None,
+) -> ModelConfig:
     """Load model configuration from model_config.yml as a Pydantic model."""
     config_ref = str(config_path)
     if not uri_exists(config_ref):
@@ -111,7 +143,9 @@ def load_model_config(config_path: Union[str, Path] = MODEL_CONFIG_PATH) -> Mode
     if model_section is None:
         raise KeyError(f"No 'model' section found in {config_path}")
 
-    return ModelConfig.model_validate(model_section)
+    return _model_config_from_section(
+        model_section, config_ref, fallback_seed=fallback_seed
+    )
 
 
 def load_variables_config(
@@ -192,6 +226,8 @@ def load_tuning_variables_config(
 
 def load_tuning_model_config(
     config_path: Union[str, Path],
+    *,
+    fallback_seed: int | None = None,
 ) -> ModelConfig:
     """Load model config from tuning directory (only maxent section).
     
@@ -218,8 +254,9 @@ def load_tuning_model_config(
     if model_section is None:
         raise KeyError(f"No 'model' section found in {config_ref}")
     
-    return ModelConfig(**model_section)
-
+    return _model_config_from_section(
+        model_section, config_ref, fallback_seed=fallback_seed
+    )
 
 
 def load_tuning_configs(
@@ -253,7 +290,10 @@ def load_tuning_configs(
             f"Expected tuning configs in {config_dir}"
         )
 
-    model_config = load_tuning_model_config(model_config_path)
+    base_seed = load_model_config().seed
+    model_config = load_tuning_model_config(
+        model_config_path, fallback_seed=base_seed
+    )
     selected_features = load_tuning_variables_config(variables_config_path)
     
     return model_config, selected_features

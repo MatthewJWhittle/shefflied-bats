@@ -339,6 +339,7 @@ class TestFullTrainingWorkflow:
         result: TrainingResults = train_single_model(
             data=training_data,
             max_threads_per_model=1,
+            seed=42,
         )
         
         # Check if training succeeded
@@ -417,6 +418,7 @@ class TestFullTrainingWorkflow:
         result: TrainingResults = train_single_model(
             data=training_data,
             max_threads_per_model=1,
+            seed=42,
         )
         
         if not result.success:

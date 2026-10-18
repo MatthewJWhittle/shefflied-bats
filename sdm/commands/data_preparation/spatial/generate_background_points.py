@@ -5,6 +5,7 @@ import geopandas as gpd
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.occurrence.sampling import generate_background_points, TransformMethod, BackgroundMethod
+from sdm.utils.io import load_model_config
 
 def generate_background_points_wrapper(
     occurrence_data_path: Path,
@@ -66,6 +67,7 @@ def generate_background_points_wrapper(
         transform_method=transform_method,
         cap_percentile=cap_percentile,
         region_weighting_factor=region_weighting_factor if region_weighting_factor is not None else 1.0,
+        seed=load_model_config().seed,
     )
 
     # If a specific output path is provided, write directly there instead of copying

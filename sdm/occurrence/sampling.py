@@ -150,6 +150,8 @@ def calculate_floor_probability(
 def sample_probability_surface(
     prob_surface: xr.DataArray,
     n_background_points: int,
+    *,
+    seed: int,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Sample background points from a probability surface.
@@ -176,6 +178,8 @@ def sample_probability_surface(
     flat_x = coords_x.flatten()[valid_indices]
     flat_y = coords_y.flatten()[valid_indices]
 
+    rng = np.random.default_rng(seed)
+
     # Sample points
     logging.info(f"Sampling {n_background_points} background points...")
     if len(flat_x) < n_background_points:
@@ -188,11 +192,11 @@ def sample_probability_surface(
         # If sampling all available points without replacement:
         # chosen_indices = np.random.choice(len(flat_x), size=len(flat_x), replace=False, p=flat_probs)
         # If sampling n_background_points with replacement (if n_background_points > len(flat_x)):
-        chosen_indices = np.random.choice(
+        chosen_indices = rng.choice(
             len(flat_x), size=n_background_points, replace=True, p=flat_probs
         )
     else:
-        chosen_indices = np.random.choice(
+        chosen_indices = rng.choice(
             len(flat_x), size=n_background_points, replace=False, p=flat_probs
         )
 
@@ -303,6 +307,8 @@ def generate_background_points_from_data(
     region_weighting_factor: float = 1.0,
     reverse_weights: bool = False,
     clip_to_boundary: bool = True,
+    *,
+    seed: int,
 ) -> Tuple[gpd.GeoDataFrame, xr.DataArray]:
     """Generate background points based on density-smoothed occurrence data.
 
@@ -465,7 +471,7 @@ def generate_background_points_from_data(
             )
 
     background_x, background_y, probabilities = sample_probability_surface(
-        prob_surface, n_background_points
+        prob_surface, n_background_points, seed=seed
     )
 
     # Create GeoDataFrame
@@ -502,6 +508,8 @@ def generate_background_points(
     region_weighting_factor: float = 1.0,
     write_parameters: bool = False,
     reverse_weights: bool = False,
+    *,
+    seed: int,
 ) -> Tuple[Path, Path]:
     """
     A wrapper around generate_background_points_from_data that has a file interface and output
@@ -546,6 +554,7 @@ def generate_background_points(
         cap_percentile=cap_percentile,
         region_weighting_factor=region_weighting_factor,
         reverse_weights=reverse_weights,
+        seed=seed,
     )
 
     background_points_path = output_dir_for_density_raster / "background_points.geojson"

@@ -138,7 +138,8 @@ def test_generate_background_points_from_data(sample_occurrences, sample_boundar
         background_method=BackgroundMethod.CONTRAST,
         background_value=0.3,
         sigma=1.0,
-        transform_method=TransformMethod.PRESENCE
+        transform_method=TransformMethod.PRESENCE,
+        seed=42,
     )
     
     assert isinstance(bg_points, gpd.GeoDataFrame)
@@ -156,6 +157,7 @@ def test_orientation_of_density_array(sample_occurrences, sample_boundary):
         boundary=sample_boundary,
         n_background_points=100,
         background_value=0.0,
+        seed=42,
     )
 
     # The array could be flipped in the y direction if we haven't been careful
@@ -197,7 +199,8 @@ def test_generate_background_points(
         output_dir_for_density_raster=output_dir,
         regions_path=regions_path,
         n_background_points=config["n_background_points"],
-        grid_resolution=config["grid_resolution"]
+        grid_resolution=config["grid_resolution"],
+        seed=42,
     )
     assert bg_points_path.exists()
     assert density_raster_path.exists()
@@ -219,7 +222,8 @@ def test_generate_background_points_with_stratification(
         background_method=BackgroundMethod.CONTRAST,
         background_value=0.3,
         sigma=1.0,
-        transform_method=TransformMethod.PRESENCE
+        transform_method=TransformMethod.PRESENCE,
+        seed=42,
     )
     
     # Basic checks
@@ -643,6 +647,7 @@ def test_train_models_with_setup(
         sampling_params=sampling_params,
         min_presence=15,
         verbose=False,
+        seed=42,
     )
     
     # Verify results

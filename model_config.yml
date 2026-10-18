@@ -1,4 +1,5 @@
 model:
+  seed: 42
   record_age_years: 20
 
   maxent:

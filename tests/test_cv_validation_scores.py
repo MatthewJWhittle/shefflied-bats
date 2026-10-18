@@ -69,6 +69,7 @@ def test_each_presence_gets_one_held_out_score(
         n_folds=3,
         feature_columns=feature_columns,
         collect_validation_scores=True,
+        random_state=42,
     )
 
     assert validation_scores is not None
@@ -90,6 +91,7 @@ def test_held_out_score_not_from_training_fold(
         n_folds=3,
         feature_columns=feature_columns,
         collect_validation_scores=True,
+        random_state=42,
     )
 
     assert validation_scores is not None
@@ -113,6 +115,7 @@ def test_validation_score_columns(
         n_folds=3,
         feature_columns=feature_columns,
         collect_validation_scores=True,
+        random_state=42,
     )
 
     assert validation_scores is not None
