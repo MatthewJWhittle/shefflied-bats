@@ -169,6 +169,7 @@ def prepare_training_data(
     transform_method: TransformMethod,
     *,
     seed: int,
+    background_occurrence_gdf: Optional[gpd.GeoDataFrame] = None,
 ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, List[str]]:
     """
     Prepare study-level training data shared across all species-activity combinations.
@@ -177,6 +178,11 @@ def prepare_training_data(
     - presence_with_evs_gdf: all presence points annotated with environmental variables
     - background_with_evs_gdf: all background points annotated with environmental variables
     - ev_columns: list of environmental variable column names
+
+    ``background_occurrence_gdf`` is the record set whose density drives background
+    sampling. Pass all bat records so that a run filtered to some species or activity
+    types samples background exactly as a full run does. When omitted,
+    ``occurrence_gdf`` is used.
     """
     logger.info("Preparing shared training data (presence and background with EVs)")
 
@@ -200,9 +206,12 @@ def prepare_training_data(
         tolerance=tolerance,
     )
 
-    # Generate background points from all occurrence data
+    # Generate background points from all occurrence data (not just the filtered subset)
+    background_source_gdf = (
+        background_occurrence_gdf if background_occurrence_gdf is not None else occurrence_gdf
+    )
     background_points_gdf, _ = generate_background_points_from_data(
-        occurrence_data=occurrence_gdf,
+        occurrence_data=background_source_gdf,
         boundary=boundary,
         n_background_points=n_background_points,
         background_method=background_method,
@@ -1527,6 +1536,9 @@ def train_sdm_models(
     logger.debug("Loading environmental variables...")
     evs_to_model, _ = load_environmental_variables(ev_uri)
     
+    # Keep every bat record for background sampling, so filtered runs match full runs
+    all_bats_gdf = bats_ant
+
     # Filter species and activity types if specified
     if species is not None:
         logger.debug(f"Filtering to species: {', '.join(species)}")
@@ -1553,6 +1565,7 @@ def train_sdm_models(
         ev_columns,
     ) = prepare_training_data(
         occurrence_gdf=bats_ant,
+        background_occurrence_gdf=all_bats_gdf,
         boundary=boundary,
         evs_to_model=evs_to_model,
         n_background_points=background_config.n_background_points,
