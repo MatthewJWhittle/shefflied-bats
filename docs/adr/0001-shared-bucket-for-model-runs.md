@@ -15,6 +15,7 @@ The goal is to train models on a developer laptop or on remote machines from the
 - The bucket owner uses their own Google account on local development machines. Remote machines use the `model-run` service account through `GOOGLE_APPLICATION_CREDENTIALS`, with a key file kept only on that machine and never in git.
 - `model-run` has `roles/storage.objectAdmin` on the bucket: read, write, overwrite. It can't change bucket settings or access. Overwriting counts as deleting the old version in Cloud Storage, so it can delete single files. The 30-day version history covers that.
 - Code reads and writes through plain fsspec paths under `MODEL_OUTPUT_ROOT`, with no storage-specific commands in the command-line tool.
+- Training code knows nothing about Google Cloud Storage. It reads and writes through ordinary file paths, which can be local folders or remote addresses such as `gs://`, and there's no storage-specific code in training.
 - Species and project settings kept in git are always read from the repository checkout, never from the bucket; a missing per-species settings file under `config_dir` stops the run rather than falling back silently.
 - Large shared inputs can be mirrored locally (for example `gcloud storage rsync --recursive gs://habitat-suitability-modelling-data/inputs ~/hsm-inputs`) and referenced with `INPUT_DATA_ROOT` pointing at that directory while `MODEL_OUTPUT_ROOT` remains on the bucket.
 
