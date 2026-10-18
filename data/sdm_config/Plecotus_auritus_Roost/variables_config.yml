@@ -1,3 +1,28 @@
+# Brown long-eared bat (Plecotus auritus) roost model: environmental layers.
+#
+# Layers removed from the previous set, and why (correlations are over the
+# presence and background points used in training):
+# - ceh_landcover_coniferous_woodland, ceh_landcover_coniferous_woodland_500m:
+#   no published roost evidence for conifer cover; roost studies point to
+#   broadleaved woodland. Low overlap with kept layers and little used by the
+#   previous model, so the drop rests on ecology, not redundancy.
+# - ceh_landcover_suburban (in-cell): overlaps in-cell building cover
+#   (r = 0.85) and works at too fine a scale: it scores heavily suburban cells
+#   highest, which tracks where surveys happen rather than where bats roost.
+# - ceh_landcover_urban_500m: overlaps urban cover within 1.5 km (r = 0.87),
+#   the scale at which avoidance of built-up land has been measured.
+# - ceh_landcover_suburban_500m: overlaps in-cell building cover (r = 0.81);
+#   urban cover within 1.5 km covers the landscape-scale urban effect.
+# - vom_vegetation_height_std: near-duplicate of mean vegetation height in
+#   rank order (Spearman 0.99, Pearson 0.87); no published roost evidence
+#   either way, so this drop rests on overlap alone. Putting it back raises
+#   cross-validated AUC by about 0.015.
+#
+# Layers added:
+# - ceh_landcover_broadleaved_woodland_500m: roosts sit close to broadleaved
+#   woodland (Boughey et al. 2011; Bellamy & Altringham 2015).
+# - ceh_landcover_urban_1500m: avoidance of built-up land around roosts,
+#   at the 1.5 km scale used by Bellamy & Altringham 2015.
 variables:
 - os_distance_distance_to_minor_roads
 - terrain_stats_slope
