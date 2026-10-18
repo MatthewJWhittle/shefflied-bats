@@ -66,6 +66,7 @@ def test_model_config_loads_from_memory_filesystem() -> None:
     uri = "memory://cfg-root/model_config.yml"
     yaml_text = """
 model:
+  seed: 1
   record_age_years: 1
   maxent:
     feature_types: [linear]

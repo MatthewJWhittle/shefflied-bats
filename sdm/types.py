@@ -121,7 +121,7 @@ class SamplingConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    seed: int = 42
+    seed: int
     maxent: MaxentConfigModel
     sampling: Optional[SamplingConfig] = None
     background: Optional[BackgroundConfig] = None

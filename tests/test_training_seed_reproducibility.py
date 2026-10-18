@@ -47,6 +47,36 @@ def test_model_config_seed_from_repo() -> None:
     assert cfg.seed == 42
 
 
+def test_model_config_requires_seed_in_yaml() -> None:
+    import fsspec
+
+    fs = fsspec.filesystem("memory")
+    uri = "memory://cfg-no-seed/model_config.yml"
+    yaml_text = """
+model:
+  maxent:
+    feature_types: [linear]
+    beta_multiplier: 1.0
+    beta_lqp: 1.0
+    beta_hinge: 0.5
+    beta_threshold: 0.5
+    beta_categorical: 0.5
+    n_hinge_features: 10
+    n_threshold_features: 10
+    clamp: true
+    convergence_tolerance: 1.0e-5
+    use_lambdas: best
+    n_lambdas: 100
+    class_weights: balanced
+    tau: 0.5
+    transform: cloglog
+"""
+    fs.write_text(uri, yaml_text.strip())
+
+    with pytest.raises(ValueError, match="Missing required 'seed'"):
+        load_model_config(uri)
+
+
 def test_background_points_reproducible_for_same_seed(
     synthetic_occurrences: gpd.GeoDataFrame,
     synthetic_boundary: gpd.GeoDataFrame,

@@ -1646,7 +1646,10 @@ def train_sdm_models(
                 per_model_config_path, per_model_variables_path = (
                     model_config_file_paths(model_subdir)
                 )
-                model_config = load_model_config(per_model_config_path)
+                model_config = load_model_config(
+                    per_model_config_path,
+                    fallback_seed=base_model_cfg.seed,
+                )
                 maxent_model_config = DefaultMaxentConfig.from_config(
                     config=model_config
                 )

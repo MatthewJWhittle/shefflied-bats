@@ -74,7 +74,8 @@ def test_plecotus_auritus_roost_tuned_model_config_values() -> None:
     model_id = get_model_id(["Plecotus auritus", "Roost"])
     config_dir = resolve_model_config_dir("data/sdm_config", model_id, must_exist=True)
     model_path, variables_path = model_config_file_paths(config_dir)
-    model_cfg = load_model_config(model_path)
+    project_seed = load_model_config().seed
+    model_cfg = load_model_config(model_path, fallback_seed=project_seed)
     variables_cfg = load_variables_config(variables_path)
     assert len(variables_cfg.variables) == 15
     assert model_cfg.maxent is not None

@@ -76,6 +76,7 @@ def test_elapid_maxent_from_config_matches_wrapper_from_config():
 
 def test_default_maxent_config_from_model_config_preserves_clamp():
     cfg = ModelConfig(
+        seed=42,
         maxent={
             "feature_types": ["linear", "hinge"],
             "beta_multiplier": 1.5,
