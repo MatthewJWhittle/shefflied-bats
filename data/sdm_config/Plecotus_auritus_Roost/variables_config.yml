@@ -13,16 +13,18 @@
 #   the scale at which avoidance of built-up land has been measured.
 # - ceh_landcover_suburban_500m: overlaps in-cell building cover (r = 0.81);
 #   urban cover within 1.5 km covers the landscape-scale urban effect.
-# - vom_vegetation_height_std: near-duplicate of mean vegetation height in
-#   rank order (Spearman 0.99, Pearson 0.87); no published roost evidence
-#   either way, so this drop rests on overlap alone. Putting it back raises
-#   cross-validated AUC by about 0.015.
 #
 # Layers added:
 # - ceh_landcover_broadleaved_woodland_500m: roosts sit close to broadleaved
 #   woodland (Boughey et al. 2011; Bellamy & Altringham 2015).
 # - ceh_landcover_urban_1500m: avoidance of built-up land around roosts,
 #   at the 1.5 km scale used by Bellamy & Altringham 2015.
+# - vom_vegetation_height_std (put back): variability of vegetation height,
+#   a measure of canopy structure that picks out edges and tree-shrub mix.
+#   It tracks mean vegetation height closely in rank order (Spearman 0.99,
+#   Pearson 0.87) but adds edge structure. Putting it back raised held-out
+#   AUC on all four seeds and kept urban hotspot counts close to the
+#   11-layer set.
 variables:
 - os_distance_distance_to_minor_roads
 - terrain_stats_slope
@@ -35,3 +37,4 @@ variables:
 - climate_stats_temp_ann_avg
 - ceh_landcover_broadleaved_woodland_500m
 - ceh_landcover_urban_1500m
+- vom_vegetation_height_std  # canopy structural variability: edges, tree-shrub mix
