@@ -19,6 +19,7 @@ from sklearn.compose import ColumnTransformer
 
 
 import elapid as ela
+from sdm.utils.rng import apply_training_seed
 from elapid.models import MaxentModel as BaseMaxentModel
 from elapid.models import MaxentModel as ElapidMaxentModel
 from elapid.types import to_iterable # Used by elapid internals, good to be aware of
@@ -197,6 +198,7 @@ def cross_validate_maxent_model(
     n_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
     collect_validation_scores: bool = False,
+    random_state: int = 42,
 ) -> Tuple[List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     # Note: Returns only valid models (None values filtered out)
     """
@@ -209,12 +211,14 @@ def cross_validate_maxent_model(
         n_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
         collect_validation_scores: When True, return per-point held-out scores as a DataFrame.
+        random_state: Seed for geographic CV (KMeans inside elapid ``GeographicKFold``).
 
     Returns:
         Tuple of (trained_models_per_fold, metric_scores_per_fold, validation_scores).
         ``validation_scores`` is ``None`` unless ``collect_validation_scores`` is True.
         Note: trained_models_per_fold may contain None values for failed folds.
     """
+    apply_training_seed(random_state)
     gfolds = ela.GeographicKFold(n_splits=n_folds)
         
     fold_metrics = []
@@ -341,6 +345,7 @@ def evaluate_and_train_maxent_model(
     n_cv_folds: int = 3,
     feature_columns: Optional[List[str]] = None,
     collect_validation_scores: bool = False,
+    random_state: int = 42,
 ) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     """
     Performs cross-validation and then trains a final model on all data.
@@ -355,6 +360,7 @@ def evaluate_and_train_maxent_model(
         n_cv_folds: Number of folds for geographic cross-validation.
         feature_columns: List of feature column names. If None, inferred.
         collect_validation_scores: When True, include per-point held-out scores.
+        random_state: Seed for geographic cross-validation folds.
 
     Returns:
         Tuple of (final_trained_model, cv_models, cv_scores, validation_scores).
@@ -367,6 +373,7 @@ def evaluate_and_train_maxent_model(
         n_folds=n_cv_folds,
         feature_columns=feature_columns,
         collect_validation_scores=collect_validation_scores,
+        random_state=random_state,
     )
     
     # Log CV results only if we have valid scores (keep as debug, summary will be logged at higher level)

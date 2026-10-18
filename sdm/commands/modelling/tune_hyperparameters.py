@@ -46,6 +46,7 @@ from sdm.occurrence.sampling import (
 from sdm.raster.io import load_environmental_variables
 from sdm.utils.fs import local_materialized_path
 from sdm.utils.model_runs import resolve_data_path
+from sdm.utils.rng import apply_training_seed
 from sdm.utils.sdm_config import resolve_sdm_config_root
 from sdm.utils.io import (
     load_model_config,
@@ -195,6 +196,8 @@ def precompute_correlation_matrix(
     training_gdf: gpd.GeoDataFrame,
     available_features: List[str],
     sample_size: int = 3000,
+    *,
+    seed: int = 42,
 ) -> Optional[pd.DataFrame]:
     """Precompute correlation matrix for all available features.
     
@@ -218,7 +221,7 @@ def precompute_correlation_matrix(
         
         # Random sample if data is larger than sample_size
         if len(feature_data) > sample_size:
-            feature_data = feature_data.sample(n=sample_size, random_state=42)
+            feature_data = feature_data.sample(n=sample_size, random_state=seed)
         
         # Check for constant features (zero variance) - these cause correlation issues
         feature_std = feature_data.std()
@@ -346,8 +349,11 @@ def eval_model(
     data: TrainingData,
     max_threads_per_model: int = 1,
     n_cv_folds: int = 3,
+    *,
+    seed: int = 42,
 ) -> Tuple[float, float]:
     """Evaluate a model and return CV scores and stability for tuning."""
+    apply_training_seed(seed)
     # Create model
     model = create_maxent_pipeline(
         feature_names=data.model_features,
@@ -375,6 +381,7 @@ def eval_model(
         n_folds=n_cv_folds,
         metric_fn=roc_auc_score,
         feature_columns=data.model_features,  # Explicitly pass feature columns
+        random_state=seed,
     )
     
     # Get mean and std CV scores
@@ -474,6 +481,7 @@ def objective_train_model(
         data=training_data,
         max_threads_per_model=1,  # Use 1 thread per model for tuning
         n_cv_folds=n_cv_folds,
+        seed=base_model_config.seed,
     )
     
     # If all CV folds failed (NaN scores), prune this trial
@@ -1135,6 +1143,7 @@ def tune_hyperparameters(
         background_value=background_value,
         sigma=sigma,
         transform_method=transform_method,
+        seed=base_model_config.seed,
     )
 
     base_variables_config = VariablesConfig(
@@ -1200,7 +1209,7 @@ def tune_hyperparameters(
                 d_min=d_min,
                 d_max=d_max,
                 sample_weight_n_neighbors=sample_weight_n_neighbors,
-                random_state=42,
+                random_state=base_model_config.seed,
             )
 
             # Basic sanity checks before starting tuning for this combination
@@ -1229,7 +1238,7 @@ def tune_hyperparameters(
 
             # Create study name for this combination
             study_name_combination = f"{study_name or 'sdm_tuning'}_{latin_name}_{activity_type}".replace(" ", "_")
-            sampler = TPESampler(seed=42)
+            sampler = TPESampler(seed=base_model_config.seed)
             pruner = MedianPruner(n_startup_trials=10, n_warmup_steps=10)
             
             study = optuna.create_study(
@@ -1247,6 +1256,7 @@ def tune_hyperparameters(
                 training_gdf=species_training_gdf,
                 available_features=available_features,
                 sample_size=correlation_sample_size,
+                seed=base_model_config.seed,
             )
             
             # Create objective function for this combination
