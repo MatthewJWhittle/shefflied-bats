@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.base import BaseEstimator, clone
 import rasterio as rio # For rio.enums and types used in apply_model_to_rasters
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, RobustScaler, QuantileTransformer
+from sklearn.preprocessing import StandardScaler, RobustScaler, QuantileTransformer, FunctionTransformer
 from sklearn.compose import ColumnTransformer
 
 
@@ -490,7 +490,7 @@ def create_maxent_pipeline(
     feature_names: List[str], 
     maxent_n_jobs: int = 1, # Threads for MaxentModel itself
     model_config: MaxentConfig = DefaultMaxentConfig(),
-    # Add other MaxentModel params as needed
+    feature_caps: Optional[Dict[str, float]] = None,
 ) -> Pipeline:
     """Creates a scikit-learn Pipeline for MaxEnt modeling.
 
@@ -502,6 +502,9 @@ def create_maxent_pipeline(
         feature_names: Columns to keep, in order, for the model input matrix.
         maxent_n_jobs: Number of threads for the MaxentModel.
         model_config: Elapid-compatible MaxEnt configuration.
+        feature_caps: Optional upper caps by feature name (resolved values). When given,
+            a ``capping`` step clips those columns before scaling, so the fitted pipeline
+            applies the same caps at prediction time.
 
     Returns:
         A scikit-learn ``Pipeline`` instance.
@@ -519,11 +522,54 @@ def create_maxent_pipeline(
     scaler = StandardScaler()
     maxent_estimator = elapid_maxent_from_config(model_config, n_cpus=maxent_n_jobs)
 
-    return Pipeline([
-        ("feature_selection", column_selector),
-        ("scaling", scaler),
-        ("maxent", maxent_estimator),
-    ])
+    steps = [("feature_selection", column_selector)]
+    if feature_caps:
+        steps.append(("capping", make_capping_transformer(feature_names, feature_caps)))
+    steps += [("scaling", scaler), ("maxent", maxent_estimator)]
+    return Pipeline(steps)
+
+
+def make_capping_transformer(
+    feature_names: List[str], feature_caps: Dict[str, float]
+) -> FunctionTransformer:
+    """Clip capped columns to their upper cap; other columns pass through unchanged.
+
+    Built from ``numpy.clip`` and ``FunctionTransformer`` so pickles need only
+    ``sklearn`` and ``numpy`` on load.
+    """
+    unknown = set(feature_caps) - set(feature_names)
+    if unknown:
+        raise ValueError(f"Caps given for features not in the model: {sorted(unknown)}")
+    upper = np.array(
+        [float(feature_caps.get(name, np.inf)) for name in feature_names], dtype=float
+    )
+    transformer = FunctionTransformer(
+        np.clip,
+        kw_args={"a_min": np.full(len(feature_names), -np.inf), "a_max": upper},
+        feature_names_out="one-to-one",
+    )
+    if hasattr(transformer, "set_output"):
+        transformer.set_output(transform="pandas")
+    return transformer
+
+
+def resolve_feature_caps(
+    caps_config: Dict[str, Any], training_points: pd.DataFrame
+) -> Dict[str, float]:
+    """Turn cap settings into numbers.
+
+    A ``quantile`` cap is the quantile of that column over the training points
+    (presence plus background, unweighted). A ``value`` cap is used as given.
+    """
+    resolved: Dict[str, float] = {}
+    for name, spec in caps_config.items():
+        quantile = getattr(spec, "quantile", None)
+        value = getattr(spec, "value", None)
+        if quantile is not None:
+            resolved[name] = float(np.nanquantile(training_points[name].to_numpy(dtype=float), quantile))
+        else:
+            resolved[name] = float(value)
+    return resolved
 
 # Enum for activity types, useful for get_feature_config
 class ActivityType(StrEnum):

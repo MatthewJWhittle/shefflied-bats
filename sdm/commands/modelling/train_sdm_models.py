@@ -38,6 +38,7 @@ from sdm.models.maxent.maxent_model import (
     DefaultMaxentConfig,
     MaxentConfig,
     create_maxent_pipeline,
+    resolve_feature_caps,
     evaluate_and_train_maxent_model,
 )
 from sdm.occurrence.sampling import (
@@ -650,6 +651,7 @@ def train_single_model(
             feature_names=model_features,
             maxent_n_jobs=max_threads_per_model,
             model_config=model_config,
+            feature_caps=data.feature_caps or None,
         )
         logger.info(f"Model features: {model_features}")
         # do 2 folds if n_presence < 15, 3 folds otherwise
@@ -1032,13 +1034,19 @@ def save_run_metadata(
     *,
     seed: int,
     model_config_path: str,
+    feature_caps: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> Path:
-    """Write run-level metadata (including the training seed) into the run folder."""
-    metadata = {
+    """Write run-level metadata (including the training seed) into the run folder.
+
+    ``feature_caps`` maps model id to the resolved upper caps used in that model.
+    """
+    metadata: Dict[str, Any] = {
         "schema_version": 1,
         "seed": seed,
         "model_config_path": model_config_path,
     }
+    if feature_caps:
+        metadata["feature_caps"] = feature_caps
     path = output_dir / "run_metadata.json"
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
@@ -1590,6 +1598,7 @@ def train_sdm_models(
         min_presence if min_presence is not None else base_model_cfg.sampling.min_presence
     )
     
+    resolved_feature_caps: Dict[str, Dict[str, float]] = {}
     for latin_name, activity_type in tqdm(
         filter_combinations, desc="Preparing training data"
     ):
@@ -1689,6 +1698,11 @@ def train_sdm_models(
                 len(model_features_config.variables),
             )
 
+        feature_caps = resolve_feature_caps(model_features_config.caps, species_data)
+        if feature_caps:
+            logger.info("%s: feature caps %s", identifier, feature_caps)
+        resolved_feature_caps[identifier] = feature_caps
+
         training_data.append(
             TrainingData(
                 latin_name=latin_name,
@@ -1696,6 +1710,7 @@ def train_sdm_models(
                 occurrence=species_data,
                 maxent_config=maxent_model_config,
                 model_features=model_features_config.variables,
+                feature_caps=feature_caps,
             )
         )
     
@@ -1744,6 +1759,7 @@ def train_sdm_models(
             models_output_dir,
             seed=training_seed,
             model_config_path=repo_relative_config_path(model_config_path),
+            feature_caps={k: v for k, v in resolved_feature_caps.items() if v},
         )
 
     logger.info("Model run outputs: %s", written_uri)

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import List, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 import geopandas as gpd
 import numpy as np
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
     from sdm.occurrence.sampling import BackgroundMethod, TransformMethod
@@ -141,6 +141,7 @@ class TrainingData(SDMModel):
     occurrence: gpd.GeoDataFrame
     maxent_config: Any  # DefaultMaxentConfig - using Any to avoid circular imports, required for training
     model_features: List[str]  # Required for training - list of feature column names to use
+    feature_caps: Dict[str, float] = Field(default_factory=dict)  # Resolved upper caps, applied in the pipeline
 
 
 class TrainingResults(SDMModel):
@@ -157,13 +158,32 @@ class TrainingResults(SDMModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
+class FeatureCapConfig(BaseModel):
+    """Upper cap for one predictor: a quantile of the training points or a fixed value."""
+
+    quantile: Optional[float] = None
+    value: Optional[float] = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "FeatureCapConfig":
+        if (self.quantile is None) == (self.value is None):
+            raise ValueError("A feature cap needs exactly one of 'quantile' or 'value'.")
+        if self.quantile is not None and not 0.0 < self.quantile <= 1.0:
+            raise ValueError("Cap 'quantile' must be in (0, 1].")
+        return self
+
+
 class VariablesConfig(BaseModel):
     variables: List[str]
+    caps: Dict[str, FeatureCapConfig] = Field(default_factory=dict)
 
     def validate_features(self, features: List[str]) -> "VariablesConfig":
         """Validate that all variables in this config exist in the provided features list."""
         if not set(self.variables).issubset(set(features)):
             raise ValueError(f"Variables config contains features that are not in the features list: {set(self.variables) - set(features)}")
+        uncapped = set(self.caps) - set(self.variables)
+        if uncapped:
+            raise ValueError(f"Caps set for variables not in the variables list: {sorted(uncapped)}")
         return self
 
 
