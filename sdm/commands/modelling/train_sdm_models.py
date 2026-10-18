@@ -51,9 +51,13 @@ from sdm.utils.io import (
     load_model_config,
     load_variables_config,
     load_boundary,
-    load_tuning_configs,
     CONFIG_PATH,
     MODEL_CONFIG_PATH,
+)
+from sdm.utils.sdm_config import (
+    model_config_file_paths,
+    resolve_model_config_dir,
+    resolve_sdm_config_root,
 )
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
@@ -1170,7 +1174,9 @@ def setup_training_data(
     # Resolve variables config path
     if variables_config_path is None:
         variables_config_path = Path(project_config.paths.variables_config_path)
-    variables_cfg = load_variables_config(resolve_data_path(variables_config_path))
+    variables_cfg = load_variables_config(
+        resolve_sdm_config_root(variables_config_path)
+    )
     
     # Resolve data paths from config if not explicitly provided
     bats_uri = resolve_data_path(
@@ -1376,6 +1382,7 @@ def train_sdm_models(
     d_min: float = 500,
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,
+    allow_config_fallback: bool = False,
 ) -> pd.DataFrame:
     """Run the MaxEnt model training pipeline using the new modular approach.
     
@@ -1403,6 +1410,8 @@ def train_sdm_models(
         d_min: Minimum distance from presence for background (meters)
         d_max: Maximum distance from presence for background (meters)
         sample_weight_n_neighbors: Number of neighbors for sample weighting
+        allow_config_fallback: If true, missing per-model configs use the base
+            ``variables_config.yml`` roster instead of failing (default: false).
         
     Note:
         Background point generation parameters are loaded from model_config.yml
@@ -1420,7 +1429,13 @@ def train_sdm_models(
     
     # Load configs
     project_config = load_project_config(project_config_path)
-    base_model_cfg = load_model_config(resolve_data_path(model_config_path))
+    base_model_cfg = load_model_config(resolve_sdm_config_root(model_config_path))
+
+    if variables_config_path is None:
+        variables_config_path = Path(project_config.paths.variables_config_path)
+    base_variables_cfg = load_variables_config(
+        resolve_sdm_config_root(variables_config_path)
+    )
     
     # Get background config from model config (with defaults if not present)
     background_config = base_model_cfg.background or BackgroundConfig()
@@ -1560,57 +1575,63 @@ def train_sdm_models(
             )
             continue
         
-        # Load per-species-activity configs from config_dir if provided
         identifier = get_model_id([latin_name, activity_type])
+        maxent_model_config: DefaultMaxentConfig = default_model_config
+        model_features_config: VariablesConfig
 
-        # this can be optional as we will just use all available features if not provided
-        model_features_config : VariablesConfig = VariablesConfig(variables=ev_columns)
-        maxent_model_config : DefaultMaxentConfig = default_model_config
-        if config_dir is not None:
-            config_dir_uri = resolve_data_path(config_dir)
-            if uri_exists(config_dir_uri):
-                try:
-                    model_config_path = join_uri_path(
-                        config_dir_uri, identifier, "model_config.yml"
-                    )
-                    model_config = load_model_config(model_config_path)
-                    # Convert ModelConfig to DefaultMaxentConfig
-                    maxent_model_config = DefaultMaxentConfig.from_config(
-                        config=model_config
-                    )
-                    logger.debug(f"Loaded model config for {identifier}: {maxent_model_config}")
-                except FileNotFoundError:
-                    logger.debug(
-                        f"No model config found for {identifier} at {model_config_path}. "
-                        f"Using default configs"
-                    )
-                except Exception as e:
-                    raise Exception(f"Error loading model config for {identifier}: {e}")
-                
-                try:
-                    variables_config_path = join_uri_path(
-                        config_dir_uri, identifier, "variables_config.yml"
-                    )
-                    variables_config = load_variables_config(variables_config_path)
-                    # This will raise an error if the variables config contains features that are not in the data
-                    model_features_config = variables_config.validate_features(ev_columns)
-                    logger.debug(f"Loaded variables config for {identifier}: {model_features_config.variables}")
+        def _apply_base_variables_fallback(reason: str) -> None:
+            nonlocal maxent_model_config, model_features_config
+            logger.warning(
+                "%s: %s; using base variables config from %s",
+                identifier,
+                reason,
+                resolve_sdm_config_root(variables_config_path),
+            )
+            maxent_model_config = default_model_config
+            model_features_config = base_variables_cfg.validate_features(ev_columns)
 
-                except FileNotFoundError:
-                    logger.debug(
-                        f"No variables config found for {identifier} at {variables_config_path}. "
-                        f"Using default configs"
-                    )
-                except Exception as e:
-                    raise Exception(f"Error loading variables config for {identifier}: {e}")
-            else:
-                raise FileNotFoundError(
-                    f"Tuning directory {config_dir_uri} does not exist"
-                )
+        if config_dir is None:
+            model_features_config = base_variables_cfg.validate_features(ev_columns)
+            logger.info(
+                "%s: no config_dir; using base variables (%d features)",
+                identifier,
+                len(model_features_config.variables),
+            )
         else:
-            logger.debug(f"No config_dir provided, using default configs for {identifier}")
-        
-        # Create TrainingData with config and features included
+            try:
+                model_subdir = resolve_model_config_dir(
+                    config_dir, identifier, must_exist=True
+                )
+                per_model_config_path, per_model_variables_path = (
+                    model_config_file_paths(model_subdir)
+                )
+                model_config = load_model_config(per_model_config_path)
+                maxent_model_config = DefaultMaxentConfig.from_config(
+                    config=model_config
+                )
+                variables_config = load_variables_config(per_model_variables_path)
+                model_features_config = variables_config.validate_features(
+                    ev_columns
+                )
+            except FileNotFoundError as exc:
+                if allow_config_fallback:
+                    _apply_base_variables_fallback(str(exc))
+                else:
+                    raise
+            except Exception as exc:
+                if allow_config_fallback:
+                    _apply_base_variables_fallback(str(exc))
+                else:
+                    raise RuntimeError(
+                        f"Error loading per-model configs for {identifier}: {exc}"
+                    ) from exc
+
+            logger.info(
+                "%s: training with %d features",
+                identifier,
+                len(model_features_config.variables),
+            )
+
         training_data.append(
             TrainingData(
                 latin_name=latin_name,

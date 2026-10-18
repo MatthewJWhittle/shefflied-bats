@@ -46,6 +46,7 @@ from sdm.occurrence.sampling import (
 from sdm.raster.io import load_environmental_variables
 from sdm.utils.fs import local_materialized_path
 from sdm.utils.model_runs import resolve_data_path
+from sdm.utils.sdm_config import resolve_sdm_config_root
 from sdm.utils.io import (
     load_model_config,
     load_project_config,
@@ -1053,7 +1054,7 @@ def tune_hyperparameters(
     
     # Load base configs
     project_config = load_project_config(project_config_path)
-    base_model_config = load_model_config(resolve_data_path(model_config_path))
+    base_model_config = load_model_config(resolve_sdm_config_root(model_config_path))
     
     # Get background config from model config (use provided values as overrides)
     bg_config = base_model_config.background or BackgroundConfig()
@@ -1281,7 +1282,12 @@ def tune_hyperparameters(
             
             if n_completed > 0:
                 # Write best configs for this combination
-                combination_dir = get_tuning_config_path(output_dir, get_model_id([latin_name, activity_type]))
+                combination_dir = Path(
+                    get_tuning_config_path(
+                        output_dir,
+                        get_model_id([latin_name, activity_type]),
+                    )
+                )
                 combination_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Use consistent file names (not "best_*") for easy loading
