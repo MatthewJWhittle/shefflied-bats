@@ -513,20 +513,30 @@ def compare_layers(
         help="Folder of the current / reference environmental layers.",
     ),
     output_csv: Path = typer.Option(
-        Path("data/evs/layer_comparison.csv"),
+        Path("layer_comparison/layer_comparison.csv"),
         "--output-csv",
         "-o",
-        help="CSV table with one row per layer.",
+        help=(
+            "CSV table with one row per layer. Must not be under data/evs or inputs/ "
+            "(same write guard as the rebuild command)."
+        ),
     ),
-    variables_config_path: Path = typer.Option(
-        Path("data/sdm_config/Plecotus_auritus_Roost/variables_config.yml"),
-        "--variables-config",
-        help="Variables YAML whose layer list is compared first (Plecotus roost by default).",
+    priority_config: Optional[List[Path]] = typer.Option(
+        None,
+        "--priority-config",
+        help=(
+            "Repeatable path to a variables_config.yml. Priority order is the union "
+            "of variables across these configs (first-seen order). Default: all "
+            "data/sdm_config/*/variables_config.yml."
+        ),
     ),
     difference_maps_dir: Optional[Path] = typer.Option(
         None,
         "--difference-maps-dir",
-        help="Directory for per-layer difference GeoTIFFs (default: alongside the CSV).",
+        help=(
+            "Directory for per-layer difference GeoTIFFs and patch tables "
+            "(default: alongside the CSV). Must not be under data/evs or inputs/."
+        ),
     ),
     source_versions: Optional[Path] = typer.Option(
         None,
@@ -537,6 +547,16 @@ def compare_layers(
         None,
         "--model-hooks-csv",
         help="Optional stub CSV for later model AUC / cut-off checks (not run here).",
+    ),
+    stack_only: bool = typer.Option(
+        False,
+        "--stack-only",
+        help="Only read **/evs-to-model.tif stacks (ignore intermediate layer files).",
+    ),
+    file_glob: Optional[str] = typer.Option(
+        None,
+        "--glob",
+        help="Only read raster files matching this glob (mutually exclusive with --stack-only).",
     ),
     verbose: bool = False,
 ) -> None:
@@ -549,18 +569,28 @@ def compare_layers(
     from sdm.commands.data_preparation.processing.compare_ev_layers import (
         compare_ev_layers,
     )
+    from sdm.utils.ev_output_guards import ForbiddenEvOutputError
 
     setup_logging(verbose=verbose)
-    summary = compare_ev_layers(
-        rebuilt_dir=rebuilt_dir,
-        current_dir=current_dir,
-        output_csv=output_csv,
-        variables_config_path=variables_config_path,
-        difference_maps_dir=difference_maps_dir,
-        source_versions_path=source_versions,
-        write_model_hooks_csv=model_hooks_csv,
-        verbose=verbose,
-    )
+    if stack_only and file_glob:
+        typer.secho("Use only one of --stack-only and --glob", err=True)
+        raise typer.Exit(code=2)
+    try:
+        summary = compare_ev_layers(
+            rebuilt_dir=rebuilt_dir,
+            current_dir=current_dir,
+            output_csv=output_csv,
+            priority_config_paths=priority_config,
+            difference_maps_dir=difference_maps_dir,
+            source_versions_path=source_versions,
+            write_model_hooks_csv=model_hooks_csv,
+            stack_only=stack_only,
+            file_glob=file_glob,
+            verbose=verbose,
+        )
+    except ForbiddenEvOutputError as exc:
+        typer.secho(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
     n_pass = sum(1 for r in summary.layers if r.verdict.value == "pass")
     n_fail = sum(1 for r in summary.layers if r.verdict.value == "fail")
     n_flag = sum(

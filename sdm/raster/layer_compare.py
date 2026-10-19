@@ -11,6 +11,7 @@ they are not required for layer comparison runs.
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -23,11 +24,28 @@ from scipy import ndimage
 from sdm.utils.text_utils import tidy_variable_name
 
 RASTER_SUFFIXES = {".tif", ".tiff", ".geotiff"}
+DEFAULT_STACK_NAME = "evs-to-model.tif"
 SHARE_WITHIN_TOLERANCE_PASS = 0.95
 CONTINUOUS_RANGE_FRACTION = 0.01
-# Compactness: mismatch cells in many tiny components relative to area → widespread.
-MAX_SCATTERED_COMPONENTS_PER_AREA = 0.02
+
+# Compactness heuristics for out-of-tolerance cells.
 MAX_COMPONENTS_FOR_COMPACT = 8
+# Fill ratio of mismatch cells inside their row/col bounding box. Low values
+# flag elongated / road-network-shaped components even when component count is 1.
+MIN_BBOX_FILL_RATIO = 0.25
+
+# ---------------------------------------------------------------------------
+# Exact-match (category / percentage-cover) name rules.
+#
+# Open question for architecture review: neighbourhood CEH landcover buffers
+# (ceh_landcover_*_{500,1000,1500}m) are stored as decimal averages, not pure
+# categories. They remain on EXACT match for now; change
+# ``exact_match_layer_names`` / ``is_exact_match_layer`` in one place when the
+# review decides otherwise.
+# ---------------------------------------------------------------------------
+EXACT_MATCH_NAME_CONTAINS: tuple[str, ...] = ("landcover",)
+EXACT_MATCH_NAME_PREFIXES: tuple[str, ...] = ("os_cover",)
+EXACT_MATCH_NAME_INFIXES: tuple[str, ...] = ("_cover_",)
 
 
 class LayerValueKind(str, Enum):
@@ -98,6 +116,19 @@ class GridCheck:
 
 
 @dataclass
+class PatchInfo:
+    """One connected component of out-of-tolerance cells."""
+
+    component_id: int
+    cell_count: int
+    row_min: int
+    row_max: int
+    col_min: int
+    col_max: int
+    bbox_fill_ratio: float
+
+
+@dataclass
 class LayerCompareResult:
     layer_name: str
     value_kind: LayerValueKind
@@ -108,10 +139,12 @@ class LayerCompareResult:
     difference_map_path: str
     differences_local: Optional[bool]
     n_mismatch_components: Optional[int]
-    source_version_current: str
-    source_version_rebuilt: str
-    reason: str
-    verdict: LayerVerdict
+    patches: list[PatchInfo] = field(default_factory=list)
+    patch_table_path: str = ""
+    source_version_current: str = ""
+    source_version_rebuilt: str = ""
+    reason: str = ""
+    verdict: LayerVerdict = LayerVerdict.FAIL
     notes: str = ""
 
 
@@ -139,24 +172,74 @@ class CompareRunSummary:
     model_hooks: list[ModelCompareHookResult] = field(default_factory=list)
 
 
+def is_exact_match_layer(layer_name: str) -> bool:
+    """Return True when the layer must match cell values exactly.
+
+    Central switch for category / percentage-cover rules. Neighbourhood
+    CEH landcover buffers remain exact until architecture review changes this.
+    """
+    name = tidy_variable_name(layer_name)
+    if any(token in name for token in EXACT_MATCH_NAME_CONTAINS):
+        return True
+    if any(name.startswith(prefix) for prefix in EXACT_MATCH_NAME_PREFIXES):
+        return True
+    if any(infix in name for infix in EXACT_MATCH_NAME_INFIXES):
+        return True
+    return False
+
+
 def classify_value_kind(layer_name: str) -> LayerValueKind:
     """Category / percentage-cover → exact; distances, heights, climate → continuous."""
-    name = tidy_variable_name(layer_name)
-    if "landcover" in name or name.startswith("os_cover") or "_cover_" in name:
+    if is_exact_match_layer(layer_name):
         return LayerValueKind.EXACT
     return LayerValueKind.CONTINUOUS
 
 
-def discover_layers(folder: Path) -> dict[str, LayerRef]:
+def _iter_raster_paths(
+    folder: Path,
+    *,
+    stack_only: bool = False,
+    file_glob: Optional[str] = None,
+) -> list[Path]:
+    folder = Path(folder)
+    if stack_only and file_glob:
+        raise ValueError("Use only one of stack_only and file_glob")
+    if stack_only:
+        paths = [
+            p
+            for p in folder.rglob("*")
+            if p.is_file() and p.name.lower() in {"evs-to-model.tif", "evs-to-model.tiff"}
+        ]
+        return sorted(paths)
+    if file_glob:
+        # Path.match is relative to the pattern; prefer glob/rglob semantics.
+        if "**" in file_glob or "/" in file_glob or "\\" in file_glob:
+            paths = [p for p in folder.glob(file_glob) if p.is_file()]
+            if not paths:
+                paths = [p for p in folder.rglob(file_glob) if p.is_file()]
+        else:
+            paths = [p for p in folder.rglob(file_glob) if p.is_file()]
+        return sorted(paths)
+    return sorted(
+        p
+        for p in folder.rglob("*")
+        if p.is_file() and p.suffix.lower() in RASTER_SUFFIXES
+    )
+
+
+def discover_layers(
+    folder: Path,
+    *,
+    stack_only: bool = False,
+    file_glob: Optional[str] = None,
+) -> dict[str, LayerRef]:
     """Index named layers under a folder (single-band files and multi-band stacks)."""
     folder = Path(folder)
     if not folder.is_dir():
         raise FileNotFoundError(f"Layer folder not found: {folder}")
 
     found: dict[str, LayerRef] = {}
-    for path in sorted(folder.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in RASTER_SUFFIXES:
-            continue
+    for path in _iter_raster_paths(folder, stack_only=stack_only, file_glob=file_glob):
         with rasterio.open(path) as src:
             for band_index in range(1, src.count + 1):
                 description = None
@@ -168,8 +251,9 @@ def discover_layers(folder: Path) -> dict[str, LayerRef]:
                     name = tidy_variable_name(path.stem)
                 else:
                     name = tidy_variable_name(f"{path.stem}_band_{band_index}")
-                # Prefer first occurrence; nested duplicates keep the first path.
-                found.setdefault(name, LayerRef(name=name, path=path, band_index=band_index))
+                found.setdefault(
+                    name, LayerRef(name=name, path=path, band_index=band_index)
+                )
     return found
 
 
@@ -290,7 +374,6 @@ def check_grid(
         )
     )
     nodata_value_match = _nodata_equal(current_meta["nodata"], rebuilt_meta["nodata"])
-    # nodata_cells_match is filled by caller once arrays are available.
     return GridCheck(
         name_match=name_match,
         projection_match=projection_match,
@@ -349,27 +432,52 @@ def cells_within_tolerance(
     return within, share, max_diff
 
 
-def differences_are_local(
+def analyze_mismatch_patches(
     out_of_tolerance: np.ndarray,
     jointly_valid: np.ndarray,
-) -> tuple[bool, int]:
-    """Heuristic: few compact connected components → local; many → widespread."""
+) -> tuple[bool, list[PatchInfo], int]:
+    """Return (differences_local, patches, n_components).
+
+    Fails the local-patch check when there are too many components, or when any
+    component is sparse inside its bounding box (low fill ratio — typical of
+    elongated / road-network-shaped differences).
+    """
     mismatch = out_of_tolerance & jointly_valid
     n_mismatch = int(mismatch.sum())
     if n_mismatch == 0:
-        return True, 0
+        return True, [], 0
 
     labeled, n_components = ndimage.label(mismatch)
-    area = max(int(jointly_valid.sum()), 1)
-    compact = (
-        n_components <= MAX_COMPONENTS_FOR_COMPACT
-        and (n_components / area) <= MAX_SCATTERED_COMPONENTS_PER_AREA
-    )
-    # Also treat a single contiguous patch covering many cells as local.
-    if n_components == 1:
-        compact = True
-    _ = labeled  # labeling used for component count only
-    return compact, int(n_components)
+    patches: list[PatchInfo] = []
+    sparse_component = False
+
+    for component_id in range(1, n_components + 1):
+        coords = np.argwhere(labeled == component_id)
+        cell_count = int(coords.shape[0])
+        row_min, col_min = (int(v) for v in coords.min(axis=0))
+        row_max, col_max = (int(v) for v in coords.max(axis=0))
+        bbox_h = row_max - row_min + 1
+        bbox_w = col_max - col_min + 1
+        bbox_area = max(bbox_h * bbox_w, 1)
+        fill_ratio = cell_count / bbox_area
+        patches.append(
+            PatchInfo(
+                component_id=component_id,
+                cell_count=cell_count,
+                row_min=row_min,
+                row_max=row_max,
+                col_min=col_min,
+                col_max=col_max,
+                bbox_fill_ratio=float(fill_ratio),
+            )
+        )
+        # Single-cell patches are compact by definition.
+        if cell_count > 1 and fill_ratio < MIN_BBOX_FILL_RATIO:
+            sparse_component = True
+
+    too_many = n_components > MAX_COMPONENTS_FOR_COMPACT
+    differences_local = not too_many and not sparse_component
+    return differences_local, patches, int(n_components)
 
 
 def write_difference_map(
@@ -425,12 +533,14 @@ def decide_verdict(
         return LayerVerdict.FAIL
     if share_within is None:
         return LayerVerdict.FAIL
+    # Source version drift is always flagged when both versions are recorded,
+    # even if values and locality would otherwise pass.
+    if source_changed:
+        return LayerVerdict.FLAGGED_SOURCE_CHANGE
     values_ok = share_within >= SHARE_WITHIN_TOLERANCE_PASS
     local_ok = differences_local is True or differences_local is None
     if values_ok and local_ok:
         return LayerVerdict.PASS
-    if source_changed:
-        return LayerVerdict.FLAGGED_SOURCE_CHANGE
     return LayerVerdict.FAIL
 
 
@@ -489,12 +599,15 @@ def compare_layer_pair(
         grid.nodata_cells_match = False
 
     diff_path = ""
+    patch_table_path = ""
+    patches: list[PatchInfo] = []
     share: Optional[float] = None
     max_diff: Optional[float] = None
     local: Optional[bool] = None
     n_components: Optional[int] = None
+    notes = ""
 
-    if grid.ok and current_data.shape == rebuilt_data.shape:
+    if current_data.shape == rebuilt_data.shape:
         within, share, max_diff = cells_within_tolerance(
             current_data,
             rebuilt_data,
@@ -505,7 +618,7 @@ def compare_layer_pair(
             rebuilt_data, rebuilt_meta["nodata"]
         )
         out_of_tol = jointly & ~within
-        local, n_components = differences_are_local(out_of_tol, jointly)
+        local, patches, n_components = analyze_mismatch_patches(out_of_tol, jointly)
         out_file = Path(diff_dir) / f"{layer_name}_difference.tif"
         write_difference_map(
             current_data,
@@ -515,28 +628,12 @@ def compare_layer_pair(
             out_path=out_file,
         )
         diff_path = str(out_file)
-    elif current_data.shape == rebuilt_data.shape:
-        # Still emit a difference map for review even when grid metadata fails
-        # on non-shape fields (e.g. name), if arrays align.
-        out_file = Path(diff_dir) / f"{layer_name}_difference.tif"
-        write_difference_map(
-            current_data,
-            rebuilt_data,
-            profile=current_pack,
-            nodata=nodata,
-            out_path=out_file,
-        )
-        diff_path = str(out_file)
-        within, share, max_diff = cells_within_tolerance(
-            current_data,
-            rebuilt_data,
-            nodata=nodata,
-            kind=kind,
-        )
-        jointly = _valid_mask(current_data, nodata) & _valid_mask(
-            rebuilt_data, rebuilt_meta["nodata"]
-        )
-        local, n_components = differences_are_local(jointly & ~within, jointly)
+        patch_file = Path(diff_dir) / f"{layer_name}_patches.csv"
+        _write_patch_table(patch_file, patches)
+        patch_table_path = str(patch_file)
+
+    if source_changed:
+        notes = "source versions differ"
 
     verdict = decide_verdict(
         grid_ok=grid.ok,
@@ -556,11 +653,43 @@ def compare_layer_pair(
         difference_map_path=diff_path,
         differences_local=local,
         n_mismatch_components=n_components,
+        patches=patches,
+        patch_table_path=patch_table_path,
         source_version_current=source_version_current,
         source_version_rebuilt=source_version_rebuilt,
         reason=reason,
         verdict=verdict,
+        notes=notes,
     )
+
+
+def _write_patch_table(path: Path, patches: Sequence[PatchInfo]) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "component_id",
+        "cell_count",
+        "row_min",
+        "row_max",
+        "col_min",
+        "col_max",
+        "bbox_fill_ratio",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for patch in patches:
+            writer.writerow(
+                {
+                    "component_id": patch.component_id,
+                    "cell_count": patch.cell_count,
+                    "row_min": patch.row_min,
+                    "row_max": patch.row_max,
+                    "col_min": patch.col_min,
+                    "col_max": patch.col_max,
+                    "bbox_fill_ratio": patch.bbox_fill_ratio,
+                }
+            )
 
 
 def model_compare_hooks(model_ids: Sequence[str] | None = None) -> list[ModelCompareHookResult]:
@@ -580,6 +709,7 @@ def result_to_row(result: LayerCompareResult) -> dict:
         "difference_map_path": result.difference_map_path,
         "differences_local": result.differences_local,
         "n_mismatch_components": result.n_mismatch_components,
+        "patch_table_path": result.patch_table_path,
         "source_version_current": result.source_version_current,
         "source_version_rebuilt": result.source_version_rebuilt,
         "reason": result.reason,
