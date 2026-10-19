@@ -18,13 +18,17 @@ def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=
     # Define the raster size and transform
     # Here, I'm assuming a 1x1 meter resolution and using the bounds of the GeoDataFrame
     if bbox is None:
-        x_min, y_min, x_max, y_max = gdf.total_bounds
-    else: 
-        x_min, y_min, x_max, y_max = bbox
+        raw_bounds = tuple(gdf.total_bounds)
+    else:
+        raw_bounds = tuple(bbox)
 
-    width = int((x_max - x_min) / resolution)
-    height = int((y_max - y_min) / resolution)
-    transform = from_bounds(x_min, y_min, x_max, y_max, width, height)
+    # Snap to the shared resolution grid so the 10 m OS cover origin sits on a
+    # cell line (same helper as the model transform). Raw buffered bounds left
+    # the fine grid offset and bilinear resample bled fractions into zeros.
+    transform, (x_min, y_min, x_max, y_max) = construct_transform_shift_bounds(
+        raw_bounds, resolution
+    )
+    height, width = grid_shape_from_bounds((x_min, y_min, x_max, y_max), resolution)
 
     # Create a mask: rasterize the GeoDataFrame. This gives a value of True where the geometry covers a square
     mask = geometry_mask(gdf.geometry, transform=transform, invert=True, out_shape=(height, width))
@@ -177,14 +181,13 @@ def reproject_data(
             )
         shape = grid_shape_from_bounds(bounds, resolution)
     # resolution is encoded in transform; rioxarray forbids combining it
-    # with shape/transform. ``resampling`` is still ignored here (bilinear);
-    # a follow-up commit honours the argument for zero-cover bleed.
-    _ = (resolution, resampling)
+    # with shape/transform.
+    _ = resolution
     reprojected = array.rio.reproject(
         crs,
         transform=transform,
         shape=shape,
-        resampling=Resampling.bilinear,
+        resampling=resampling,
     )
     if isinstance(reprojected, xr.DataArray):
         reprojected = reprojected.where(reprojected != reprojected.rio.nodata, np.nan)
