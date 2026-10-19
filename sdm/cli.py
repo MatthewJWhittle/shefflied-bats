@@ -104,13 +104,13 @@ def run_data_rebuild(
 
 @app.command()
 def data(
-    output_dir: str = typer.Option(
-        ...,
+    output_dir: Optional[str] = typer.Option(
+        None,
         "--output-dir",
         "-o",
         help=(
-            "Local directory for rebuilt EV layers (required; taken as a string so "
-            "gs:// URIs are not collapsed by pathlib). "
+            "Local directory for rebuilt EV layers (required unless --plan; taken "
+            "as a string so gs:// URIs are not collapsed by pathlib). "
             "Refuses data/evs, paths under inputs/, INPUT_DATA_ROOT, "
             "and gs://…/inputs URIs so the live layer set is not overwritten."
         ),
@@ -129,6 +129,16 @@ def data(
         help=(
             "Ignore stale OS parquet and Boundary-Line caches and rebuild them "
             "from sources under --cache-dir."
+        ),
+    ),
+    plan: bool = typer.Option(
+        False,
+        "--plan",
+        help=(
+            "Print each rebuild step, its source URL or local input path, whether "
+            "that input is present, and the OS 100 km tiles needed. No downloads "
+            "and no writes. Exits non-zero if a required manual input "
+            "(CEH LCM 2023 10 m) is missing."
         ),
     ),
     live_download: bool = True,
@@ -160,7 +170,39 @@ def data(
     verbose: bool = False,
 ) -> None:
     """Rebuild all environmental layers into a caller-chosen output folder."""
+    from sdm.commands.data_preparation.plan_data_rebuild import run_data_plan
+    from sdm.utils.rebuild_provenance import DEFAULT_CEH_PATH
+
     setup_logging(verbose=verbose)
+    resolved_ceh = Path(ceh_path) if ceh_path is not None else DEFAULT_CEH_PATH
+
+    if plan:
+        from sdm.commands.data_preparation.rebuild_steps import (
+            UnknownRebuildStepError,
+        )
+
+        try:
+            exit_code = run_data_plan(
+                boundary_path=Path(PROJECT_CONFIG.paths.boundary),
+                buffer_m=float(PROJECT_CONFIG.spatial.study_area_buffer),
+                ceh_data_path=resolved_ceh,
+                cache_dir=Path(cache_dir) if cache_dir else None,
+                skip=skip,
+                only=only,
+            )
+        except (UnknownRebuildStepError, ValueError) as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=2) from exc
+        raise typer.Exit(code=exit_code)
+
+    if not output_dir:
+        typer.secho(
+            "Error: --output-dir / -o is required unless --plan is set.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
     run_data_rebuild(
         output_dir,
         cache_dir=cache_dir,

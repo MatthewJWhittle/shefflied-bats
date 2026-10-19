@@ -20,29 +20,34 @@ def build_ev_dataset_inputs(
     skip_ceh: bool = False,
     skip_coastal: bool = False,
 ) -> List[str]:
-    """Build name=path merge inputs for standard ``sdm data`` pipeline outputs."""
+    """Build name=path merge inputs for standard ``sdm data`` pipeline outputs.
+
+    Dataset prefixes match the live ``evs-to-model`` band names
+    (``ceh_landcover_*``, ``bgs_coast_*``, ``climate_bioclim_*``,
+    ``vom_vegetation_height_*``, etc.). Monthly WorldClim rasters are omitted:
+    ``climate_stats.tif`` already carries the annual summaries used in modelling.
+    """
     evs_dir = Path(evs_dir)
     climate_dir = evs_dir / "climate"
     inputs = [
         f"terrain_stats={evs_dir / 'terrain_stats.tif'}",
-        f"climate_bio={climate_dir / 'bio.tif'}",
-        f"climate_tavg={climate_dir / 'tavg.tif'}",
-        f"climate_prec={climate_dir / 'prec.tif'}",
-        f"climate_wind={climate_dir / 'wind.tif'}",
-        f"vom={evs_dir / 'vom' / f'vom_summary_metrics_{resolution}m.tif'}",
+        f"terrain={evs_dir / 'terrain' / f'dtm_dsm_{resolution}m.tif'}",
+        f"climate_bioclim={climate_dir / 'bio.tif'}",
+        f"climate_stats={climate_dir / 'climate_stats.tif'}",
+        f"vom_vegetation_height={evs_dir / 'vom' / f'vom_summary_metrics_{resolution}m.tif'}",
         f"os_cover={evs_dir / 'os-feature-cover.tif'}",
         f"os_distance={evs_dir / 'os-distance-to-feature.tif'}",
     ]
     if not skip_ceh:
         inputs.insert(
-            5,
-            f"landcover={evs_dir / 'landcover' / f'ceh-land-cover-{resolution}m.tif'}",
+            4,
+            f"ceh_landcover={evs_dir / 'landcover' / f'ceh-land-cover-{resolution}m.tif'}",
         )
     if not skip_coastal:
-        insert_at = 6 if skip_ceh else 7
+        insert_at = 5 if skip_ceh else 6
         inputs.insert(
             insert_at,
-            f"coastal={evs_dir / 'coastal_distance.tif'}",
+            f"bgs_coast={evs_dir / 'coastal_distance.tif'}",
         )
     return inputs
 
