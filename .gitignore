@@ -198,3 +198,6 @@ crash.log
 # Credentials
 *-key.json
 *credentials*.json
+
+# Local scaling assessment outputs (#56)
+data/scaling-bench/
