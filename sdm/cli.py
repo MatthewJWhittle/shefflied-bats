@@ -52,22 +52,35 @@ def run_data_rebuild(
     cache_dir: Optional[str] = None,
     fresh: bool = False,
     live_download: bool = True,
-    skip_ceh: bool = False,
-    skip_coastal: bool = False,
+    skip: Optional[str] = None,
+    only: Optional[str] = None,
     ceh_path: Optional[Path] = None,
     verbose: bool = False,
 ) -> Path:
     """Core EV rebuild used by ``sdm data`` and ``sdm pipeline``.
 
-    Plain bool/Path defaults (not ``typer.Option``) so callers that invoke this
-    as a Python function cannot accidentally treat OptionInfo as truthy and
-    skip CEH or coastal steps.
+    Plain defaults (not ``typer.Option``) so callers that invoke this as a
+    Python function cannot accidentally treat OptionInfo as truthy and skip
+    steps. ``skip`` / ``only`` are comma-separated registry step names.
     """
     from sdm.commands.data_preparation.rebuild_ev_layers import (
         ForbiddenEvOutputError,
         rebuild_environmental_layers,
     )
+    from sdm.commands.data_preparation.rebuild_steps import (
+        UnknownRebuildStepError,
+        parse_step_name_list,
+        resolve_active_steps,
+    )
     from sdm.utils.rebuild_provenance import DEFAULT_CEH_PATH
+
+    try:
+        skip_steps = parse_step_name_list(skip)
+        only_steps = parse_step_name_list(only)
+        resolve_active_steps(skip=skip_steps, only=only_steps)
+    except (UnknownRebuildStepError, ValueError) as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
 
     try:
         return rebuild_environmental_layers(
@@ -75,8 +88,8 @@ def run_data_rebuild(
             boundary_path=Path(PROJECT_CONFIG.paths.boundary),
             resolution=PROJECT_CONFIG.spatial.resolution,
             live_download=live_download,
-            skip_ceh=skip_ceh,
-            skip_coastal=skip_coastal,
+            skip=skip_steps,
+            only=only_steps,
             cache_dir=Path(cache_dir) if cache_dir else None,
             fresh=fresh,
             ceh_data_path=Path(ceh_path) if ceh_path is not None else DEFAULT_CEH_PATH,
@@ -119,15 +132,22 @@ def data(
         ),
     ),
     live_download: bool = True,
-    skip_ceh: bool = typer.Option(
-        False,
-        "--skip-ceh",
-        help="Skip CEH land cover (manual GeoTIFF). Use for live-source smoke tests.",
+    skip: Optional[str] = typer.Option(
+        None,
+        "--skip",
+        help=(
+            "Comma-separated rebuild step names to skip "
+            "(registry: terrain,terrain_stats,climate,ceh,vom,coastal,os,merge). "
+            "Example: --skip ceh,coastal"
+        ),
     ),
-    skip_coastal: bool = typer.Option(
-        False,
-        "--skip-coastal",
-        help="Skip coastal distance layer. Use for live-source smoke tests.",
+    only: Optional[str] = typer.Option(
+        None,
+        "--only",
+        help=(
+            "Comma-separated rebuild step names to run exclusively "
+            "(same registry as --skip). Mutually exclusive with --skip."
+        ),
     ),
     ceh_path: Optional[Path] = typer.Option(
         None,
@@ -146,8 +166,8 @@ def data(
         cache_dir=cache_dir,
         fresh=fresh,
         live_download=live_download,
-        skip_ceh=skip_ceh,
-        skip_coastal=skip_coastal,
+        skip=skip,
+        only=only,
         ceh_path=ceh_path,
         verbose=verbose,
     )
@@ -532,7 +552,7 @@ def pipeline(
     logging.info("Starting complete SDM pipeline...")
     
     # Run all steps via core helpers (not Typer command callables) so OptionInfo
-    # defaults cannot be treated as true and silently skip CEH / coastal.
+    # defaults cannot be treated as true and silently skip layers.
     if generate_background:
         background(verbose=verbose)
     run_data_rebuild(
@@ -540,8 +560,8 @@ def pipeline(
         cache_dir=cache_dir,
         fresh=fresh,
         live_download=True,
-        skip_ceh=False,
-        skip_coastal=False,
+        skip=None,
+        only=None,
         verbose=verbose,
     )
     rebuilt_ev = str(Path(output_dir) / "evs-to-model.tif")

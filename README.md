@@ -43,8 +43,8 @@ One command rebuilds every public-source EV layer (terrain, climate, land cover,
 ```bash
 sdm data --output-dir data/evs-rebuild
 sdm data -o data/evs-rebuild --cache-dir /tmp/evs-cache --fresh
-# optional smoke skips:
-sdm data -o /tmp/evs-smoke --skip-ceh --skip-coastal
+# optional smoke skips (registry names):
+sdm data -o /tmp/evs-smoke --skip ceh,coastal
 ```
 
 Download caches (WorldClim, OS tiles/parquets, Boundary-Line) go under `--cache-dir` or, by default, `<output-dir>/cache`. Pass `--fresh` so stale OS parquets cannot hide source changes. Full flag list: [docs/rebuild-ev-layers.md](docs/rebuild-ev-layers.md).

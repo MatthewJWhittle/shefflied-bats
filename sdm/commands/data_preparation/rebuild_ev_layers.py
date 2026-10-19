@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Iterable
 
 from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import (
     generate_ceh_lc_data,
@@ -25,6 +26,11 @@ from sdm.commands.data_preparation.processing.merge_ev_layers import (
     merge_ev_layers,
 )
 from sdm.commands.data_preparation.processing.process_os_data import process_os_data
+from sdm.commands.data_preparation.rebuild_steps import (
+    REBUILD_STEP_NAMES,
+    UnknownRebuildStepError,
+    resolve_active_steps,
+)
 from sdm.commands.data_preparation.spatial.generate_coastal_distance import (
     generate_coastal_distance,
 )
@@ -60,8 +66,8 @@ def rebuild_environmental_layers(
     boundary_path: Path,
     resolution: int,
     live_download: bool = True,
-    skip_ceh: bool = False,
-    skip_coastal: bool = False,
+    skip: Iterable[str] = (),
+    only: Iterable[str] = (),
     cache_dir: Path | str | None = None,
     fresh: bool = False,
     ceh_data_path: Path = DEFAULT_CEH_PATH,
@@ -77,12 +83,21 @@ def rebuild_environmental_layers(
     ``cache_dir`` when set, otherwise ``<output_dir>/cache``. Pass ``fresh=True``
     to ignore/rebuild stale cached parquets and Boundary-Line extracts.
 
+    ``skip`` / ``only`` take registry step names (see
+    ``sdm.commands.data_preparation.rebuild_steps``); they are mutually
+    exclusive.
+
     Raises
     ------
     ForbiddenEvOutputError
         If ``output_dir`` is the live EV set, under ``inputs/``, under
         ``INPUT_DATA_ROOT``, or a ``gs://…/inputs`` URI.
+    UnknownRebuildStepError
+        If ``skip`` or ``only`` names a step outside the registry.
+    ValueError
+        If both ``skip`` and ``only`` are non-empty.
     """
+    active = resolve_active_steps(skip=skip, only=only)
     evs_dir = validate_ev_output_dir(
         output_dir,
         config_evs=config_evs,
@@ -97,9 +112,18 @@ def rebuild_environmental_layers(
     logging.info("Rebuilding environmental layers into %s", evs_dir)
     logging.info("Cache directory: %s (fresh=%s)", cache_root, fresh)
     logging.info("Write guards: %s", forbidden_output_summary())
+    if active != REBUILD_STEP_NAMES:
+        logging.info("Active steps: %s", ", ".join(sorted(active)))
+
+    def _run_or_skip(name: str, recorder_key: str, fn) -> None:
+        if name not in active:
+            logging.info("Skipping %s (--skip / --only)", name)
+            return
+        recorder.run(recorder_key, fn)
 
     try:
-        recorder.run(
+        _run_or_skip(
+            "terrain",
             "generate_terrain_data",
             lambda: generate_terrain_data(
                 output_dir=evs_dir / "terrain",
@@ -109,7 +133,8 @@ def rebuild_environmental_layers(
             ),
         )
 
-        recorder.run(
+        _run_or_skip(
+            "terrain_stats",
             "generate_terrain_stats",
             lambda: generate_terrain_stats(
                 input_dem_path=evs_dir / "terrain" / "dtm_dsm_100m.tif",
@@ -118,7 +143,8 @@ def rebuild_environmental_layers(
             ),
         )
 
-        recorder.run(
+        _run_or_skip(
+            "climate",
             "generate_climate_data",
             lambda: generate_climate_data(
                 output_dir=evs_dir / "climate",
@@ -128,20 +154,19 @@ def rebuild_environmental_layers(
             ),
         )
 
-        if skip_ceh:
-            logging.info("Skipping CEH land cover (--skip-ceh)")
-        else:
-            recorder.run(
-                "generate_ceh_lc_data",
-                lambda: generate_ceh_lc_data(
-                    output_dir=evs_dir / "landcover",
-                    boundary_path=boundary_path,
-                    ceh_data_path=ceh_data_path,
-                    verbose=verbose,
-                ),
-            )
+        _run_or_skip(
+            "ceh",
+            "generate_ceh_lc_data",
+            lambda: generate_ceh_lc_data(
+                output_dir=evs_dir / "landcover",
+                boundary_path=boundary_path,
+                ceh_data_path=ceh_data_path,
+                verbose=verbose,
+            ),
+        )
 
-        recorder.run(
+        _run_or_skip(
+            "vom",
             "generate_vom_data",
             lambda: generate_vom_data(
                 output_dir=evs_dir / "vom",
@@ -151,22 +176,21 @@ def rebuild_environmental_layers(
             ),
         )
 
-        if skip_coastal:
-            logging.info("Skipping coastal distance (--skip-coastal)")
-        else:
-            recorder.run(
-                "generate_coastal_distance",
-                lambda: generate_coastal_distance(
-                    boundary_path=boundary_path,
-                    output_dir=evs_dir,
-                    live_download=live_download,
-                    cache_dir=caches["boundary_line"],
-                    overwrite_cache=fresh,
-                    verbose=verbose,
-                ),
-            )
+        _run_or_skip(
+            "coastal",
+            "generate_coastal_distance",
+            lambda: generate_coastal_distance(
+                boundary_path=boundary_path,
+                output_dir=evs_dir,
+                live_download=live_download,
+                cache_dir=caches["boundary_line"],
+                overwrite_cache=fresh,
+                verbose=verbose,
+            ),
+        )
 
-        recorder.run(
+        _run_or_skip(
+            "os",
             "process_os_data",
             lambda: process_os_data(
                 output_dir=evs_dir,
@@ -180,7 +204,10 @@ def rebuild_environmental_layers(
             ),
         )
 
-        recorder.run(
+        skip_ceh = "ceh" not in active
+        skip_coastal = "coastal" not in active
+        _run_or_skip(
+            "merge",
             "merge_ev_layers",
             lambda: merge_ev_layers(
                 dataset_inputs=build_ev_dataset_inputs(
@@ -218,6 +245,7 @@ def rebuild_environmental_layers(
 __all__ = [
     "DEFAULT_CEH_PATH",
     "ForbiddenEvOutputError",
+    "UnknownRebuildStepError",
     "forbidden_output_summary",
     "rebuild_cache_layout",
     "rebuild_environmental_layers",

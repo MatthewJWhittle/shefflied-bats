@@ -82,8 +82,6 @@ def test_rebuild_metrics_include_provenance_on_orchestrator(
             out,
             boundary_path=boundary,
             resolution=100,
-            skip_ceh=False,
-            skip_coastal=False,
         )
 
     metrics = json.loads((out / "rebuild_metrics.json").read_text(encoding="utf-8"))

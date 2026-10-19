@@ -15,8 +15,8 @@ Alias: `sdm data -o <folder>`.
 | `--output-dir` / `-o` | **Required.** Local folder for rebuilt layers (string, so `gs://` is not collapsed by pathlib). |
 | `--cache-dir` | Download caches (WorldClim, OS tiles + parquets, Boundary-Line). Default: `<output-dir>/cache`. |
 | `--fresh` | Ignore stale OS parquet and Boundary-Line caches; rebuild them from sources under `--cache-dir`. |
-| `--skip-ceh` | Skip CEH land cover (manual GeoTIFF). |
-| `--skip-coastal` | Skip coastal distance. |
+| `--skip` | Comma-separated registry step names to skip (e.g. `--skip ceh,coastal`). Valid names: `terrain`, `terrain_stats`, `climate`, `ceh`, `vom`, `coastal`, `os`, `merge`. Unknown names exit 2 and list valid names. |
+| `--only` | Comma-separated registry step names to run exclusively (same names as `--skip`). Mutually exclusive with `--skip`. |
 | `--ceh-path` | Manual CEH LCM 2023 10 m GeoTIFF (default: git-ignored path under `data/raw/big-files/CEH/`). |
 | `--no-live-download` | Offline mode for live OS / Boundary-Line downloads. |
 | `--verbose` | Verbose logging. |
@@ -25,7 +25,7 @@ Examples:
 
 ```bash
 sdm data --output-dir data/evs-rebuild
-sdm data -o /tmp/evs-smoke --skip-ceh --skip-coastal
+sdm data -o /tmp/evs-smoke --skip ceh,coastal
 sdm data -o data/evs-rebuild --cache-dir /tmp/evs-cache --fresh
 ```
 
@@ -33,14 +33,44 @@ This is the single documented entry point that rebuilds every environmental laye
 
 ## Ordered steps
 
-1. `generate_terrain_data` → `<folder>/terrain/`
-2. `generate_terrain_stats` → `<folder>/terrain_stats.tif`
-3. `generate_climate_data` → `<folder>/climate/` (WorldClim cache under `--cache-dir`/worldclim)
-4. `generate_ceh_lc_data` → `<folder>/landcover/` (unless `--skip-ceh`)
-5. `generate_vom_data` → `<folder>/vom/`
-6. `generate_coastal_distance` → `<folder>/coastal_distance.tif` (unless `--skip-coastal`; Boundary-Line under `--cache-dir`/boundary-line)
-7. `process_os_data` → `<folder>/os-feature-cover.tif`, `os-distance-to-feature.tif` (OS raw + parquets under `--cache-dir`)
-8. `merge_ev_layers` → `<folder>/evs-to-model.tif`
+```mermaid
+flowchart TD
+  sources["Sources<br/>EA WCS · WorldClim · CEH GeoTIFF<br/>Boundary-Line · OS Vector Map"]
+  terrain["terrain<br/>generate_terrain_data → terrain/"]
+  terrain_stats["terrain_stats<br/>generate_terrain_stats → terrain_stats.tif"]
+  climate["climate<br/>generate_climate_data → climate/"]
+  ceh["ceh<br/>generate_ceh_lc_data → landcover/"]
+  vom["vom<br/>generate_vom_data → vom/"]
+  coastal["coastal<br/>generate_coastal_distance → coastal_distance.tif"]
+  os["os<br/>process_os_data → os-feature-cover.tif<br/>os-distance-to-feature.tif"]
+  merge["merge<br/>merge_ev_layers"]
+  out["evs-to-model.tif"]
+
+  sources --> terrain --> terrain_stats
+  sources --> climate
+  sources --> ceh
+  sources --> vom
+  sources --> coastal
+  sources --> os
+  terrain_stats --> merge
+  climate --> merge
+  ceh --> merge
+  vom --> merge
+  coastal --> merge
+  os --> merge
+  merge --> out
+```
+
+Execution order (same as the registry / `--skip` names):
+
+1. `terrain` — `generate_terrain_data` → `<folder>/terrain/`
+2. `terrain_stats` — `generate_terrain_stats` → `<folder>/terrain_stats.tif`
+3. `climate` — `generate_climate_data` → `<folder>/climate/` (WorldClim cache under `--cache-dir`/worldclim)
+4. `ceh` — `generate_ceh_lc_data` → `<folder>/landcover/` (unless skipped)
+5. `vom` — `generate_vom_data` → `<folder>/vom/`
+6. `coastal` — `generate_coastal_distance` → `<folder>/coastal_distance.tif` (unless skipped; Boundary-Line under `--cache-dir`/boundary-line)
+7. `os` — `process_os_data` → `<folder>/os-feature-cover.tif`, `os-distance-to-feature.tif` (OS raw + parquets under `--cache-dir`)
+8. `merge` — `merge_ev_layers` → `<folder>/evs-to-model.tif`
 
 ## Write guards (refused destinations)
 
