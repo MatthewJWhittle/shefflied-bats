@@ -12,6 +12,7 @@ they are not required for layer comparison runs.
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -38,16 +39,23 @@ MIN_BBOX_FILL_RATIO = 0.25
 # ---------------------------------------------------------------------------
 # Value-kind name rules (architecture review on #38 / #43).
 #
-# Exact match: in-cell category and percentage layers stored as whole numbers
+# Exact match: in-cell category and percentage-cover layers stored as whole numbers
 # (e.g. ceh_landcover_arable, os_cover_buildings).
 #
-# Continuous (1% of layer range): neighbourhood CEH landcover averages
-# (ceh_landcover_*_{500,1000,1500}m) stored as decimals, plus distances,
-# heights, and climate.
+# Continuous (1% of layer range): any neighbourhood average named *_NNNm
+# (os_cover_water_500m, ceh_landcover_*_1000m, …), plus distances, heights,
+# and climate.
 # ---------------------------------------------------------------------------
 EXACT_MATCH_NAME_PREFIXES: tuple[str, ...] = ("os_cover",)
 EXACT_MATCH_NAME_INFIXES: tuple[str, ...] = ("_cover_",)
-CEH_NEIGHBOURHOOD_BUFFER_RE = re.compile(r"_(500|1000|1500)m$")
+NEIGHBOURHOOD_BUFFER_RE = re.compile(r"_(500|1000|1500)m$")
+# Back-compat alias used in docs / earlier review notes.
+CEH_NEIGHBOURHOOD_BUFFER_RE = NEIGHBOURHOOD_BUFFER_RE
+PREFERRED_STACK_NAMES = frozenset({"evs-to-model.tif", "evs-to-model.tiff"})
+
+
+class DuplicateLayerError(ValueError):
+    """Raised when the same layer name appears in multiple raster files."""
 
 
 class LayerValueKind(str, Enum):
@@ -174,20 +182,26 @@ class CompareRunSummary:
     model_hooks: list[ModelCompareHookResult] = field(default_factory=list)
 
 
+def is_neighbourhood_average(layer_name: str) -> bool:
+    """True for neighbourhood buffer averages (*_500m / *_1000m / *_1500m)."""
+    name = tidy_variable_name(layer_name)
+    return bool(NEIGHBOURHOOD_BUFFER_RE.search(name))
+
+
 def is_ceh_neighbourhood_average(layer_name: str) -> bool:
     """True for CEH landcover neighbourhood averages (*_500m / *_1000m / *_1500m)."""
     name = tidy_variable_name(layer_name)
-    return "landcover" in name and bool(CEH_NEIGHBOURHOOD_BUFFER_RE.search(name))
+    return "landcover" in name and is_neighbourhood_average(name)
 
 
 def is_exact_match_layer(layer_name: str) -> bool:
     """Return True when the layer must match cell values exactly.
 
     Whole-number in-cell categories and percentage-cover layers only.
-    Neighbourhood CEH averages are continuous (see architecture review).
+    Any ``*_NNNm`` neighbourhood average is continuous (1% of range).
     """
     name = tidy_variable_name(layer_name)
-    if is_ceh_neighbourhood_average(name):
+    if is_neighbourhood_average(name):
         return False
     if "landcover" in name:
         return True
@@ -203,6 +217,10 @@ def classify_value_kind(layer_name: str) -> LayerValueKind:
     if is_exact_match_layer(layer_name):
         return LayerValueKind.EXACT
     return LayerValueKind.CONTINUOUS
+
+
+def _is_preferred_stack_path(path: Path) -> bool:
+    return Path(path).name.lower() in PREFERRED_STACK_NAMES
 
 
 def _iter_raster_paths(
@@ -243,7 +261,12 @@ def discover_layers(
     stack_only: bool = False,
     file_glob: Optional[str] = None,
 ) -> dict[str, LayerRef]:
-    """Index named layers under a folder (single-band files and multi-band stacks)."""
+    """Index named layers under a folder (single-band files and multi-band stacks).
+
+    When the same layer name appears in more than one file, prefer
+    ``evs-to-model.tif`` and emit a warning. Ambiguous duplicates (neither or
+    both sides are the preferred stack) raise :class:`DuplicateLayerError`.
+    """
     folder = Path(folder)
     if not folder.is_dir():
         raise FileNotFoundError(f"Layer folder not found: {folder}")
@@ -261,8 +284,34 @@ def discover_layers(
                     name = tidy_variable_name(path.stem)
                 else:
                     name = tidy_variable_name(f"{path.stem}_band_{band_index}")
-                found.setdefault(
-                    name, LayerRef(name=name, path=path, band_index=band_index)
+                ref = LayerRef(name=name, path=path, band_index=band_index)
+                existing = found.get(name)
+                if existing is None:
+                    found[name] = ref
+                    continue
+                existing_preferred = _is_preferred_stack_path(existing.path)
+                new_preferred = _is_preferred_stack_path(path)
+                if new_preferred and not existing_preferred:
+                    logging.warning(
+                        "Duplicate layer %r: preferring %s over %s",
+                        name,
+                        path,
+                        existing.path,
+                    )
+                    found[name] = ref
+                    continue
+                if existing_preferred and not new_preferred:
+                    logging.warning(
+                        "Duplicate layer %r: keeping preferred stack %s; ignoring %s",
+                        name,
+                        existing.path,
+                        path,
+                    )
+                    continue
+                raise DuplicateLayerError(
+                    f"Duplicate layer name {name!r} in {existing.path} and {path}. "
+                    "Use --stack-only / --glob to select one file, or remove the "
+                    "extra raster so names are unique."
                 )
     return found
 
@@ -458,14 +507,21 @@ def analyze_mismatch_patches(
         return True, [], 0
 
     labeled, n_components = ndimage.label(mismatch)
+    # find_objects gives one slice per label without rescanning the full grid
+    # per component (the previous argwhere(labeled == id) loop was O(cells × patches)).
+    objects = ndimage.find_objects(labeled)
     patches: list[PatchInfo] = []
     sparse_component = False
 
-    for component_id in range(1, n_components + 1):
-        coords = np.argwhere(labeled == component_id)
-        cell_count = int(coords.shape[0])
-        row_min, col_min = (int(v) for v in coords.min(axis=0))
-        row_max, col_max = (int(v) for v in coords.max(axis=0))
+    for component_id, slc in enumerate(objects, start=1):
+        if slc is None:
+            continue
+        region = labeled[slc]
+        cell_count = int((region == component_id).sum())
+        row_min = int(slc[0].start)
+        row_max = int(slc[0].stop - 1)
+        col_min = int(slc[1].start)
+        col_max = int(slc[1].stop - 1)
         bbox_h = row_max - row_min + 1
         bbox_w = col_max - col_min + 1
         bbox_area = max(bbox_h * bbox_w, 1)

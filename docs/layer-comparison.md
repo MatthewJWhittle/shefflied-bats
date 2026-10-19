@@ -7,15 +7,17 @@ Tooling for [issue #38](https://github.com/MatthewJWhittle/shefflied-bats/issues
 Pass marks (per layer) follow the consolidated architecture review on #38:
 
 1. **Same shape** — layer name, projection, cell size, grid origin, extent, no-data value and no-data cells must match exactly.
-2. **Mostly the same values** — at least 95% of jointly valid cells are close. Exact match only for in-cell category and percentage layers stored as whole numbers. Continuous layers — including neighbourhood CEH landcover averages (`ceh_landcover_*_500m` / `_1000m` / `_1500m`), distances, heights, and climate — must be within 1% of the current layer’s full value range (architecture review decision on #43).
+2. **Mostly the same values** — at least 95% of jointly valid cells are close. Exact match only for in-cell category and percentage layers stored as whole numbers. Continuous layers — including any neighbourhood average named `*_500m` / `*_1000m` / `*_1500m` (e.g. `os_cover_water_500m`, `ceh_landcover_*_1000m`), distances, heights, and climate — must be within 1% of the current layer’s full value range (architecture review decision on #43).
 3. **Differences are local** — out-of-tolerance cells should form compact patches. Each compared layer gets a difference GeoTIFF plus a per-patch table (component id, cell count, bounding box, bbox fill ratio). Sparse / road-network-shaped components fail the local-patch check.
 4. **Source changes are flagged, not failed** — optional `--source-versions` YAML. When before/after versions differ, the verdict is `flagged_source_change` even if values would otherwise pass.
 
-Value-kind rules live in `is_exact_match_layer` / `is_ceh_neighbourhood_average` in `sdm/raster/layer_compare.py`.
+Value-kind rules live in `is_exact_match_layer` / `is_neighbourhood_average` in `sdm/raster/layer_compare.py`.
 
 Model checks (held-out AUC, cut-off map switch, brown long-eared roost marks from #29) are **not** run here. Pass `--model-hooks-csv` to write stub rows documenting those later checks after a real rebuild + retrain.
 
-Layer order: union of variables across release-model configs under `data/sdm_config/*/variables_config.yml` (or repeatable `--priority-config`), then any other layers discovered in either folder.
+Layer order: union of variables across the 18 release-model `variables_config.yml` files under `data/sdm_config/*/variables_config.yml` (or repeatable `--priority-config`), then any other layers discovered in either folder.
+
+Without `--stack-only` / `--glob`, duplicate layer names across files are resolved by preferring `evs-to-model.tif` (with a warning). Ambiguous duplicates (e.g. the same name in `all-evs.tif` and another non-stack file) raise an error.
 
 Comparison outputs reuse the same write guard as the rebuild command (`sdm.utils.ev_output_guards` from #44): refuse writes under `data/evs`, any `inputs/` path, `${INPUT_DATA_ROOT}`, and bucket inputs URIs.
 

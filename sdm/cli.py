@@ -569,6 +569,7 @@ def compare_layers(
     from sdm.commands.data_preparation.processing.compare_ev_layers import (
         compare_ev_layers,
     )
+    from sdm.raster.layer_compare import DuplicateLayerError
     from sdm.utils.ev_output_guards import ForbiddenEvOutputError
 
     setup_logging(verbose=verbose)
@@ -589,6 +590,9 @@ def compare_layers(
             verbose=verbose,
         )
     except ForbiddenEvOutputError as exc:
+        typer.secho(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    except DuplicateLayerError as exc:
         typer.secho(str(exc), err=True)
         raise typer.Exit(code=2) from exc
     n_pass = sum(1 for r in summary.layers if r.verdict.value == "pass")

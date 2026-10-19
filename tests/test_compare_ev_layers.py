@@ -18,6 +18,7 @@ from sdm.commands.data_preparation.processing.compare_ev_layers import (
     validate_comparison_write_path,
 )
 from sdm.raster.layer_compare import (
+    DuplicateLayerError,
     LayerValueKind,
     LayerVerdict,
     analyze_mismatch_patches,
@@ -25,6 +26,7 @@ from sdm.raster.layer_compare import (
     compare_layer_pair,
     discover_layers,
     is_exact_match_layer,
+    is_neighbourhood_average,
     ordered_layer_names,
 )
 from sdm.utils.ev_output_guards import ForbiddenEvOutputError
@@ -96,11 +98,20 @@ def test_classify_value_kind_and_exact_rule_centralized():
     # In-cell CEH categories (whole numbers) → exact.
     assert classify_value_kind("ceh_landcover_arable") is LayerValueKind.EXACT
     assert is_exact_match_layer("ceh_landcover_broadleaved_woodland")
-    # Neighbourhood CEH averages (decimals) → continuous (architecture review).
+    # Neighbourhood averages (any *_NNNm, including os_cover_*) → continuous.
     assert classify_value_kind("ceh_landcover_arable_1000m") is LayerValueKind.CONTINUOUS
     assert classify_value_kind("ceh_landcover_urban_1500m") is LayerValueKind.CONTINUOUS
     assert not is_exact_match_layer("ceh_landcover_broadleaved_woodland_500m")
+    assert is_neighbourhood_average("os_cover_water_500m")
+    assert is_neighbourhood_average("os_cover_water_1000m")
+    assert is_neighbourhood_average("os_cover_water_1500m")
+    assert classify_value_kind("os_cover_water_500m") is LayerValueKind.CONTINUOUS
+    assert classify_value_kind("os_cover_water_1000m") is LayerValueKind.CONTINUOUS
+    assert classify_value_kind("os_cover_water_1500m") is LayerValueKind.CONTINUOUS
+    assert not is_exact_match_layer("os_cover_water_500m")
+    # In-cell OS cover percentages (no buffer suffix) stay exact.
     assert classify_value_kind("os_cover_buildings") is LayerValueKind.EXACT
+    assert classify_value_kind("os_cover_water") is LayerValueKind.EXACT
     assert (
         classify_value_kind("os_distance_distance_to_minor_roads")
         is LayerValueKind.CONTINUOUS
@@ -119,7 +130,7 @@ def test_priority_union_preserves_first_seen_order(variables_configs: list[Path]
 
 def test_default_priority_configs_cover_release_models():
     paths = default_priority_config_paths()
-    assert paths
+    assert len(paths) == 18
     assert any(p.parent.name == "Plecotus_auritus_Roost" for p in paths)
     names = load_priority_layer_names(paths)
     assert "os_distance_distance_to_minor_roads" in names
@@ -335,6 +346,78 @@ def test_ceh_neighbourhood_average_uses_continuous_tolerance(tmp_path: Path):
     assert result.share_within_tolerance == 1.0
     assert result.max_difference == pytest.approx(0.5)
     assert result.verdict is LayerVerdict.PASS
+
+
+def test_os_cover_neighbourhood_average_uses_continuous_tolerance(tmp_path: Path):
+    """os_cover_*_NNNm must not inherit exact-match from the os_cover prefix."""
+    name = "os_cover_water_500m"
+    current = np.linspace(0, 100, 16, dtype=np.float32).reshape(4, 4)
+    rebuilt = current + 0.5  # within 1% of range if continuous; fails if exact
+    cur_dir = tmp_path / "current"
+    reb_dir = tmp_path / "rebuilt"
+    _write_raster(cur_dir / f"{name}.tif", current, description=name)
+    _write_raster(reb_dir / f"{name}.tif", rebuilt, description=name)
+
+    result = compare_layer_pair(
+        name,
+        discover_layers(cur_dir)[name],
+        discover_layers(reb_dir)[name],
+        diff_dir=tmp_path / "diffs",
+    )
+    assert result.value_kind is LayerValueKind.CONTINUOUS
+    assert result.share_within_tolerance == 1.0
+    assert result.max_difference == pytest.approx(0.5)
+    assert result.verdict is LayerVerdict.PASS
+
+
+def test_discover_layers_prefers_evs_to_model_over_all_evs(tmp_path: Path, caplog):
+    """Without --stack-only, prefer evs-to-model.tif when names collide with all-evs.tif."""
+    import logging
+
+    name = "os_cover_water"
+    all_evs = tmp_path / "all-evs.tif"
+    stack = tmp_path / "evs-to-model.tif"
+    _write_raster(all_evs, np.zeros((3, 3), dtype=np.float32), description=name)
+    _write_raster(stack, np.ones((3, 3), dtype=np.float32), description=name)
+
+    with caplog.at_level(logging.WARNING):
+        found = discover_layers(tmp_path)
+    assert name in found
+    assert found[name].path == stack
+    assert any("Duplicate layer" in rec.message for rec in caplog.records)
+
+
+def test_discover_layers_errors_on_ambiguous_duplicates(tmp_path: Path):
+    name = "terrain_stats_slope"
+    _write_raster(
+        tmp_path / "a_layer.tif",
+        np.zeros((2, 2), dtype=np.float32),
+        description=name,
+    )
+    _write_raster(
+        tmp_path / "b_layer.tif",
+        np.ones((2, 2), dtype=np.float32),
+        description=name,
+    )
+    with pytest.raises(DuplicateLayerError, match="Duplicate layer name"):
+        discover_layers(tmp_path)
+
+
+def test_analyze_mismatch_patches_timing_guard():
+    """~3M cells with ~4% scattered mismatches should finish well under 10 s."""
+    import time
+
+    rng = np.random.default_rng(0)
+    height, width = 1500, 2000  # 3_000_000 cells
+    jointly = np.ones((height, width), dtype=bool)
+    mismatch = rng.random((height, width)) < 0.04
+    start = time.perf_counter()
+    local, patches, n_components = analyze_mismatch_patches(mismatch, jointly)
+    elapsed = time.perf_counter() - start
+    assert n_components == len(patches)
+    assert n_components > 0
+    assert local is False  # far more than MAX_COMPONENTS_FOR_COMPACT
+    assert elapsed < 10.0, f"patch analysis too slow: {elapsed:.2f}s"
 
 
 def test_grid_mismatch_fails(tmp_path: Path):
