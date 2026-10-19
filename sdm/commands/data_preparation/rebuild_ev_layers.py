@@ -166,6 +166,7 @@ def rebuild_environmental_layers(
                 output_dir=evs_dir / "climate",
                 boundary_path=boundary_path,
                 worldclim_cache_dir=caches["worldclim"],
+                run_stats=True,
                 verbose=verbose,
             ),
         )
