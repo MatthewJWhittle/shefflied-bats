@@ -174,7 +174,7 @@ Library micro-optimisations already ranked in [#51](https://github.com/MatthewJW
 | Fixed national tile scheme | **Adopt** | Align compute tiles to existing **OS 100 km** grid and EA WCS `BoxTiler` origin `(0,0)` so downloads and jobs share IDs. |
 | Chunk / window size | **Try** | Start with **100 km** jobs; optionally subdivide to 25–50 km if peak RSS still high. |
 | Windowed COG/Zarr reads | **Adopt** | Never `open_rasterio` the full national stack without `chunks=`. |
-| **Halo / overlap** | **Adopt** | Multiscale max window **30 cells × 100 m = 1 500 m** → **≥1 500 m** (15 cells) halo beyond each tile’s interior before rolling (`center=True`). OS/coastal distances: include feature geometries (or coast) intersecting the **tile + max distance of interest** (clip distances already 0–7 000 m — use **7 000 m** feature halo for those layers). Terrain/VOM WCS tiles already national-aligned; re-merge with overlap matching kernel/filter support. **Check:** #38 closeness test on one boundary-straddling tile vs untiled reference (max abs diff within agreed tolerance). |
+| **Halo / overlap** | **Adopt** | Multiscale max window **30 cells × 100 m = 1 500 m** → **≥1 500 m** (15 cells) halo beyond each tile’s interior before rolling (`center=True`). OS/coastal distances: include feature geometries (or coast) intersecting the **tile + max distance of interest** (clip distances already 0–7 000 m — use **7 000 m** feature halo for those layers). Terrain/VOM WCS tiles already national-aligned; re-merge with overlap matching kernel/filter support. **Check:** #38 closeness on one boundary-straddling tile vs untiled reference — grid shape and top-left corner match exactly; continuous layers pass when ≥95% of cells are within 1% of the layer’s range; categorical layers when ≥95% of cells match. |
 
 ### C. Dask / xarray vs per-tile multiprocessing
 
@@ -215,7 +215,7 @@ Faster libs for hotspots (GDAL proximity, xarray-spatial, numba): **skip** proxi
 | Mode | Recommendation | Rough England cost (assumptions) |
 |------|----------------|----------------------------------|
 | Local workstation 32–64 GB | **Try** only after streaming merge | Still painful for OS/VOM downloads; overnight possible if tiled sequentially. |
-| **Scale-to-zero GCP** — Cloud Run Jobs or Batch, one task per 100 km tile, outputs to Cloud Storage | **Adopt** for national runs | **Assumptions:** ~50 tiles × ~4 min (≈ our 50 km wall) × **4 vCPU / 16 GiB** Cloud Run Jobs (London/europe-west2 class rates ≈ **$0.000018 / vCPU-s** + **$0.000002 / GiB-s**). Compute ≈ 50 × 240 s × (4×1.8¢ + 16×0.2¢)/100000 ≈ **~$1–3 / full England rebuild** before free tier, plus **GCS** storage for caches/COGs (tens of GB) and download egress from OS/EA to the VM (often the larger bill if uncached). Spot **Batch** can cut compute further. **Local** electricity ≈ negligible; human time and laptop RAM dominate. |
+| **Scale-to-zero GCP** — Cloud Run Jobs or Batch, one task per 100 km tile, outputs to Cloud Storage | **Adopt** for national runs | **Assumptions:** ~50 tiles × ~4 min (≈ our 50 km wall) × **4 vCPU / 16 GiB** Cloud Run Jobs (London/europe-west2 class rates ≈ **$0.000018 / vCPU-s** + **$0.000002 / GiB-s**). Compute ≈ 50 × 240 s × (4×1.8¢ + 16×0.2¢)/100000 ≈ **~$1–3 / full England rebuild** before free tier, plus **GCS** storage for caches/COGs (tens of GB) and any outbound reads of results. Inbound pulls from OS/EA into Google Cloud are not billed as network ingress. Spot **Batch** can cut compute further. **Local** electricity ≈ negligible; human time and laptop RAM dominate. |
 
 ---
 
@@ -235,8 +235,8 @@ What **stays the same:** band naming and clipping semantics; STRtree exact dista
 
 | Order | Change | Prove it worked |
 |------:|--------|-----------------|
-| 1 | **Stream merge + stack** (chunked read/write; never hold all bands) | Peak RSS on 50 km and study rebuild **&lt; 8 GB** through merge/stack; bit-compare (or #38 closeness) vs current `all-evs.tif` / `evs-to-model.tif` |
-| 2 | **Tile runner** on OS 100 km / WCS grid with **1 500 m** multiscale halo + **7 000 m** distance-feature halo | One boundary tile matches untiled reference within #38 tolerance; England job = N tile tasks |
+| 1 | **Stream merge + stack** (chunked read/write; never hold all bands) | Peak RSS on 50 km and study rebuild **&lt; 8 GB** through merge/stack; #38 closeness vs current `all-evs.tif` / `evs-to-model.tif` |
+| 2 | **Tile runner** on OS 100 km / WCS grid with **1 500 m** multiscale halo + **7 000 m** distance-feature halo | One boundary tile vs untiled reference passes #38 closeness (exact grid + 95% / 1%-of-range continuous, 95% match categorical); England job = N tile tasks |
 | 3 | **Durable WCS + OS tile cache** | Second England (or 50 km) run skips re-download; bytes-from-network ≈ 0 for cached tiles |
 | 4 | **OS cover without full 10 m tempfile** (in-memory rasterize / library path from #51) | `process_os_data` time on 50 km **≤ 0.5×** current profile; cover layer closeness check |
 | 5 | **GCP Batch / Cloud Run Jobs per tile** (optional once 1–4 local) | England wall clock under chosen budget; cost within ~$1–5 compute at stated sizes |
@@ -247,4 +247,5 @@ What **stays the same:** band naming and clipping semantics; STRtree exact dista
 
 - Deliverable for [#56](https://github.com/MatthewJWhittle/shefflied-bats/issues/56): this report plus `scripts/profile_ev_scaling.py` and `docs/artifacts/ev-scaling-profile-summary.json`. No `sdm/` pipeline behaviour change.
 - CEH and coast in the profile runs are **synthetic stand-ins**; EA, OS, and WorldClim steps used live public services at respectful concurrency.
+- Boundary-tile proof uses the #38 closeness check (not max absolute difference). GCP cost notes treat OS/EA pulls as unbilled ingress; storage and outbound reads remain the network-side risks.
 - Matt: pick which ordered changes to schedule after review; only Matt merges optimisation work.
