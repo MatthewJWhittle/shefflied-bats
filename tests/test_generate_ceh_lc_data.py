@@ -256,50 +256,47 @@ def _synthetic_ceh_tile(height: int, width: int, seed: int = 0, nodata: int = 25
     return da
 
 
-def test_chunked_matches_single_pass_exactly():
-    """Chunked coarsen must match the legacy single-pass stack on a small tile."""
+def test_dask_matches_single_pass_exactly():
+    """Native dask coarsen must match the legacy single-pass stack on a small tile."""
     from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import (
         coarsen_land_cover_categories,
     )
 
     tile = _synthetic_ceh_tile(240, 260, seed=7)
-    # window=80 → multiple chunks on this tile; 80 is already a multiple of 10.
-    full = coarsen_land_cover_categories(tile, 100, window_pixels=80, method="full")
-    chunked = coarsen_land_cover_categories(tile, 100, window_pixels=80, method="chunked")
+    full = coarsen_land_cover_categories(tile, 100, chunks={"y": 80, "x": 80}, method="full")
+    dask_out = coarsen_land_cover_categories(
+        tile, 100, chunks={"y": 80, "x": 80}, method="dask"
+    )
 
-    assert set(full.data_vars) == set(chunked.data_vars)
-    assert np.allclose(full.x.values, chunked.x.values)
-    assert np.allclose(full.y.values, chunked.y.values)
+    assert set(full.data_vars) == set(dask_out.data_vars)
+    assert np.allclose(full.x.values, dask_out.x.values)
+    assert np.allclose(full.y.values, dask_out.y.values)
     for name in full.data_vars:
-        np.testing.assert_array_equal(full[name].values, chunked[name].values)
+        np.testing.assert_array_equal(full[name].values, dask_out[name].values)
 
 
-def test_chunked_matches_when_requested_window_splits_output_cell():
+def test_dask_matches_when_chunks_split_coarse_cells():
     """
-    Requested window mid-way through a 100 m cell (105 source px) must snap to
-    the output grid so no coarse cell is split; result still matches single-pass.
+    Dask chunks that deliberately split 100 m cells (105 source px, not a
+    multiple of coarsen_factor=10) must still match the single-pass result —
+    chunk boundaries do not affect coarsen correctness.
     """
     from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import (
-        _aligned_window_starts,
         coarsen_land_cover_categories,
     )
 
-    coarsen_factor = 10  # 10 m → 100 m
-    # 105 is deliberately not a multiple of 10 — would split a 100 m cell if used raw.
-    starts = list(_aligned_window_starts(350, window=105, coarsen_factor=coarsen_factor))
-    assert starts, "expected at least one aligned chunk"
-    for start, size in starts:
-        assert start % coarsen_factor == 0
-        assert size % coarsen_factor == 0
-        assert size <= 100  # 105 snapped down to 100
-
     tile = _synthetic_ceh_tile(350, 370, seed=11)
-    full = coarsen_land_cover_categories(tile, 100, window_pixels=105, method="full")
-    chunked = coarsen_land_cover_categories(tile, 100, window_pixels=105, method="chunked")
+    odd_chunks = {"y": 105, "x": 105}
+    full = coarsen_land_cover_categories(tile, 100, chunks=odd_chunks, method="full")
+    dask_out = coarsen_land_cover_categories(
+        tile, 100, chunks=odd_chunks, method="dask"
+    )
 
-    assert set(full.data_vars) == set(chunked.data_vars)
+    assert set(full.data_vars) == set(dask_out.data_vars)
+    assert np.allclose(full.x.values, dask_out.x.values)
+    assert np.allclose(full.y.values, dask_out.y.values)
     for name in full.data_vars:
-        np.testing.assert_array_equal(full[name].values, chunked[name].values)
+        np.testing.assert_array_equal(full[name].values, dask_out[name].values)
 
 
 def _load_ceh_output_dataset(path):
@@ -326,7 +323,7 @@ def _landcover_step_with_neighbourhood(ceh_tif_path):
     Full land-cover step outputs: in-cell class layers plus 500/1000/1500 m means.
 
     Neighbourhood averages use the existing multiscale path
-    (``calculate_multiscale_variables``), not chunked CEH aggregation.
+    (``calculate_multiscale_variables``), not the CEH class-aggregation path.
     """
     class_layers = _load_ceh_output_dataset(ceh_tif_path)
     parts = [class_layers]
@@ -335,24 +332,21 @@ def _landcover_step_with_neighbourhood(ceh_tif_path):
     return xr.merge(parts)
 
 
-def test_e2e_landcover_step_matches_a97f7d9_baseline_with_neighbourhood(
+def test_e2e_landcover_step_matches_single_pass_with_neighbourhood(
     tmp_path, mock_spatial_config
 ):
     """
     Full land-cover step (class layers + 500/1000/1500 m neighbourhood averages)
-    from chunked aggregation must match the a97f7d9 single-pass baseline
-    (``coarsen_method="full"``) on a synthetic AOI where chunk edges fall
-    mid-neighbourhood-window.
+    from native dask aggregation must match the single-pass baseline
+    (``coarsen_method="full"``), including when dask chunks split coarse cells
+    after an arbitrary clip.
     """
-    # 600×620 @ 10 m → after trim/coarsen ~60×62 @ 100 m. window_pixels=105
-    # snaps to 100 source px = 10 coarse cells, so chunk seams every 10 cells.
-    # Neighbourhood windows 20 and 30 (radius 10 / 15) therefore straddle seams.
     height, width = 600, 620
     tile = _synthetic_ceh_tile(height, width, seed=42)
     ceh_path = tmp_path / "ceh.tif"
     tile.rio.to_raster(ceh_path)
 
-    # Boundary inset so clip keeps a multi-chunk interior; no extra buffer.
+    # Boundary inset so clip offset is not coarsen-aligned (arbitrary clip).
     margin = 80
     boundary = gpd.GeoDataFrame(
         geometry=[box(margin, margin, width * 10 - margin, height * 10 - margin)],
@@ -360,6 +354,9 @@ def test_e2e_landcover_step_matches_a97f7d9_baseline_with_neighbourhood(
     )
     boundary_path = tmp_path / "boundary.geojson"
     boundary.to_file(boundary_path)
+
+    # Chunks deliberately not a multiple of coarsen_factor (10).
+    odd_chunks = {"band": 1, "y": 105, "x": 105}
 
     with patch(
         "sdm.commands.data_preparation.environmental.generate_ceh_lc_data.load_spatial_config"
@@ -372,26 +369,24 @@ def test_e2e_landcover_step_matches_a97f7d9_baseline_with_neighbourhood(
             ceh_data_path=ceh_path,
             buffer_distance_m=0,
             output_resolution_m=100,
-            window_pixels=105,
-            coarsen_method="full",  # a97f7d9 single-pass path
+            coarsen_method="full",
             verbose=False,
         )
-        chunked_path = generate_ceh_lc_data(
-            output_dir=tmp_path / "chunked",
+        dask_path = generate_ceh_lc_data(
+            output_dir=tmp_path / "dask",
             boundary_path=boundary_path,
             ceh_data_path=ceh_path,
             buffer_distance_m=0,
             output_resolution_m=100,
-            window_pixels=105,  # mid-100 m cell request → snaps; seams mid-window
-            coarsen_method="chunked",
+            chunks=odd_chunks,
+            coarsen_method="dask",
             verbose=False,
         )
 
     baseline = _landcover_step_with_neighbourhood(baseline_path)
-    chunked = _landcover_step_with_neighbourhood(chunked_path)
+    dask_out = _landcover_step_with_neighbourhood(dask_path)
 
-    # Class layers plus neighbourhood suffixes must all be present and equal.
-    assert set(baseline.data_vars) == set(chunked.data_vars)
+    assert set(baseline.data_vars) == set(dask_out.data_vars)
     neighbourhood_vars = [
         v for v in baseline.data_vars if str(v).endswith(("_500m", "_1000m", "_1500m"))
     ]
@@ -402,7 +397,59 @@ def test_e2e_landcover_step_matches_a97f7d9_baseline_with_neighbourhood(
     for name in baseline.data_vars:
         np.testing.assert_allclose(
             baseline[name].values,
-            chunked[name].values,
+            dask_out[name].values,
             equal_nan=True,
             err_msg=f"mismatch in land-cover step layer {name!r}",
         )
+
+
+def test_dask_peak_memory_below_full_method():
+    """
+    Peak RSS for the dask path stays well below the legacy full path on a
+    multi-megapixel synthetic tile (memory measurement for the PR table).
+    """
+    import gc
+    import os
+    import time
+    from threading import Event, Thread
+
+    import psutil
+
+    from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import (
+        coarsen_land_cover_categories,
+    )
+
+    def _measure(method: str, side_px: int = 3000):
+        tile = _synthetic_ceh_tile(side_px, side_px, seed=0)
+        gc.collect()
+        proc = psutil.Process(os.getpid())
+        stop = Event()
+        peak = {"rss": proc.memory_info().rss}
+
+        def _sample() -> None:
+            while not stop.is_set():
+                peak["rss"] = max(peak["rss"], proc.memory_info().rss)
+                time.sleep(0.005)
+
+        sampler = Thread(target=_sample, daemon=True)
+        sampler.start()
+        t0 = time.perf_counter()
+        out = coarsen_land_cover_categories(
+            tile, 100, chunks={"y": 1000, "x": 1000}, method=method
+        )
+        _ = sum(float(out[v].values.sum()) for v in out.data_vars)
+        elapsed = time.perf_counter() - t0
+        peak["rss"] = max(peak["rss"], proc.memory_info().rss)
+        stop.set()
+        sampler.join(timeout=1)
+        del out, tile
+        gc.collect()
+        return elapsed, peak["rss"] / (1024**3)
+
+    full_s, full_gib = _measure("full")
+    dask_s, dask_gib = _measure("dask")
+
+    assert full_s > 0 and dask_s > 0
+    assert dask_gib < full_gib * 0.75, (
+        f"expected dask peak ({dask_gib:.3f} GiB) below full ({full_gib:.3f} GiB)"
+    )
