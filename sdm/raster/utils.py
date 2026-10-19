@@ -32,6 +32,8 @@ def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=
     mask = mask.astype('uint8')
 
     # Write the mask to a raster file
+    # 0/1 cover mask: 0 is valid "no cover". Do not tag nodata=0 — masked
+    # reads would drop zeros and corrupt neighbourhood means.
     with rio.open(
         output_file,
         "w",
@@ -42,7 +44,6 @@ def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=
         dtype=mask.dtype,
         crs=gdf.crs,
         transform=transform,
-        nodata=0,
     ) as dest:
         dest.write(mask, 1)
 
