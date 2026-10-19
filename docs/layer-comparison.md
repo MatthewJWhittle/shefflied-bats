@@ -7,11 +7,11 @@ Tooling for [issue #38](https://github.com/MatthewJWhittle/shefflied-bats/issues
 Pass marks (per layer) follow the consolidated architecture review on #38:
 
 1. **Same shape** — layer name, projection, cell size, grid origin, extent, no-data value and no-data cells must match exactly.
-2. **Mostly the same values** — at least 95% of jointly valid cells are close. Category and percentage-cover layers must match exactly; continuous layers (distances, heights, climate) must be within 1% of the current layer’s full value range.
+2. **Mostly the same values** — at least 95% of jointly valid cells are close. Exact match only for in-cell category and percentage layers stored as whole numbers. Continuous layers — including neighbourhood CEH landcover averages (`ceh_landcover_*_500m` / `_1000m` / `_1500m`), distances, heights, and climate — must be within 1% of the current layer’s full value range (architecture review decision on #43).
 3. **Differences are local** — out-of-tolerance cells should form compact patches. Each compared layer gets a difference GeoTIFF plus a per-patch table (component id, cell count, bounding box, bbox fill ratio). Sparse / road-network-shaped components fail the local-patch check.
 4. **Source changes are flagged, not failed** — optional `--source-versions` YAML. When before/after versions differ, the verdict is `flagged_source_change` even if values would otherwise pass.
 
-**Open question for architecture review:** neighbourhood CEH landcover buffers (`ceh_landcover_*_500m` / `_1000m` / `_1500m`) are stored as decimal averages, not pure categories. They stay on **exact match** for now; the rule is centralized in `is_exact_match_layer` / `EXACT_MATCH_*` constants in `sdm/raster/layer_compare.py`.
+Value-kind rules live in `is_exact_match_layer` / `is_ceh_neighbourhood_average` in `sdm/raster/layer_compare.py`.
 
 Model checks (held-out AUC, cut-off map switch, brown long-eared roost marks from #29) are **not** run here. Pass `--model-hooks-csv` to write stub rows documenting those later checks after a real rebuild + retrain.
 

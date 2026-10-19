@@ -12,6 +12,7 @@ they are not required for layer comparison runs.
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -35,17 +36,18 @@ MAX_COMPONENTS_FOR_COMPACT = 8
 MIN_BBOX_FILL_RATIO = 0.25
 
 # ---------------------------------------------------------------------------
-# Exact-match (category / percentage-cover) name rules.
+# Value-kind name rules (architecture review on #38 / #43).
 #
-# Open question for architecture review: neighbourhood CEH landcover buffers
-# (ceh_landcover_*_{500,1000,1500}m) are stored as decimal averages, not pure
-# categories. They remain on EXACT match for now; change
-# ``exact_match_layer_names`` / ``is_exact_match_layer`` in one place when the
-# review decides otherwise.
+# Exact match: in-cell category and percentage layers stored as whole numbers
+# (e.g. ceh_landcover_arable, os_cover_buildings).
+#
+# Continuous (1% of layer range): neighbourhood CEH landcover averages
+# (ceh_landcover_*_{500,1000,1500}m) stored as decimals, plus distances,
+# heights, and climate.
 # ---------------------------------------------------------------------------
-EXACT_MATCH_NAME_CONTAINS: tuple[str, ...] = ("landcover",)
 EXACT_MATCH_NAME_PREFIXES: tuple[str, ...] = ("os_cover",)
 EXACT_MATCH_NAME_INFIXES: tuple[str, ...] = ("_cover_",)
+CEH_NEIGHBOURHOOD_BUFFER_RE = re.compile(r"_(500|1000|1500)m$")
 
 
 class LayerValueKind(str, Enum):
@@ -172,14 +174,22 @@ class CompareRunSummary:
     model_hooks: list[ModelCompareHookResult] = field(default_factory=list)
 
 
+def is_ceh_neighbourhood_average(layer_name: str) -> bool:
+    """True for CEH landcover neighbourhood averages (*_500m / *_1000m / *_1500m)."""
+    name = tidy_variable_name(layer_name)
+    return "landcover" in name and bool(CEH_NEIGHBOURHOOD_BUFFER_RE.search(name))
+
+
 def is_exact_match_layer(layer_name: str) -> bool:
     """Return True when the layer must match cell values exactly.
 
-    Central switch for category / percentage-cover rules. Neighbourhood
-    CEH landcover buffers remain exact until architecture review changes this.
+    Whole-number in-cell categories and percentage-cover layers only.
+    Neighbourhood CEH averages are continuous (see architecture review).
     """
     name = tidy_variable_name(layer_name)
-    if any(token in name for token in EXACT_MATCH_NAME_CONTAINS):
+    if is_ceh_neighbourhood_average(name):
+        return False
+    if "landcover" in name:
         return True
     if any(name.startswith(prefix) for prefix in EXACT_MATCH_NAME_PREFIXES):
         return True
@@ -189,7 +199,7 @@ def is_exact_match_layer(layer_name: str) -> bool:
 
 
 def classify_value_kind(layer_name: str) -> LayerValueKind:
-    """Category / percentage-cover → exact; distances, heights, climate → continuous."""
+    """Whole-number category/percentage → exact; continuous otherwise."""
     if is_exact_match_layer(layer_name):
         return LayerValueKind.EXACT
     return LayerValueKind.CONTINUOUS

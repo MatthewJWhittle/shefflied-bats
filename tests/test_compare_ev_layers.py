@@ -93,9 +93,13 @@ def variables_configs(tmp_path: Path) -> list[Path]:
 
 
 def test_classify_value_kind_and_exact_rule_centralized():
-    assert classify_value_kind("ceh_landcover_arable_1000m") is LayerValueKind.EXACT
-    assert classify_value_kind("ceh_landcover_urban_1500m") is LayerValueKind.EXACT
-    assert is_exact_match_layer("ceh_landcover_broadleaved_woodland_500m")
+    # In-cell CEH categories (whole numbers) → exact.
+    assert classify_value_kind("ceh_landcover_arable") is LayerValueKind.EXACT
+    assert is_exact_match_layer("ceh_landcover_broadleaved_woodland")
+    # Neighbourhood CEH averages (decimals) → continuous (architecture review).
+    assert classify_value_kind("ceh_landcover_arable_1000m") is LayerValueKind.CONTINUOUS
+    assert classify_value_kind("ceh_landcover_urban_1500m") is LayerValueKind.CONTINUOUS
+    assert not is_exact_match_layer("ceh_landcover_broadleaved_woodland_500m")
     assert classify_value_kind("os_cover_buildings") is LayerValueKind.EXACT
     assert (
         classify_value_kind("os_distance_distance_to_minor_roads")
@@ -289,7 +293,7 @@ def test_sparse_road_shaped_patch_fails_local_check():
 
 
 def test_exact_category_mismatch_share(tmp_path: Path):
-    name = "ceh_landcover_arable_1000m"
+    name = "ceh_landcover_arable"
     current = np.ones((5, 5), dtype=np.float32)
     rebuilt = current.copy()
     rebuilt[0, 0] = 2.0
@@ -307,6 +311,29 @@ def test_exact_category_mismatch_share(tmp_path: Path):
     )
     assert result.value_kind is LayerValueKind.EXACT
     assert result.share_within_tolerance == pytest.approx(0.96)
+    assert result.verdict is LayerVerdict.PASS
+
+
+def test_ceh_neighbourhood_average_uses_continuous_tolerance(tmp_path: Path):
+    """Neighbourhood CEH buffers are continuous: within 1% of range passes."""
+    name = "ceh_landcover_broadleaved_woodland_500m"
+    # Range 0–100 → 1% tolerance = 1.0; delta 0.5 should pass as continuous.
+    current = np.linspace(0, 100, 16, dtype=np.float32).reshape(4, 4)
+    rebuilt = current + 0.5
+    cur_dir = tmp_path / "current"
+    reb_dir = tmp_path / "rebuilt"
+    _write_raster(cur_dir / f"{name}.tif", current, description=name)
+    _write_raster(reb_dir / f"{name}.tif", rebuilt, description=name)
+
+    result = compare_layer_pair(
+        name,
+        discover_layers(cur_dir)[name],
+        discover_layers(reb_dir)[name],
+        diff_dir=tmp_path / "diffs",
+    )
+    assert result.value_kind is LayerValueKind.CONTINUOUS
+    assert result.share_within_tolerance == 1.0
+    assert result.max_difference == pytest.approx(0.5)
     assert result.verdict is LayerVerdict.PASS
 
 
