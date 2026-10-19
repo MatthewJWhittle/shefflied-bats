@@ -2,7 +2,7 @@
 
 Thanks for helping improve the HSM toolchain.
 
-Shared agent and contributor principles (prefer existing libraries, written-work rules) live in [AGENTS.md](AGENTS.md).
+Working principles for coding agents (and useful for contributors) live in [AGENTS.md](AGENTS.md).
 
 ## Setup
 
