@@ -54,10 +54,17 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     )
     original_min = float(ds["terrain_stats_curvature"].min())
     original_max = float(ds["terrain_stats_curvature"].max())
-    clipped = apply_layer_clipping(ds)
+    expected_lo = float(ds["terrain_stats_curvature"].quantile(0.05).item())
+    expected_hi = float(ds["terrain_stats_curvature"].quantile(0.95).item())
+    clipped, applied = apply_layer_clipping(ds)
     assert float(clipped["bgs_coast_distance_to_coast"].max()) == 7000.0
     assert float(clipped["terrain_stats_curvature"].min()) > original_min
     assert float(clipped["terrain_stats_curvature"].max()) < original_max
+    assert applied["terrain_stats_curvature"]["min"] == expected_lo
+    assert applied["terrain_stats_curvature"]["max"] == expected_hi
+    assert applied["terrain_stats_curvature"]["quantile_min"] == 0.05
+    assert applied["terrain_stats_curvature"]["quantile_max"] == 0.95
+    assert applied["bgs_coast_distance_to_coast"] == {"min": 0.0, "max": 7000.0}
 
 
 def _write_synthetic_all_evs(path: Path, band_names: list[str]) -> None:
@@ -114,6 +121,12 @@ def test_synthetic_stack_covers_all_sdm_config_variables(tmp_path: Path) -> None
     _, used = build_model_ev_stack(all_evs, out, build_settings=settings)
     assert used["layer_clipping"]["enabled"] is True
     assert used["layer_clipping"]["layers"]["bgs_coast_distance_to_coast"]["max"] == 7000.0
+    applied = used["layer_clipping"]["applied"]
+    assert "terrain_stats_curvature" in applied
+    assert "min" in applied["terrain_stats_curvature"]
+    assert "max" in applied["terrain_stats_curvature"]
+    assert applied["terrain_stats_curvature"]["quantile_min"] == 0.05
+    assert applied["terrain_stats_curvature"]["quantile_max"] == 0.95
 
     result = rxr.open_rasterio(out, masked=True, band_as_variable=True)
     # Band names may be band_1..; prefer long_name attrs from write.
@@ -153,3 +166,95 @@ def test_selected_csv_include_count() -> None:
     with open("data/ev_clusters_selected.csv", encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     assert len(keep) == sum(1 for row in rows if row["include"].strip() == "1")
+
+
+def test_does_not_invent_nodata_when_source_unset(tmp_path: Path) -> None:
+    """Notebook write path does not invent NaN when source bands lack a nodata tag."""
+    selected_csv = tmp_path / "selected.csv"
+    selected_csv.write_text(
+        "column_name,include\n"
+        "terrain_dtm,1\n"
+        "os_cover_water,1\n",
+        encoding="utf-8",
+    )
+    height = width = 12
+    data = {
+        "terrain_dtm": (("y", "x"), np.ones((height, width), dtype=np.float32)),
+        "os_cover_water": (("y", "x"), np.zeros((height, width), dtype=np.float32)),
+        "terrain_stats_curvature": (
+            ("y", "x"),
+            np.linspace(-1, 1, height * width, dtype=np.float32).reshape(height, width),
+        ),
+    }
+    ds = xr.Dataset(
+        data,
+        coords={
+            "y": np.arange(height, dtype=np.float64) * 100.0 + 400_000.0,
+            "x": np.arange(width, dtype=np.float64) * 100.0 + 400_000.0,
+        },
+    )
+    ds = ds.rio.write_crs("EPSG:27700")
+    for var in ds.data_vars:
+        ds[var].attrs["long_name"] = var
+        # Intentionally no write_nodata — source tag unset.
+    all_evs = tmp_path / "all-evs.tif"
+    out = tmp_path / "evs-to-model.tif"
+    ds.rio.to_raster(all_evs)
+
+    settings = default_build_settings()
+    settings["selected_variables_csv"] = str(selected_csv)
+    settings["multiscale"]["groups"] = ["os_cover_water"]
+    settings["multiscale"]["windows_cells"] = [10]
+
+    build_model_ev_stack(all_evs, out, build_settings=settings)
+    written = rxr.open_rasterio(out, masked=False, band_as_variable=True)
+    for var in written.data_vars:
+        # Must not invent NaN solely because nodata was missing.
+        assert written[var].rio.nodata is None
+
+
+def test_masked_open_preserves_nan_nodata_like_notebook(tmp_path: Path) -> None:
+    """Notebook loads with masked=True, so tagged nodata becomes NaN before write."""
+    selected_csv = tmp_path / "selected.csv"
+    selected_csv.write_text(
+        "column_name,include\nterrain_dtm,1\nos_cover_water,1\n",
+        encoding="utf-8",
+    )
+    height = width = 12
+    ds = xr.Dataset(
+        {
+            "terrain_dtm": (("y", "x"), np.ones((height, width), dtype=np.float32)),
+            "os_cover_water": (("y", "x"), np.zeros((height, width), dtype=np.float32)),
+            "terrain_stats_curvature": (
+                ("y", "x"),
+                np.linspace(-1, 1, height * width, dtype=np.float32).reshape(
+                    height, width
+                ),
+            ),
+        },
+        coords={
+            "y": np.arange(height, dtype=np.float64) * 100.0 + 400_000.0,
+            "x": np.arange(width, dtype=np.float64) * 100.0 + 400_000.0,
+        },
+    )
+    ds = ds.rio.write_crs("EPSG:27700")
+    for var in ds.data_vars:
+        ds[var].attrs["long_name"] = var
+        ds[var].rio.write_nodata(-9999.0, inplace=True)
+    all_evs = tmp_path / "all-evs.tif"
+    out = tmp_path / "evs-to-model.tif"
+    ds.rio.to_raster(all_evs)
+
+    # Evidence: masked=True (notebook cell 2) replaces -9999 with NaN in rio.nodata.
+    opened = rxr.open_rasterio(all_evs, masked=True, band_as_variable=True)
+    assert np.isnan(float(opened["band_1"].rio.nodata))
+
+    settings = default_build_settings()
+    settings["selected_variables_csv"] = str(selected_csv)
+    settings["multiscale"]["groups"] = ["os_cover_water"]
+    settings["multiscale"]["windows_cells"] = [10]
+    build_model_ev_stack(all_evs, out, build_settings=settings)
+
+    written = rxr.open_rasterio(out, masked=False, band_as_variable=True)
+    for var in written.data_vars:
+        assert np.isnan(float(written[var].rio.nodata))

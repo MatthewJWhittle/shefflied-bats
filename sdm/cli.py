@@ -177,14 +177,22 @@ def data(
     resolved_ceh = Path(ceh_path) if ceh_path is not None else DEFAULT_CEH_PATH
 
     if plan:
-        exit_code = run_data_plan(
-            boundary_path=Path(PROJECT_CONFIG.paths.boundary),
-            buffer_m=float(PROJECT_CONFIG.spatial.study_area_buffer),
-            ceh_data_path=resolved_ceh,
-            cache_dir=Path(cache_dir) if cache_dir else None,
-            skip_ceh=skip_ceh,
-            skip_coastal=skip_coastal,
+        from sdm.commands.data_preparation.rebuild_steps import (
+            UnknownRebuildStepError,
         )
+
+        try:
+            exit_code = run_data_plan(
+                boundary_path=Path(PROJECT_CONFIG.paths.boundary),
+                buffer_m=float(PROJECT_CONFIG.spatial.study_area_buffer),
+                ceh_data_path=resolved_ceh,
+                cache_dir=Path(cache_dir) if cache_dir else None,
+                skip=skip,
+                only=only,
+            )
+        except (UnknownRebuildStepError, ValueError) as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=2) from exc
         raise typer.Exit(code=exit_code)
 
     if not output_dir:
