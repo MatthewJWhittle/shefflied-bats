@@ -104,9 +104,13 @@ Each successful (or partially failed) run writes:
 - `<folder>/rebuild_metrics.json`
 - `<folder>/rebuild_metrics.csv`
 
+<<<<<<< HEAD
 Columns / fields: `step`, `duration_seconds`, `peak_rss_bytes` (per-step process-tree peak via sampling), `status`, `error`. JSON also includes `build_settings` (selected CSV, multiscale windows, configured clip limits, and `layer_clipping.applied` with concrete bounds), plus `git_commit`, `recorded_at`, and `sources` (each input product version / path / modified date when available).
 
 The JSON file also records `provenance`: the git commit SHA and each source's product/version or local file date (CEH path mtime when present).
+=======
+Columns / fields: `step`, `duration_seconds`, `peak_rss_bytes` (per-step process-tree peak via sampling), `status`, `error`. JSON also includes `build_settings` (selected CSV, multiscale windows, configured clip limits, and `layer_clipping.applied` with concrete curvature 5%/95% values) and `provenance` (git commit SHA; OS product release version/date from the Downloads API; Environment Agency dataset name + fetch time; CEH local path mtime).
+>>>>>>> 29afc6b (Fix encoded nodata restore and OS/EA provenance versions)
 
 ## Using the rebuilt stack
 

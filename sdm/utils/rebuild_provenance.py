@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+import requests
 
 from sdm.data.coastline_download import PRODUCT_ID as BOUNDARY_LINE_PRODUCT_ID
 from sdm.data.os_download import BASE_URL as OS_DOWNLOADS_BASE_URL
@@ -32,7 +35,16 @@ EA_DSM_WCS = (
 EA_VOM_WCS = (
     "https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs"
 )
+EA_DTM_DATASET_NAME = "LiDAR Composite Digital Terrain Model (DTM) 1 m"
+EA_DSM_DATASET_NAME = (
+    "LiDAR Composite Digital Surface Model (DSM) last return 1 m"
+)
+EA_VOM_DATASET_NAME = "Vegetation Object Model (VOM)"
 CEH_PRODUCT = "CEH Land Cover Map 2023 10 m"
+
+_OS_PRODUCT_TIMEOUT_SECONDS = 15
+
+logger = logging.getLogger(__name__)
 
 
 def git_commit_sha(*, cwd: Optional[Path] = None) -> Optional[str]:
@@ -70,19 +82,68 @@ def _path_source_meta(path: Path) -> dict[str, Any]:
     return meta
 
 
+def fetch_os_product_release(
+    product_id: str,
+    *,
+    base_url: str = OS_DOWNLOADS_BASE_URL,
+    session: Optional[requests.Session] = None,
+) -> dict[str, Any]:
+    """Return OS Downloads product id, name, and release version/date.
+
+    The OS Downloads API exposes ``version`` on ``GET /products/{id}``
+    (e.g. ``2026-05`` for Vector Map District). Network failures leave
+    ``version`` / ``name`` as ``None`` so rebuild metrics still write.
+    """
+    meta: dict[str, Any] = {
+        "product_id": product_id,
+        "name": None,
+        "version": None,
+        "product_url": f"{base_url.rstrip('/')}/products/{product_id}",
+    }
+    client = session or requests.Session()
+    try:
+        response = client.get(
+            meta["product_url"],
+            timeout=_OS_PRODUCT_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (OSError, requests.RequestException, ValueError) as exc:
+        logger.info("OS product metadata unavailable for %s: %s", product_id, exc)
+        meta["lookup_error"] = type(exc).__name__
+        return meta
+
+    if isinstance(payload, dict):
+        name = payload.get("name")
+        version = payload.get("version")
+        if name is not None:
+            meta["name"] = str(name)
+        if version is not None:
+            # OS publishes release labels like "2026-05" / "2026-10".
+            meta["version"] = str(version)
+            meta["release"] = str(version)
+    return meta
+
+
 def collect_rebuild_provenance(
     *,
     ceh_data_path: Path | str | None = None,
     cwd: Optional[Path] = None,
+    session: Optional[requests.Session] = None,
+    fetched_at_utc: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build provenance block for ``rebuild_metrics.json``.
 
     Records the git commit and each wired source's product/version or local
-    file date. Does not include study-area names, grid references, or secrets.
+    file date. OS products include the Downloads API release version/date.
+    Environment Agency WCS sources record the dataset name and fetch time
+    (the service does not expose a stable product version). Does not include
+    study-area names, grid references, or secrets.
     """
     ceh_path = Path(ceh_data_path) if ceh_data_path is not None else DEFAULT_CEH_PATH
+    fetched = fetched_at_utc or _utc_now_iso()
     return {
-        "recorded_at_utc": _utc_now_iso(),
+        "recorded_at_utc": fetched,
         "git_commit": git_commit_sha(cwd=cwd),
         "sources": {
             "worldclim": {
@@ -91,19 +152,31 @@ def collect_rebuild_provenance(
                 "url_pattern": WORLDCLIM_URL_PATTERN,
             },
             "os_vector_map_district": {
-                "product_id": OS_VMD_PRODUCT_ID,
+                **fetch_os_product_release(
+                    OS_VMD_PRODUCT_ID, session=session
+                ),
                 "api_base_url": OS_DOWNLOADS_BASE_URL,
             },
             "os_boundary_line": {
-                "product_id": BOUNDARY_LINE_PRODUCT_ID,
+                **fetch_os_product_release(
+                    BOUNDARY_LINE_PRODUCT_ID, session=session
+                ),
                 "api_base_url": OS_DOWNLOADS_BASE_URL,
             },
-            "ea_lidar_wcs": {
-                "dtm": EA_DTM_WCS,
-                "dsm": EA_DSM_WCS,
+            "ea_lidar_dtm": {
+                "dataset_name": EA_DTM_DATASET_NAME,
+                "endpoint": EA_DTM_WCS,
+                "fetched_at_utc": fetched,
             },
-            "ea_vom_wcs": {
+            "ea_lidar_dsm": {
+                "dataset_name": EA_DSM_DATASET_NAME,
+                "endpoint": EA_DSM_WCS,
+                "fetched_at_utc": fetched,
+            },
+            "ea_vom": {
+                "dataset_name": EA_VOM_DATASET_NAME,
                 "endpoint": EA_VOM_WCS,
+                "fetched_at_utc": fetched,
             },
             "ceh_land_cover": {
                 "product": CEH_PRODUCT,

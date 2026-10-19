@@ -11,6 +11,7 @@ import xarray as xr
 import yaml
 
 from sdm.commands.data_preparation.processing.build_model_ev_stack import (
+    _band_source_nodata,
     apply_layer_clipping,
     build_model_ev_stack,
     canonicalize_band_name,
@@ -221,8 +222,8 @@ def test_does_not_invent_nodata_when_source_unset(tmp_path: Path) -> None:
         assert written[var].rio.nodata is None
 
 
-def test_masked_open_preserves_nan_nodata_like_notebook(tmp_path: Path) -> None:
-    """Notebook loads with masked=True, so tagged nodata becomes NaN before write."""
+def test_preserves_encoded_nodata_minus_9999(tmp_path: Path) -> None:
+    """Masked read puts NaN in ``rio.nodata``; restore ``encoded_nodata`` (-9999)."""
     selected_csv = tmp_path / "selected.csv"
     selected_csv.write_text(
         "column_name,include\nterrain_dtm,1\nos_cover_water,1\n",
@@ -253,9 +254,10 @@ def test_masked_open_preserves_nan_nodata_like_notebook(tmp_path: Path) -> None:
     out = tmp_path / "evs-to-model.tif"
     ds.rio.to_raster(all_evs)
 
-    # Evidence: masked=True (notebook cell 2) replaces -9999 with NaN in rio.nodata.
     opened = rxr.open_rasterio(all_evs, masked=True, band_as_variable=True)
     assert np.isnan(float(opened["band_1"].rio.nodata))
+    assert float(opened["band_1"].rio.encoded_nodata) == -9999.0
+    assert float(_band_source_nodata(opened["band_1"])) == -9999.0
 
     settings = default_build_settings()
     settings["selected_variables_csv"] = str(selected_csv)
@@ -265,4 +267,4 @@ def test_masked_open_preserves_nan_nodata_like_notebook(tmp_path: Path) -> None:
 
     written = rxr.open_rasterio(out, masked=False, band_as_variable=True)
     for var in written.data_vars:
-        assert np.isnan(float(written[var].rio.nodata))
+        assert float(written[var].rio.nodata) == -9999.0
