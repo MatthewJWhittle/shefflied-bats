@@ -157,21 +157,29 @@ def apply_layer_clipping(
     *,
     clipping: Mapping[str, Mapping[str, float]] | None = None,
     enabled: bool = True,
-) -> xr.Dataset:
+) -> tuple[xr.Dataset, dict[str, dict[str, float]]]:
     """Apply notebook layer-level clipping (distances and curvature quantiles).
 
     Clipping is settled ON by the architecture review. ``enabled`` exists so the
     option is explicit in config/metrics; turning it off is out of scope for #38.
+
+    Returns
+    -------
+    dataset, applied
+        ``applied`` maps each clipped layer to the concrete min/max used. For
+        quantile clips (curvature), this includes the resolved 5%/95% values so
+        ``rebuild_metrics.json`` can record them, not only the log line.
     """
     if not enabled:
         logging.warning(
             "Layer clipping disabled — out of scope for #38; output will not "
             "match today's evs-to-model.tif like-for-like"
         )
-        return dataset
+        return dataset, {}
 
     specs = clipping if clipping is not None else DEFAULT_LAYER_CLIPPING
     out = dataset.copy()
+    applied: dict[str, dict[str, float]] = {}
     for name, spec in specs.items():
         if name not in out.data_vars:
             logging.info("Skipping clip for missing layer %s", name)
@@ -182,6 +190,12 @@ def apply_layer_clipping(
             lo = float(out[name].quantile(q_lo).item())
             hi = float(out[name].quantile(q_hi).item())
             out[name] = out[name].clip(min=lo, max=hi)
+            applied[name] = {
+                "quantile_min": q_lo,
+                "quantile_max": q_hi,
+                "min": lo,
+                "max": hi,
+            }
             logging.info(
                 "Clipped %s to quantiles %.2f–%.2f (values %.6g–%.6g)",
                 name,
@@ -194,8 +208,9 @@ def apply_layer_clipping(
             lo = float(spec["min"])
             hi = float(spec["max"])
             out[name] = out[name].clip(min=lo, max=hi)
+            applied[name] = {"min": lo, "max": hi}
             logging.info("Clipped %s to %.0f–%.0f", name, lo, hi)
-    return out
+    return out, applied
 
 
 def subset_selected_variables(
@@ -208,6 +223,37 @@ def subset_selected_variables(
             + ", ".join(missing)
         )
     return dataset[list(selected)]
+
+
+def _capture_nodata(dataset: xr.Dataset) -> dict[str, Any]:
+    """Snapshot each band's rio nodata (notebook preserves source tags on write)."""
+    return {str(var): dataset[var].rio.nodata for var in dataset.data_vars}
+
+
+def _restore_nodata(dataset: xr.Dataset, nodata_by_var: Mapping[str, Any]) -> xr.Dataset:
+    """Re-apply source nodata after ops (clip/astype) that drop encoding.
+
+    Does not invent NaN when every source band lacked a nodata tag. When some
+    source bands had a tag, neighbourhood / clip survivors inherit that source
+    value so the Dataset write stays consistent.
+    """
+    out = dataset
+    fallback = next(
+        (value for value in nodata_by_var.values() if value is not None),
+        None,
+    )
+    for var in out.data_vars:
+        name = str(var)
+        nodata = nodata_by_var.get(name)
+        if nodata is None:
+            # Neighbourhood layers inherit the base band's nodata.
+            base = re.sub(r"_(?:500|1000|1500)m$", "", name)
+            nodata = nodata_by_var.get(base)
+        if nodata is None:
+            nodata = fallback
+        if nodata is not None:
+            out[var].rio.write_nodata(nodata, inplace=True)
+    return out
 
 
 def add_multiscale_layers(
@@ -273,6 +319,9 @@ def build_model_ev_stack(
 ) -> tuple[Path, dict[str, Any]]:
     """Reproduce notebook steps: rename → clip → subset → multiscale → write.
 
+    Order matches ``notebooks/feature-engineering.ipynb`` (clipping runs on the
+    full renamed stack before the selected subset and neighbourhood layers).
+
     Parameters
     ----------
     input_path:
@@ -296,13 +345,17 @@ def build_model_ev_stack(
     logging.info("Loading merged EV stack from %s", input_path)
     dataset = rxr.open_rasterio(input_path, masked=True, band_as_variable=True)
     dataset = rename_ev_bands(dataset)
+    # Capture before clip/astype — those ops drop rio nodata encoding.
+    source_nodata = _capture_nodata(dataset)
 
     clip_cfg = settings["layer_clipping"]
-    dataset = apply_layer_clipping(
+    dataset, applied_clips = apply_layer_clipping(
         dataset,
         clipping=clip_cfg["layers"],
         enabled=bool(clip_cfg["enabled"]),
     )
+    # Persist concrete clip bounds (including curvature 5%/95% values) for metrics.
+    settings["layer_clipping"]["applied"] = applied_clips
 
     selected = load_selected_variable_names(settings["selected_variables_csv"])
     dataset = subset_selected_variables(dataset, selected)
@@ -314,12 +367,16 @@ def build_model_ev_stack(
         windows_cells=multi["windows_cells"],
     )
 
-    # Ensure float32 + long_name for GeoTIFF band descriptions
+    # float32 + long_name for GeoTIFF band descriptions. Restore source nodata
+    # rather than inventing NaN when the source tag was unset (notebook write
+    # path: ``rio.to_raster`` only, no forced NaN fill).
+    # Note: load uses masked=True (same as the notebook), so a tagged source
+    # nodata such as -9999 is already NaN in ``source_nodata`` before write —
+    # that is why today's evs-to-model.tif carries NaN nodata.
     for var in dataset.data_vars:
         dataset[var] = dataset[var].astype(np.float32)
         dataset[var].attrs["long_name"] = str(var)
-        if dataset[var].rio.nodata is None:
-            dataset[var].rio.write_nodata(np.nan, inplace=True)
+    dataset = _restore_nodata(dataset, source_nodata)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     logging.info("Writing model EV stack (%d bands) to %s", len(dataset.data_vars), output_path)

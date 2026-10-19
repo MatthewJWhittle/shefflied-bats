@@ -131,19 +131,31 @@ def test_cli_data_accepts_allowed_temp_dir(tmp_path: Path) -> None:
         return resolved
 
     runner = CliRunner()
+    ceh = tmp_path / "gblcm2023_10m.tif"
+    ceh.write_bytes(b"fake")
     with patch(
         "sdm.commands.data_preparation.rebuild_ev_layers.rebuild_environmental_layers",
         _stub_rebuild,
     ):
         result = runner.invoke(
             app,
-            ["data", "--output-dir", str(allowed), "--cache-dir", str(tmp_path / "caches"), "--fresh"],
+            [
+                "data",
+                "--output-dir",
+                str(allowed),
+                "--cache-dir",
+                str(tmp_path / "caches"),
+                "--fresh",
+                "--ceh-path",
+                str(ceh),
+            ],
         )
 
     assert result.exit_code == 0, result.output
     assert called["output"] == allowed.resolve()
     assert called["kwargs"]["fresh"] is True
     assert Path(str(called["kwargs"]["cache_dir"])) == tmp_path / "caches"
+    assert Path(str(called["kwargs"]["ceh_data_path"])) == ceh
 
 
 def test_rebuild_cache_layout_defaults_under_output(tmp_path: Path) -> None:

@@ -5,10 +5,16 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Sequence, TextIO
+from typing import FrozenSet, Iterable, Optional, Sequence, TextIO
 
 import geopandas as gpd
 
+from sdm.commands.data_preparation.rebuild_steps import (
+    REBUILD_STEPS,
+    UnknownRebuildStepError,
+    parse_step_name_list,
+    resolve_active_steps,
+)
 from sdm.data.coastline_download import LEGACY_BGS_GEOCOAST
 from sdm.data.os_download import BASE_URL as OS_DOWNLOADS_BASE_URL
 from sdm.data.os_download import osgb_100km_tiles_for_bbox
@@ -40,6 +46,12 @@ VOM_WCS_ENDPOINT = (
     "https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs"
 )
 BOUNDARY_LINE_PRODUCT = "BoundaryLine (OS Downloads API)"
+
+# Registry name → plan step ``name`` (recorder key). Keep aligned with
+# ``rebuild_steps.REBUILD_STEPS`` / ``rebuild_environmental_layers``.
+_REGISTRY_TO_PLAN_NAME: dict[str, str] = {
+    step.name: step.recorder_key for step in REBUILD_STEPS
+}
 
 
 @dataclass(frozen=True)
@@ -88,68 +100,124 @@ def os_tiles_for_boundary(
     return osgb_100km_tiles_for_bbox(*_boundary_bbox(boundary_path, buffer_m=buffer_m))
 
 
+def _resolve_active(
+    *,
+    skip: Optional[str] = None,
+    only: Optional[str] = None,
+    skip_steps: Optional[FrozenSet[str]] = None,
+    only_steps: Optional[FrozenSet[str]] = None,
+) -> FrozenSet[str]:
+    """Parse string form or accept a pre-parsed frozenset; share registry names."""
+    parsed_skip = (
+        skip_steps if skip_steps is not None else parse_step_name_list(skip)
+    )
+    parsed_only = (
+        only_steps if only_steps is not None else parse_step_name_list(only)
+    )
+    return resolve_active_steps(skip=parsed_skip, only=parsed_only)
+
+
 def build_data_plan(
     *,
     boundary_path: Path,
     buffer_m: float = 7000,
     ceh_data_path: Path = DEFAULT_CEH_PATH,
     cache_dir: Optional[Path] = None,
-    skip_ceh: bool = False,
-    skip_coastal: bool = False,
+    skip: Optional[str] = None,
+    only: Optional[str] = None,
+    skip_steps: Optional[FrozenSet[str]] = None,
+    only_steps: Optional[FrozenSet[str]] = None,
 ) -> tuple[list[PlanStep], list[str], list[str]]:
-    """Return plan steps, OS tiles, and human notes (optional BGS, etc.)."""
+    """Return plan steps, OS tiles, and human notes (optional BGS, etc.).
+
+    ``skip`` / ``only`` are comma-separated registry names (same as ``sdm data``).
+    Alternatively pass pre-parsed ``skip_steps`` / ``only_steps`` frozensets.
+    """
+    active = _resolve_active(
+        skip=skip,
+        only=only,
+        skip_steps=skip_steps,
+        only_steps=only_steps,
+    )
+    skip_ceh = "ceh" not in active
+    skip_coastal = "coastal" not in active
+
     cache_root = Path(cache_dir) if cache_dir is not None else Path("<output-dir>/cache")
     worldclim_cache = cache_root / "worldclim"
     os_raw = cache_root / "os-vector-map"
     boundary_line_cache = cache_root / "boundary-line"
 
+    def _maybe_skip(registry_name: str, step: PlanStep) -> PlanStep:
+        if registry_name in active:
+            return step
+        return PlanStep(
+            name=step.name,
+            source=f"{step.source} (skipped)",
+            local_path=step.local_path,
+            present=step.present,
+            required=False,
+            notes=f"Skipped via --skip / --only ({registry_name})",
+        )
+
     steps: list[PlanStep] = [
-        PlanStep(
-            name="generate_terrain_data",
-            source="; ".join(
-                f"{name}={url}" for name, url in sorted(TERRAIN_WCS_ENDPOINTS.items())
+        _maybe_skip(
+            "terrain",
+            PlanStep(
+                name=_REGISTRY_TO_PLAN_NAME["terrain"],
+                source="; ".join(
+                    f"{name}={url}"
+                    for name, url in sorted(TERRAIN_WCS_ENDPOINTS.items())
+                ),
+                local_path=None,
+                present=None,
+                required=True,
+                notes="EA LIDAR Composite DTM/DSM WCS (live download)",
             ),
-            local_path=None,
-            present=None,
-            required=True,
-            notes="EA LIDAR Composite DTM/DSM WCS (live download)",
         ),
-        PlanStep(
-            name="generate_terrain_stats",
-            source="local: <output-dir>/terrain/dtm_dsm_100m.tif",
-            local_path=None,
-            present=None,
-            required=True,
-            notes="Derived from terrain step output",
-        ),
-        PlanStep(
-            name="generate_climate_data",
-            source="; ".join(
-                WORLDCLIM_URL_TEMPLATE.format(var=var)
-                for var in ("bio", "tavg", "prec", "wind")
+        _maybe_skip(
+            "terrain_stats",
+            PlanStep(
+                name=_REGISTRY_TO_PLAN_NAME["terrain_stats"],
+                source="local: <output-dir>/terrain/dtm_dsm_100m.tif",
+                local_path=None,
+                present=None,
+                required=True,
+                notes="Derived from terrain step output",
             ),
-            local_path=worldclim_cache if cache_dir is not None else None,
-            present=_path_present(worldclim_cache) if cache_dir is not None else None,
-            required=True,
-            notes=f"WorldClim cache under {worldclim_cache}",
+        ),
+        _maybe_skip(
+            "climate",
+            PlanStep(
+                name=_REGISTRY_TO_PLAN_NAME["climate"],
+                source="; ".join(
+                    WORLDCLIM_URL_TEMPLATE.format(var=var)
+                    for var in ("bio", "tavg", "prec", "wind")
+                ),
+                local_path=worldclim_cache if cache_dir is not None else None,
+                present=(
+                    _path_present(worldclim_cache) if cache_dir is not None else None
+                ),
+                required=True,
+                notes=f"WorldClim cache under {worldclim_cache}",
+            ),
         ),
     ]
 
     if skip_ceh:
         steps.append(
             PlanStep(
-                name="generate_ceh_lc_data",
+                name=_REGISTRY_TO_PLAN_NAME["ceh"],
                 source=f"manual GeoTIFF (skipped): {ceh_data_path}",
                 local_path=Path(ceh_data_path),
                 present=_path_present(Path(ceh_data_path)),
                 required=False,
-                notes="Skipped via --skip-ceh",
+                notes="Skipped via --skip / --only (ceh)",
             )
         )
     else:
         steps.append(
             PlanStep(
-                name="generate_ceh_lc_data",
+                name=_REGISTRY_TO_PLAN_NAME["ceh"],
                 source=(
                     "manual CEH Land Cover Map 2023 10 m GeoTIFF "
                     f"(local path): {ceh_data_path}"
@@ -161,36 +229,37 @@ def build_data_plan(
             )
         )
 
-    steps.extend(
-        [
+    steps.append(
+        _maybe_skip(
+            "vom",
             PlanStep(
-                name="generate_vom_data",
+                name=_REGISTRY_TO_PLAN_NAME["vom"],
                 source=VOM_WCS_ENDPOINT,
                 local_path=None,
                 present=None,
                 required=True,
                 notes="EA Vegetation Object Model WCS (live download)",
             ),
-        ]
+        )
     )
 
     if skip_coastal:
         steps.append(
             PlanStep(
-                name="generate_coastal_distance",
+                name=_REGISTRY_TO_PLAN_NAME["coastal"],
                 source=f"{BOUNDARY_LINE_PRODUCT} via {OS_DOWNLOADS_BASE_URL} (skipped)",
                 local_path=boundary_line_cache if cache_dir is not None else None,
                 present=(
                     _path_present(boundary_line_cache) if cache_dir is not None else None
                 ),
                 required=False,
-                notes="Skipped via --skip-coastal",
+                notes="Skipped via --skip / --only (coastal)",
             )
         )
     else:
         steps.append(
             PlanStep(
-                name="generate_coastal_distance",
+                name=_REGISTRY_TO_PLAN_NAME["coastal"],
                 source=f"{BOUNDARY_LINE_PRODUCT} via {OS_DOWNLOADS_BASE_URL}",
                 local_path=boundary_line_cache if cache_dir is not None else None,
                 present=(
@@ -210,40 +279,51 @@ def build_data_plan(
         tiles = os_tiles_for_boundary(boundary_path, buffer_m=buffer_m)
 
     steps.append(
-        PlanStep(
-            name="process_os_data",
-            source=f"OS Vector Map District via {OS_DOWNLOADS_BASE_URL}/products/VectorMapDistrict/downloads",
-            local_path=os_raw if cache_dir is not None else None,
-            present=_path_present(os_raw) if cache_dir is not None else None,
-            required=True,
-            notes=(
-                f"Needs OS 100 km tiles: {', '.join(tiles) if tiles else '(boundary missing — tiles unknown)'}"
+        _maybe_skip(
+            "os",
+            PlanStep(
+                name=_REGISTRY_TO_PLAN_NAME["os"],
+                source=(
+                    f"OS Vector Map District via "
+                    f"{OS_DOWNLOADS_BASE_URL}/products/VectorMapDistrict/downloads"
+                ),
+                local_path=os_raw if cache_dir is not None else None,
+                present=_path_present(os_raw) if cache_dir is not None else None,
+                required=True,
+                notes=(
+                    "Needs OS 100 km tiles: "
+                    f"{', '.join(tiles) if tiles else '(boundary missing — tiles unknown)'}"
+                ),
             ),
         )
     )
 
-    steps.extend(
-        [
+    steps.append(
+        _maybe_skip(
+            "merge",
             PlanStep(
-                name="merge_ev_layers",
+                name=_REGISTRY_TO_PLAN_NAME["merge"],
                 source="local: per-layer GeoTIFFs under <output-dir>",
                 local_path=None,
                 present=None,
                 required=True,
                 notes="Writes <output-dir>/all-evs.tif",
             ),
-            PlanStep(
-                name="build_model_ev_stack",
-                source="local: <output-dir>/all-evs.tif + data/ev_clusters_selected.csv",
-                local_path=Path("data/ev_clusters_selected.csv"),
-                present=_path_present(Path("data/ev_clusters_selected.csv")),
-                required=True,
-                notes=(
-                    "Rename, layer clipping (ON), selected subset, multiscale → "
-                    "<output-dir>/evs-to-model.tif"
-                ),
+        )
+    )
+    # Post-merge model stack is not a registry --skip name; always planned.
+    steps.append(
+        PlanStep(
+            name="build_model_ev_stack",
+            source="local: <output-dir>/all-evs.tif + data/ev_clusters_selected.csv",
+            local_path=Path("data/ev_clusters_selected.csv"),
+            present=_path_present(Path("data/ev_clusters_selected.csv")),
+            required=True,
+            notes=(
+                "Rename, layer clipping (ON), selected subset, multiscale → "
+                "<output-dir>/evs-to-model.tif"
             ),
-        ]
+        )
     )
 
     notes = [
@@ -309,23 +389,26 @@ def run_data_plan(
     buffer_m: float = 7000,
     ceh_data_path: Path = DEFAULT_CEH_PATH,
     cache_dir: Optional[Path] = None,
-    skip_ceh: bool = False,
-    skip_coastal: bool = False,
+    skip: Optional[str] = None,
+    only: Optional[str] = None,
     stream: TextIO | None = None,
 ) -> int:
-    """Print the plan; return 0 if OK, 1 if a required manual input is missing."""
+    """Print the plan; return 0 if OK, 1 if a required manual input is missing.
+
+    Unknown ``--skip`` / ``--only`` names raise
+    :class:`UnknownRebuildStepError` / ``ValueError`` for the CLI to map to
+    exit code 2.
+    """
     out = stream or sys.stdout
     steps, tiles, notes = build_data_plan(
         boundary_path=boundary_path,
         buffer_m=buffer_m,
         ceh_data_path=ceh_data_path,
         cache_dir=cache_dir,
-        skip_ceh=skip_ceh,
-        skip_coastal=skip_coastal,
+        skip=skip,
+        only=only,
     )
-    out.write(
-        format_plan(steps, tiles, notes, boundary_path=boundary_path)
-    )
+    out.write(format_plan(steps, tiles, notes, boundary_path=boundary_path))
     missing = missing_required_inputs(steps)
     if not boundary_path.exists():
         out.write("\nPlan incomplete: boundary file is missing.\n")

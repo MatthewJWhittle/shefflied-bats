@@ -88,3 +88,8 @@ def test_rebuild_metrics_include_provenance_on_orchestrator(
     assert "provenance" in metrics
     assert metrics["provenance"]["sources"]["ceh_land_cover"]["product"]
     assert "git_commit" in metrics["provenance"]
+
+
+def test_gitignore_covers_default_rebuild_output() -> None:
+    text = Path(".gitignore").read_text(encoding="utf-8")
+    assert "data/evs-rebuild/" in text

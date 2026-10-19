@@ -83,19 +83,66 @@ def test_cli_plan_flag_no_writes(tmp_path: Path, monkeypatch) -> None:
     ceh = tmp_path / "ceh.tif"
     ceh.write_bytes(b"fake")
 
-    # Point project boundary at our temp file and CEH via skip... we patch run_data_plan inputs
-    # by invoking CLI with --skip-ceh so missing default CEH does not fail, then
-    # separately assert default CEH path is the documented manual input.
+    # Point project boundary at our temp file; --skip ceh so missing default CEH
+    # does not fail, then separately assert default CEH path is documented.
     runner = CliRunner()
     monkeypatch.setattr(
         "sdm.cli.PROJECT_CONFIG.paths.boundary",
         str(boundary),
     )
-    result = runner.invoke(app, ["data", "--plan", "--skip-ceh"])
+    result = runner.invoke(app, ["data", "--plan", "--skip", "ceh"])
     assert result.exit_code == 0, result.output
     assert "build_model_ev_stack" in result.output
     assert "OS 100 km tiles" in result.output
     assert "GeoCoast" in result.output
+    assert "Skipped via --skip / --only (ceh)" in result.output
     # No output-dir created by plan
     assert not (tmp_path / "evs-rebuild").exists()
     assert DEFAULT_CEH_PATH.as_posix().endswith("gblcm2023_10m.tif")
+
+
+def test_cli_plan_skip_ceh_coastal(tmp_path: Path, monkeypatch) -> None:
+    boundary = tmp_path / "boundary.geojson"
+    _write_boundary(boundary)
+    runner = CliRunner()
+    monkeypatch.setattr(
+        "sdm.cli.PROJECT_CONFIG.paths.boundary",
+        str(boundary),
+    )
+    result = runner.invoke(
+        app,
+        ["data", "-o", str(tmp_path / "x"), "--skip", "ceh,coastal", "--plan"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Skipped via --skip / --only (ceh)" in result.output
+    assert "Skipped via --skip / --only (coastal)" in result.output
+
+
+def test_cli_plan_unknown_skip_exits_2(tmp_path: Path, monkeypatch) -> None:
+    boundary = tmp_path / "boundary.geojson"
+    _write_boundary(boundary)
+    runner = CliRunner()
+    monkeypatch.setattr(
+        "sdm.cli.PROJECT_CONFIG.paths.boundary",
+        str(boundary),
+    )
+    result = runner.invoke(app, ["data", "--plan", "--skip", "ceh,nope"])
+    assert result.exit_code == 2, result.output
+    assert "Unknown rebuild step" in result.output
+    assert "nope" in result.output
+
+
+def test_cli_plan_respects_ceh_path(tmp_path: Path, monkeypatch) -> None:
+    boundary = tmp_path / "boundary.geojson"
+    _write_boundary(boundary)
+    ceh = tmp_path / "custom-ceh.tif"
+    ceh.write_bytes(b"fake")
+
+    runner = CliRunner()
+    monkeypatch.setattr(
+        "sdm.cli.PROJECT_CONFIG.paths.boundary",
+        str(boundary),
+    )
+    result = runner.invoke(app, ["data", "--plan", "--ceh-path", str(ceh)])
+    assert result.exit_code == 0, result.output
+    assert str(ceh) in result.output
