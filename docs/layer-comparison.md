@@ -4,20 +4,25 @@ Tooling for [issue #38](https://github.com/MatthewJWhittle/shefflied-bats/issues
 
 ## Implementation notes
 
-Pass marks (per layer) follow the consolidated architecture review on #38:
+The objective is **closeness, not exactness** (revised architecture review on #38). Per layer:
 
-1. **Same shape** — layer name, projection, cell size, grid origin, extent, no-data value and no-data cells must match exactly.
-2. **Mostly the same values** — at least 95% of jointly valid cells are close. Exact match only for in-cell category and percentage layers stored as whole numbers. Continuous layers — including any neighbourhood average named `*_500m` / `*_1000m` / `*_1500m` (e.g. `os_cover_water_500m`, `ceh_landcover_*_1000m`), distances, heights, and climate — must be within 1% of the current layer’s full value range (architecture review decision on #43).
-3. **Differences are local** — out-of-tolerance cells should form compact patches. Each compared layer gets a difference GeoTIFF plus a per-patch table (component id, cell count, bounding box, bbox fill ratio). Sparse / road-network-shaped components fail the local-patch check.
-4. **Source changes are flagged, not failed** — optional `--source-versions` YAML. When before/after versions differ, the verdict is `flagged_source_change` even if values would otherwise pass.
+1. **Grid (precondition)** — rebuilt must sit on the same grid as current (projection, cell size, origin / alignment, extent) so cells can be compared. Use `--align` to crop / snap the rebuilt stack onto the current reference grid (`rioxarray.reproject_match`) when shapes differ. No-data **cell** mismatches are **not** a grid failure.
+2. **Continuous layers** — cell-wise `(rebuilt − current) / layer_range` (range from the current layer’s jointly valid min/max). Report mean, median, 95th percentile and max of the absolute normalised difference, the share of cells within **1% of range**, and the **correlation**. Pass when at least **95%** of comparable cells are within 1% of range.
+3. **Category / percentage layers** — report the share of cells with the same value. Pass when at least **95%** match.
+4. **No-data** — cells empty in one layer but not the other count as **not-close** in the share figure, and the mismatch count is reported in its own column (`n_nodata_mismatch`). Cells empty in both are excluded.
+5. **Differences local** — not-close cells should form compact patches (component count + bbox fill). Each layer gets a difference GeoTIFF and a per-patch table.
+6. **Intended method changes** — configurable `--flag-layer` / `--flag-prefix` (e.g. `os_distance` after the #42 edge-distance change). Matching layers are reported as **`flagged`** with stats, **not** as failures.
+7. **Source changes** — optional `--source-versions` YAML. When before/after versions differ, verdict is `flagged_source_change`.
 
 Value-kind rules live in `is_exact_match_layer` / `is_neighbourhood_average` in `sdm/raster/layer_compare.py`.
+
+**Engine:** both sides are opened lazily with **rioxarray + dask chunks**, compared with vectorised xarray ops (`(new − old) / range`, `.mean` / `.median` / `.quantile`, `xr.corr`, combined `notnull` masks), and reduced with a **single** `dask.compute()`. Patches use `scipy.ndimage.label` on the computed boolean array. No per-cell / per-tile Python loops.
 
 Model checks (held-out AUC, cut-off map switch, brown long-eared roost marks from #29) are **not** run here. Pass `--model-hooks-csv` to write stub rows documenting those later checks after a real rebuild + retrain.
 
 Layer order: union of variables across the 18 release-model `variables_config.yml` files under `data/sdm_config/*/variables_config.yml` (or repeatable `--priority-config`), then any other layers discovered in either folder.
 
-Without `--stack-only` / `--glob`, duplicate layer names across files are resolved by preferring `evs-to-model.tif` (with a warning). Ambiguous duplicates (e.g. the same name in `all-evs.tif` and another non-stack file) raise an error.
+Without `--stack-only` / `--glob`, duplicate layer names across files are resolved by preferring `evs-to-model.tif` (with a warning). Ambiguous duplicates raise an error.
 
 Comparison outputs reuse the same write guard as the rebuild command (`sdm.utils.ev_output_guards` from #44): refuse writes under `data/evs`, any `inputs/` path, `${INPUT_DATA_ROOT}`, and bucket inputs URIs.
 
@@ -35,16 +40,15 @@ sdm compare-layers path/to/rebuilt path/to/current \
   -o layer_comparison/layer_comparison.csv \
   --stack-only
 
-# Or a custom file glob:
+# Crop / snap rebuilt onto the current grid when extents differ:
 sdm compare-layers path/to/rebuilt path/to/current \
   -o layer_comparison/layer_comparison.csv \
-  --glob 'evs-to-model.tif'
+  --align
 
-# Priority order from specific release models (repeatable):
+# Flag intended method-change layers (e.g. OS distance after #42):
 sdm compare-layers path/to/rebuilt path/to/current \
   -o layer_comparison/layer_comparison.csv \
-  --priority-config data/sdm_config/Plecotus_auritus_Roost/variables_config.yml \
-  --priority-config data/sdm_config/Pipistrellus_pipistrellus_Roost/variables_config.yml
+  --flag-prefix os_distance
 ```
 
 Optional source-version file (`source_versions.yml`):
@@ -63,15 +67,18 @@ Folders may contain single-band GeoTIFFs (stem or band description = layer name)
 |--------|---------|
 | `layer_name` | Tidied layer / band name |
 | `value_kind` | `exact` or `continuous` |
-| `grid_check` | `ok` or which shape fields mismatched |
-| `share_within_tolerance` | Fraction of jointly valid cells within tolerance |
+| `grid_check` | `ok` / `ok (aligned)` or which shape fields mismatched |
+| `share_within_tolerance` | Share of comparable cells that are close (nodata mismatches count as not-close) |
+| `n_nodata_mismatch` | Cells empty in one side only |
+| `norm_abs_diff_*` | Mean / median / p95 / max of `\|diff\| / range` (continuous only) |
+| `correlation` | `xr.corr` over spatial dims |
 | `max_difference` | Max absolute difference on jointly valid cells |
 | `difference_map_path` | GeoTIFF of absolute differences |
 | `differences_local` | Compact-patch heuristic (component count + bbox fill) |
 | `patch_table_path` | Per-component CSV (id, cell count, bbox, fill ratio) |
 | `source_version_*` / `reason` | Fillable / optional metadata |
-| `verdict` | `pass`, `fail`, `flagged_source_change`, or `missing` |
+| `verdict` | `pass`, `fail`, `flagged`, `flagged_source_change`, or `missing` |
 
 ## Tests
 
-CI uses **small synthetic rasters only** (`tests/test_compare_ev_layers.py`, `tests/test_ev_output_guards.py`). No bucket access, credentials, or full downloads.
+CI uses **small synthetic rasters only** (`tests/test_compare_ev_layers.py`). No bucket access, credentials, or full downloads.

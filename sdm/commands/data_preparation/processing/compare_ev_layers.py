@@ -1,9 +1,13 @@
 """Compare a rebuilt environmental layer folder against the current set.
 
-Writes one CSV row per layer (shape check, share within tolerance, max
-difference, difference-map path, patch table path, reason, verdict). Layer
-order: union of variables across release-model configs (repeatable
-``--priority-config``), then any other layers discovered in either folder.
+Writes one CSV row per layer (grid check, share within tolerance, continuous
+normalised-diff stats, nodata-mismatch count, difference-map path, patch
+table path, reason, verdict). Layer order: union of variables across
+release-model configs (repeatable ``--priority-config``), then any other
+layers discovered in either folder.
+
+Stacks are opened lazily with rioxarray + dask and compared with vectorised
+xarray ops (single ``.compute()``).
 
 Comparison artifact writes reuse the EV output guards from #40/#44 so results
 never land under ``data/evs`` or ``inputs/``.
@@ -23,9 +27,12 @@ import yaml
 
 from sdm.raster.layer_compare import (
     CompareRunSummary,
+    LayerCompareResult,
     compare_layer_pair,
+    compare_layer_stacks,
     discover_layers,
     model_compare_hooks,
+    open_layer_stack,
     ordered_layer_names,
     result_to_row,
 )
@@ -45,6 +52,12 @@ LAYER_CSV_COLUMNS = [
     "grid_check",
     "grid_ok",
     "share_within_tolerance",
+    "n_nodata_mismatch",
+    "norm_abs_diff_mean",
+    "norm_abs_diff_median",
+    "norm_abs_diff_p95",
+    "norm_abs_diff_max",
+    "correlation",
     "max_difference",
     "difference_map_path",
     "differences_local",
@@ -112,7 +125,6 @@ def load_source_versions(path: Optional[Path]) -> dict[str, dict[str, str]]:
 def validate_comparison_write_path(path: Path, *, label: str) -> Path:
     """Refuse comparison artifacts under live EV / inputs locations (#44 guard)."""
     path = Path(path)
-    # Directory to protect: parent of a file path, or the path itself if dir-like.
     target_dir = path if path.suffix == "" else path.parent
     if str(target_dir) in ("", "."):
         target_dir = Path(".")
@@ -137,6 +149,9 @@ def compare_ev_layers(
     write_model_hooks_csv: Optional[Path] = None,
     stack_only: bool = False,
     file_glob: Optional[str] = None,
+    align: bool = False,
+    flag_names: Optional[Sequence[str]] = None,
+    flag_prefixes: Optional[Sequence[str]] = None,
     verbose: bool = False,
 ) -> CompareRunSummary:
     """Compare all layers found under rebuilt_dir vs current_dir."""
@@ -144,6 +159,8 @@ def compare_ev_layers(
     rebuilt_dir = Path(rebuilt_dir)
     current_dir = Path(current_dir)
     output_csv = validate_comparison_write_path(Path(output_csv), label="comparison CSV")
+    flag_names = list(flag_names or ())
+    flag_prefixes = list(flag_prefixes or ())
 
     if difference_maps_dir is None:
         difference_maps_dir = output_csv.parent / "difference_maps"
@@ -181,7 +198,7 @@ def compare_ev_layers(
 
     logging.info(
         "Comparing %s layers (priority union %s from %s configs; "
-        "discovered current=%s rebuilt=%s; stack_only=%s file_glob=%s)",
+        "discovered current=%s rebuilt=%s; stack_only=%s file_glob=%s align=%s)",
         len(all_names),
         len(priority),
         len(priority_config_paths),
@@ -189,10 +206,18 @@ def compare_ev_layers(
         len(rebuilt_layers),
         stack_only,
         file_glob,
+        align,
     )
 
     summary = CompareRunSummary()
-    for name in all_names:
+    present_names = [
+        name
+        for name in all_names
+        if name in current_layers and name in rebuilt_layers
+    ]
+    missing_names = [name for name in all_names if name not in present_names]
+
+    for name in missing_names:
         versions = source_versions.get(name, {})
         result = compare_layer_pair(
             name,
@@ -201,14 +226,51 @@ def compare_ev_layers(
             diff_dir=difference_maps_dir,
             source_version_current=versions.get("current", ""),
             source_version_rebuilt=versions.get("rebuilt", ""),
+            flag_names=flag_names,
+            flag_prefixes=flag_prefixes,
+            align=align,
         )
         summary.layers.append(result)
+
+    if present_names:
+        current_refs = [current_layers[n] for n in present_names]
+        rebuilt_refs = [rebuilt_layers[n] for n in present_names]
+        current_stack = open_layer_stack(current_refs)
+        rebuilt_stack = open_layer_stack(rebuilt_refs)
+        stack_results, timing = compare_layer_stacks(
+            current_stack,
+            rebuilt_stack,
+            diff_dir=difference_maps_dir,
+            source_versions=source_versions,
+            flag_names=flag_names,
+            flag_prefixes=flag_prefixes,
+            align=align,
+        )
+        summary.layers.extend(stack_results)
+        summary.duration_seconds = timing.duration_seconds
+        summary.peak_rss_bytes = timing.peak_rss_bytes
         logging.info(
-            "%s → %s (grid=%s share=%s local=%s)",
-            name,
+            "Vectorised stack compare: %s bands, %sx%s, %.3fs, peak RSS=%s bytes (%s)",
+            timing.n_bands,
+            timing.height,
+            timing.width,
+            timing.duration_seconds,
+            timing.peak_rss_bytes,
+            timing.note,
+        )
+
+    # Restore priority order for CSV output.
+    by_name = {r.layer_name: r for r in summary.layers}
+    summary.layers = [by_name[n] for n in all_names if n in by_name]
+
+    for result in summary.layers:
+        logging.info(
+            "%s → %s (grid=%s share=%s nodata_mismatch=%s local=%s)",
+            result.layer_name,
             result.verdict.value,
             result.grid_check,
             result.share_within_tolerance,
+            result.n_nodata_mismatch,
             result.differences_local,
         )
 
@@ -221,7 +283,7 @@ def compare_ev_layers(
     return summary
 
 
-def _write_layer_csv(path: Path, results: Sequence) -> None:
+def _write_layer_csv(path: Path, results: Sequence[LayerCompareResult]) -> None:
     rows = [result_to_row(r) for r in results]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=LAYER_CSV_COLUMNS)

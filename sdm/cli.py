@@ -558,13 +558,40 @@ def compare_layers(
         "--glob",
         help="Only read raster files matching this glob (mutually exclusive with --stack-only).",
     ),
+    align: bool = typer.Option(
+        False,
+        "--align",
+        help=(
+            "Crop / snap the rebuilt stack onto the current reference grid "
+            "(rioxarray reproject_match) when shapes differ. Grid alignment is "
+            "otherwise a hard precondition."
+        ),
+    ),
+    flag_layer: Optional[List[str]] = typer.Option(
+        None,
+        "--flag-layer",
+        help=(
+            "Repeatable layer name treated as an intended method change: report "
+            "stats with verdict 'flagged' (not fail). Example: OS distance layers "
+            "after the #42 edge-distance change."
+        ),
+    ),
+    flag_prefix: Optional[List[str]] = typer.Option(
+        None,
+        "--flag-prefix",
+        help=(
+            "Repeatable name prefix for intended method-change layers "
+            "(e.g. os_distance). Matching layers are flagged, not failed."
+        ),
+    ),
     verbose: bool = False,
 ) -> None:
     """Compare rebuilt environmental layers to the current set (issue #38).
 
-    Pass marks: identical grid/shape; ≥95% of cells within tolerance (exact for
-    category/percentage-cover; 1% of layer range for continuous); difference
-    maps for local patches; source-version changes flagged, not failed.
+    Closeness, not exactness: grid must align; continuous layers pass when ≥95%
+    of cells are within 1% of the layer range; categorical layers when ≥95%
+    match. Nodata mismatches count as not-close and are reported separately.
+    Intended method changes use --flag-layer / --flag-prefix (flagged, not fail).
     """
     from sdm.commands.data_preparation.processing.compare_ev_layers import (
         compare_ev_layers,
@@ -587,6 +614,9 @@ def compare_layers(
             write_model_hooks_csv=model_hooks_csv,
             stack_only=stack_only,
             file_glob=file_glob,
+            align=align,
+            flag_names=flag_layer,
+            flag_prefixes=flag_prefix,
             verbose=verbose,
         )
     except ForbiddenEvOutputError as exc:
@@ -598,7 +628,9 @@ def compare_layers(
     n_pass = sum(1 for r in summary.layers if r.verdict.value == "pass")
     n_fail = sum(1 for r in summary.layers if r.verdict.value == "fail")
     n_flag = sum(
-        1 for r in summary.layers if r.verdict.value == "flagged_source_change"
+        1
+        for r in summary.layers
+        if r.verdict.value in {"flagged", "flagged_source_change"}
     )
     n_missing = sum(1 for r in summary.layers if r.verdict.value == "missing")
     logging.info(
@@ -609,6 +641,12 @@ def compare_layers(
         n_missing,
         output_csv,
     )
+    if summary.duration_seconds is not None:
+        logging.info(
+            "Stack compare timing: %.3fs, peak RSS=%s bytes",
+            summary.duration_seconds,
+            summary.peak_rss_bytes,
+        )
 
 
 @app.command()

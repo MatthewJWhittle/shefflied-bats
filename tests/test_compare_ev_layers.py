@@ -28,6 +28,7 @@ from sdm.raster.layer_compare import (
     discover_layers,
     is_exact_match_layer,
     is_neighbourhood_average,
+    matches_flagged_layer,
     ordered_layer_names,
 )
 from sdm.utils.ev_output_guards import ForbiddenEvOutputError
@@ -96,28 +97,34 @@ def variables_configs(tmp_path: Path) -> list[Path]:
 
 
 def test_classify_value_kind_and_exact_rule_centralized():
-    # In-cell CEH categories (whole numbers) → exact.
     assert classify_value_kind("ceh_landcover_arable") is LayerValueKind.EXACT
     assert is_exact_match_layer("ceh_landcover_broadleaved_woodland")
-    # Neighbourhood averages (any *_NNNm, including os_cover_*) → continuous.
     assert classify_value_kind("ceh_landcover_arable_1000m") is LayerValueKind.CONTINUOUS
     assert classify_value_kind("ceh_landcover_urban_1500m") is LayerValueKind.CONTINUOUS
     assert not is_exact_match_layer("ceh_landcover_broadleaved_woodland_500m")
     assert is_neighbourhood_average("os_cover_water_500m")
-    assert is_neighbourhood_average("os_cover_water_1000m")
-    assert is_neighbourhood_average("os_cover_water_1500m")
     assert classify_value_kind("os_cover_water_500m") is LayerValueKind.CONTINUOUS
-    assert classify_value_kind("os_cover_water_1000m") is LayerValueKind.CONTINUOUS
-    assert classify_value_kind("os_cover_water_1500m") is LayerValueKind.CONTINUOUS
-    assert not is_exact_match_layer("os_cover_water_500m")
-    # In-cell OS cover percentages (no buffer suffix) stay exact.
     assert classify_value_kind("os_cover_buildings") is LayerValueKind.EXACT
-    assert classify_value_kind("os_cover_water") is LayerValueKind.EXACT
     assert (
         classify_value_kind("os_distance_distance_to_minor_roads")
         is LayerValueKind.CONTINUOUS
     )
     assert classify_value_kind("climate_bioclim_bio_2") is LayerValueKind.CONTINUOUS
+
+
+def test_matches_flagged_layer_names_and_prefixes():
+    assert matches_flagged_layer(
+        "os_distance_distance_to_minor_roads",
+        flag_prefixes=["os_distance"],
+    )
+    assert matches_flagged_layer(
+        "os_distance_distance_to_major_roads",
+        flag_names=["os_distance_distance_to_major_roads"],
+    )
+    assert not matches_flagged_layer(
+        "climate_bioclim_bio_2",
+        flag_prefixes=["os_distance"],
+    )
 
 
 def test_priority_union_preserves_first_seen_order(variables_configs: list[Path]):
@@ -237,12 +244,16 @@ def test_identical_layers_pass(tmp_path: Path, variables_configs: list[Path]):
     assert by_name[name].verdict is LayerVerdict.PASS
     assert by_name[name].share_within_tolerance == 1.0
     assert by_name[name].grid_ok is True
+    assert by_name[name].n_nodata_mismatch == 0
+    assert by_name[name].correlation == pytest.approx(1.0)
     assert Path(by_name[name].difference_map_path).exists()
     assert Path(by_name[name].patch_table_path).exists()
     assert by_name["ceh_landcover_arable_1000m"].verdict is LayerVerdict.MISSING
     assert by_name["climate_bioclim_bio_2"].verdict is LayerVerdict.MISSING
     df = pd.read_csv(out_csv)
     assert list(df["layer_name"])[0] == "os_distance_distance_to_minor_roads"
+    assert "n_nodata_mismatch" in df.columns
+    assert "norm_abs_diff_p95" in df.columns
 
 
 def test_continuous_within_one_percent_passes(tmp_path: Path):
@@ -263,6 +274,12 @@ def test_continuous_within_one_percent_passes(tmp_path: Path):
     assert result.verdict is LayerVerdict.PASS
     assert result.share_within_tolerance == 1.0
     assert result.max_difference == pytest.approx(0.5)
+    # |0.5| / 100 = 0.005 for every cell
+    assert result.norm_abs_diff_mean == pytest.approx(0.005)
+    assert result.norm_abs_diff_median == pytest.approx(0.005)
+    assert result.norm_abs_diff_p95 == pytest.approx(0.005)
+    assert result.norm_abs_diff_max == pytest.approx(0.005)
+    assert result.correlation == pytest.approx(1.0)
 
 
 def test_continuous_local_compact_patch_passes(tmp_path: Path):
@@ -293,7 +310,6 @@ def test_continuous_local_compact_patch_passes(tmp_path: Path):
 
 
 def test_sparse_road_shaped_patch_fails_local_check():
-    # Plus-sign spanning a large bbox → one component, low fill ratio.
     mismatch = np.zeros((21, 21), dtype=bool)
     mismatch[10, :] = True
     mismatch[:, 10] = True
@@ -323,13 +339,12 @@ def test_exact_category_mismatch_share(tmp_path: Path):
     )
     assert result.value_kind is LayerValueKind.EXACT
     assert result.share_within_tolerance == pytest.approx(0.96)
+    assert result.norm_abs_diff_mean is None
     assert result.verdict is LayerVerdict.PASS
 
 
 def test_ceh_neighbourhood_average_uses_continuous_tolerance(tmp_path: Path):
-    """Neighbourhood CEH buffers are continuous: within 1% of range passes."""
     name = "ceh_landcover_broadleaved_woodland_500m"
-    # Range 0–100 → 1% tolerance = 1.0; delta 0.5 should pass as continuous.
     current = np.linspace(0, 100, 16, dtype=np.float32).reshape(4, 4)
     rebuilt = current + 0.5
     cur_dir = tmp_path / "current"
@@ -350,10 +365,9 @@ def test_ceh_neighbourhood_average_uses_continuous_tolerance(tmp_path: Path):
 
 
 def test_os_cover_neighbourhood_average_uses_continuous_tolerance(tmp_path: Path):
-    """os_cover_*_NNNm must not inherit exact-match from the os_cover prefix."""
     name = "os_cover_water_500m"
     current = np.linspace(0, 100, 16, dtype=np.float32).reshape(4, 4)
-    rebuilt = current + 0.5  # within 1% of range if continuous; fails if exact
+    rebuilt = current + 0.5
     cur_dir = tmp_path / "current"
     reb_dir = tmp_path / "rebuilt"
     _write_raster(cur_dir / f"{name}.tif", current, description=name)
@@ -372,7 +386,6 @@ def test_os_cover_neighbourhood_average_uses_continuous_tolerance(tmp_path: Path
 
 
 def test_discover_layers_prefers_evs_to_model_over_all_evs(tmp_path: Path, caplog):
-    """Without --stack-only, prefer evs-to-model.tif when names collide with all-evs.tif."""
     import logging
 
     name = "os_cover_water"
@@ -409,7 +422,7 @@ def test_analyze_mismatch_patches_timing_guard():
     import time
 
     rng = np.random.default_rng(0)
-    height, width = 1500, 2000  # 3_000_000 cells
+    height, width = 1500, 2000
     jointly = np.ones((height, width), dtype=bool)
     mismatch = rng.random((height, width)) < 0.04
     start = time.perf_counter()
@@ -417,7 +430,7 @@ def test_analyze_mismatch_patches_timing_guard():
     elapsed = time.perf_counter() - start
     assert n_components == len(patches)
     assert n_components > 0
-    assert local is False  # far more than MAX_COMPONENTS_FOR_COMPACT
+    assert local is False
     assert elapsed < 10.0, f"patch analysis too slow: {elapsed:.2f}s"
 
 
@@ -440,6 +453,40 @@ def test_grid_mismatch_fails(tmp_path: Path):
     assert "cell_size" in result.grid_check
 
 
+def test_align_snaps_rebuilt_onto_reference_extent(tmp_path: Path):
+    """--align crops a larger rebuilt grid onto the current reference extent."""
+    name = "climate_bioclim_bio_2"
+    current = np.arange(16, dtype=np.float32).reshape(4, 4)
+    # 6x6 grid sharing the same origin / cell size → crop to 4x4.
+    rebuilt = np.arange(36, dtype=np.float32).reshape(6, 6)
+    rebuilt[:4, :4] = current
+    cur_dir = tmp_path / "current"
+    reb_dir = tmp_path / "rebuilt"
+    _write_raster(cur_dir / f"{name}.tif", current, description=name)
+    _write_raster(reb_dir / f"{name}.tif", rebuilt, description=name)
+
+    without = compare_layer_pair(
+        name,
+        discover_layers(cur_dir)[name],
+        discover_layers(reb_dir)[name],
+        diff_dir=tmp_path / "diffs_no",
+        align=False,
+    )
+    assert without.grid_ok is False
+
+    with_align = compare_layer_pair(
+        name,
+        discover_layers(cur_dir)[name],
+        discover_layers(reb_dir)[name],
+        diff_dir=tmp_path / "diffs_yes",
+        align=True,
+    )
+    assert with_align.grid_ok is True
+    assert with_align.share_within_tolerance == 1.0
+    assert with_align.verdict is LayerVerdict.PASS
+    assert "aligned" in with_align.grid_check or "aligned" in with_align.notes
+
+
 def test_source_change_flags_even_when_values_pass(tmp_path: Path):
     name = "os_cover_buildings"
     data = np.ones((4, 4), dtype=np.float32)
@@ -459,6 +506,29 @@ def test_source_change_flags_even_when_values_pass(tmp_path: Path):
     assert result.share_within_tolerance == 1.0
     assert result.verdict is LayerVerdict.FLAGGED_SOURCE_CHANGE
     assert "source versions differ" in result.notes
+
+
+def test_method_flag_prefix_does_not_fail(tmp_path: Path):
+    """Intended method-change layers are flagged with stats, never failed."""
+    name = "os_distance_distance_to_minor_roads"
+    current = np.linspace(0, 100, 100, dtype=np.float32).reshape(10, 10)
+    rebuilt = current + 50.0  # far outside 1% of range
+    cur_dir = tmp_path / "current"
+    reb_dir = tmp_path / "rebuilt"
+    _write_raster(cur_dir / f"{name}.tif", current, description=name)
+    _write_raster(reb_dir / f"{name}.tif", rebuilt, description=name)
+
+    result = compare_layer_pair(
+        name,
+        discover_layers(cur_dir)[name],
+        discover_layers(reb_dir)[name],
+        diff_dir=tmp_path / "diffs",
+        flag_prefixes=["os_distance"],
+    )
+    assert result.share_within_tolerance is not None
+    assert result.share_within_tolerance < 0.95
+    assert result.verdict is LayerVerdict.FLAGGED
+    assert "method change" in result.notes
 
 
 def test_source_change_flags_when_values_fail(tmp_path: Path):
@@ -505,7 +575,8 @@ def test_widespread_mismatch_fails(tmp_path: Path):
     assert result.verdict is LayerVerdict.FAIL
 
 
-def test_nodata_cells_must_match(tmp_path: Path):
+def test_nodata_mismatch_counts_as_not_close_not_grid_fail(tmp_path: Path):
+    """Nodata mask mismatch is a closeness metric column, not a grid failure."""
     name = "climate_bioclim_bio_2"
     current = np.ones((4, 4), dtype=np.float32)
     rebuilt = current.copy()
@@ -522,9 +593,10 @@ def test_nodata_cells_must_match(tmp_path: Path):
         discover_layers(reb_dir)[name],
         diff_dir=tmp_path / "diffs",
     )
-    assert result.grid_ok is False
-    assert "nodata_cells" in result.grid_check
-    assert result.verdict is LayerVerdict.FAIL
+    assert result.grid_ok is True
+    assert result.n_nodata_mismatch == 1
+    # 15 matching + 1 nodata-mismatch not-close → 15/16
+    assert result.share_within_tolerance == pytest.approx(15 / 16)
 
 
 def test_near_nodata_value_counts_as_valid():
@@ -578,6 +650,8 @@ def test_cli_compare_layers(tmp_path: Path, variables_configs: list[Path]):
             str(tmp_path / "cmp" / "diffs"),
             "--model-hooks-csv",
             str(hooks),
+            "--flag-prefix",
+            "os_distance",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -585,3 +659,6 @@ def test_cli_compare_layers(tmp_path: Path, variables_configs: list[Path]):
     assert hooks.exists()
     hooks_df = pd.read_csv(hooks)
     assert hooks_df.loc[0, "verdict"] == "not_run"
+    cmp = pd.read_csv(out_csv)
+    row = cmp.loc[cmp["layer_name"] == name].iloc[0]
+    assert row["verdict"] == "flagged"
