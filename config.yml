@@ -28,6 +28,34 @@ spatial:
 # Coordinate reference system
 crs: "EPSG:27700" # OSGB1936 / British National Grid
 
+# Post-merge model EV stack (sdm data → evs-to-model.tif).
+# Layer clipping default ON follows the architecture review; disabling is out of
+# scope for #38. Limits are also copied into rebuild_metrics.json as build_settings.
+ev_stack:
+  selected_variables_csv: "data/ev_clusters_selected.csv"
+  multiscale:
+    groups:
+      - ceh_landcover
+      - os_cover_water
+      - vom_vegetation_height
+    windows_cells: [10, 20, 30]
+    resolution_m: 100
+  layer_clipping:
+    enabled: true
+    layers:
+      bgs_coast_distance_to_coast:
+        min: 0
+        max: 7000
+      os_distance_distance_to_buildings:
+        min: 0
+        max: 7000
+      os_distance_distance_to_major_roads:
+        min: 0
+        max: 7000
+      terrain_stats_curvature:
+        quantile_min: 0.05
+        quantile_max: 0.95
+
 # MLflow configuration
 mlflow:
   tracking_uri: "sqlite:///mlflow.db"

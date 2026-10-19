@@ -38,16 +38,17 @@ sdm pipeline -o data/evs-rebuild
 
 ### Rebuild environmental layers (`sdm data`)
 
-One command rebuilds every public-source EV layer (terrain, climate, land cover, VOM, coastal, OS, merge) into an **output folder you choose**:
+One command rebuilds every public-source EV layer (terrain, climate, land cover, VOM, coastal, OS, merge, model stack) into an **output folder you choose**:
 
 ```bash
+sdm data --plan
 sdm data --output-dir data/evs-rebuild
 sdm data -o data/evs-rebuild --cache-dir /tmp/evs-cache --fresh
 # optional smoke skips (registry names):
 sdm data -o /tmp/evs-smoke --skip ceh,coastal
 ```
 
-Download caches (WorldClim, OS tiles/parquets, Boundary-Line) go under `--cache-dir` or, by default, `<output-dir>/cache`. Pass `--fresh` so stale OS parquets cannot hide source changes. Full flag list: [docs/rebuild-ev-layers.md](docs/rebuild-ev-layers.md).
+`--plan` prints each step, source URL or local path, presence, and OS 100 km tiles (no downloads/writes; exits non-zero if the manual CEH LCM 2023 10 m GeoTIFF is missing). Download caches (WorldClim, OS tiles/parquets, Boundary-Line) go under `--cache-dir` or, by default, `<output-dir>/cache`. Pass `--fresh` so stale OS parquets cannot hide source changes. Full flag list: [docs/rebuild-ev-layers.md](docs/rebuild-ev-layers.md).
 
 **Write guards** — the command refuses destinations that would overwrite the live layer set:
 

@@ -21,6 +21,10 @@ from sdm.commands.data_preparation.environmental.generate_terrain_stats import (
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
     generate_vom_data,
 )
+from sdm.commands.data_preparation.processing.build_model_ev_stack import (
+    build_model_ev_stack,
+    build_settings_from_config,
+)
 from sdm.commands.data_preparation.processing.merge_ev_layers import (
     build_ev_dataset_inputs,
     merge_ev_layers,
@@ -39,6 +43,7 @@ from sdm.utils.ev_output_guards import (
     forbidden_output_summary,
     validate_ev_output_dir,
 )
+from sdm.utils.io import load_config
 from sdm.utils.rebuild_provenance import (
     DEFAULT_CEH_PATH,
     collect_rebuild_provenance,
@@ -106,12 +111,23 @@ def rebuild_environmental_layers(
     evs_dir.mkdir(parents=True, exist_ok=True)
     cache_root = Path(cache_dir) if cache_dir is not None else evs_dir / "cache"
     caches = rebuild_cache_layout(cache_root)
-    merged_output = evs_dir / "evs-to-model.tif"
+    merged_output = evs_dir / "all-evs.tif"
+    model_stack_output = evs_dir / "evs-to-model.tif"
     recorder = StepMetricsRecorder()
+    try:
+        config_ev_stack = load_config().get("ev_stack")
+    except FileNotFoundError:
+        config_ev_stack = None
+    build_settings = build_settings_from_config(config_ev_stack)
+    applied_build_settings: dict = build_settings
 
     logging.info("Rebuilding environmental layers into %s", evs_dir)
     logging.info("Cache directory: %s (fresh=%s)", cache_root, fresh)
     logging.info("Write guards: %s", forbidden_output_summary())
+    logging.info(
+        "Model-stack layer clipping enabled=%s (architecture review default ON)",
+        build_settings["layer_clipping"]["enabled"],
+    )
     if active != REBUILD_STEP_NAMES:
         logging.info("Active steps: %s", ", ".join(sorted(active)))
 
@@ -221,12 +237,26 @@ def rebuild_environmental_layers(
                 verbose=verbose,
             ),
         )
+
+        def _build_stack() -> Path:
+            nonlocal applied_build_settings
+            path, used_settings = build_model_ev_stack(
+                merged_output,
+                model_stack_output,
+                build_settings=build_settings,
+                verbose=verbose,
+            )
+            applied_build_settings = used_settings
+            return path
+
+        recorder.run("build_model_ev_stack", _build_stack)
     finally:
         if recorder.steps:
             metrics_paths = recorder.write(
                 evs_dir,
                 stem=metrics_stem,
                 extra={
+                    "build_settings": applied_build_settings,
                     "provenance": collect_rebuild_provenance(
                         ceh_data_path=ceh_data_path
                     ),
@@ -238,7 +268,7 @@ def rebuild_environmental_layers(
                 metrics_paths["csv"],
             )
 
-    logging.info("Environmental data generation complete: %s", merged_output)
+    logging.info("Environmental data generation complete: %s", model_stack_output)
     return evs_dir
 
 

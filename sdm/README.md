@@ -11,7 +11,7 @@ uv sync   # or: pip install -e .
 | Command | Purpose |
 |---------|---------|
 | `sdm setup` | Create the study boundary GeoJSON |
-| `sdm data -o DIR` | Rebuild and merge all EV layers into a caller-chosen folder; optional `--cache-dir` / `--fresh` (refuses `data/evs`, `inputs/`, `gs://`) |
+| `sdm data -o DIR` | Rebuild, merge (`all-evs.tif`), and build model stack (`evs-to-model.tif`); optional `--cache-dir` / `--fresh` / `--plan` (refuses `data/evs`, `inputs/`, `gs://`) |
 | `sdm background` | Generate background points for modelling |
 | `sdm train` | Train MaxEnt models and write model packages |
 | `sdm predict` | Apply trained models to the EV stack |
@@ -32,8 +32,9 @@ Run `sdm COMMAND --help` for options.
 # Study area
 sdm setup
 
-# Environmental variables (terrain, climate, land cover, coastal, OS, merge)
+# Environmental variables (terrain, climate, land cover, coastal, OS, merge, model stack)
 # Writes into a separate folder so the live data/evs set is not overwritten.
+sdm data --plan
 sdm data --output-dir data/evs-rebuild
 
 # Background points (optional)

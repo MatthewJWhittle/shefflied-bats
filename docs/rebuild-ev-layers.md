@@ -12,7 +12,8 @@ Alias: `sdm data -o <folder>`.
 
 | Flag | Purpose |
 |------|---------|
-| `--output-dir` / `-o` | **Required.** Local folder for rebuilt layers (string, so `gs://` is not collapsed by pathlib). |
+| `--output-dir` / `-o` | **Required** unless `--plan`. Local folder for rebuilt layers (string, so `gs://` is not collapsed by pathlib). |
+| `--plan` | Print each step, source URL or local path, whether that input is present, and OS 100 km tiles. No downloads, no writes. Exits non-zero if required CEH LCM 2023 10 m GeoTIFF is missing. |
 | `--cache-dir` | Download caches (WorldClim, OS tiles + parquets, Boundary-Line). Default: `<output-dir>/cache`. |
 | `--fresh` | Ignore stale OS parquet and Boundary-Line caches; rebuild them from sources under `--cache-dir`. |
 | `--skip` | Comma-separated registry step names to skip (e.g. `--skip ceh,coastal`). Valid names: `terrain`, `terrain_stats`, `climate`, `ceh`, `vom`, `coastal`, `os`, `merge`. Unknown names exit 2 and list valid names. |
@@ -24,12 +25,13 @@ Alias: `sdm data -o <folder>`.
 Examples:
 
 ```bash
+sdm data --plan
 sdm data --output-dir data/evs-rebuild
 sdm data -o /tmp/evs-smoke --skip ceh,coastal
 sdm data -o data/evs-rebuild --cache-dir /tmp/evs-cache --fresh
 ```
 
-This is the single documented entry point that rebuilds every environmental layer from the public/live sources wired in the data-prep modules, then merges them to `<folder>/evs-to-model.tif`.
+This is the single documented entry point that rebuilds every environmental layer from the public/live sources wired in the data-prep modules, merges them to `<folder>/all-evs.tif`, then builds `<folder>/evs-to-model.tif` (rename, layer clipping, selected subset, multiscale neighbourhoods).
 
 ## Ordered steps
 
@@ -43,8 +45,8 @@ flowchart TD
   vom["vom<br/>generate_vom_data → vom/"]
   coastal["coastal<br/>generate_coastal_distance → coastal_distance.tif"]
   os["os<br/>process_os_data → os-feature-cover.tif<br/>os-distance-to-feature.tif"]
-  merge["merge<br/>merge_ev_layers"]
-  out["evs-to-model.tif"]
+  merge["merge<br/>merge_ev_layers → all-evs.tif"]
+  stack["build_model_ev_stack → evs-to-model.tif"]
 
   sources --> terrain --> terrain_stats
   sources --> climate
@@ -58,19 +60,28 @@ flowchart TD
   vom --> merge
   coastal --> merge
   os --> merge
-  merge --> out
+  merge --> stack
 ```
 
-Execution order (same as the registry / `--skip` names):
+Execution order (registry / `--skip` names for steps 1–8; model stack always follows a successful merge):
 
 1. `terrain` — `generate_terrain_data` → `<folder>/terrain/`
 2. `terrain_stats` — `generate_terrain_stats` → `<folder>/terrain_stats.tif`
 3. `climate` — `generate_climate_data` → `<folder>/climate/` (WorldClim cache under `--cache-dir`/worldclim)
-4. `ceh` — `generate_ceh_lc_data` → `<folder>/landcover/` (unless skipped)
+4. `ceh` — `generate_ceh_lc_data` → `<folder>/landcover/` (unless skipped; **manual** CEH LCM 2023 10 m GeoTIFF)
 5. `vom` — `generate_vom_data` → `<folder>/vom/`
-6. `coastal` — `generate_coastal_distance` → `<folder>/coastal_distance.tif` (unless skipped; Boundary-Line under `--cache-dir`/boundary-line)
+6. `coastal` — `generate_coastal_distance` → `<folder>/coastal_distance.tif` (unless skipped; Boundary-Line under `--cache-dir`/boundary-line). Optional BGS GeoCoast shapefile for a like-for-like coastal layer: `data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp`
 7. `os` — `process_os_data` → `<folder>/os-feature-cover.tif`, `os-distance-to-feature.tif` (OS raw + parquets under `--cache-dir`)
-8. `merge` — `merge_ev_layers` → `<folder>/evs-to-model.tif`
+8. `merge` — `merge_ev_layers` → `<folder>/all-evs.tif`
+9. `build_model_ev_stack` → `<folder>/evs-to-model.tif` (notebook feature-engineering: rename, clip, subset, multiscale)
+
+### Model stack build settings
+
+Configured under `ev_stack` in `config.yml` and copied into `rebuild_metrics.json` as `build_settings`:
+
+- Selected variables: `data/ev_clusters_selected.csv` (`include == 1`)
+- Multiscale groups: `ceh_landcover`, `os_cover_water`, `vom_vegetation_height` at windows 10/20/30 cells (500/1000/1500 m at 100 m resolution). CEH 500/1000/1500 m neighbourhood averages use the 1%-of-range rule following the architecture review.
+- Layer clipping **ON** by default following the architecture review: coast / building / major-road distances 0–7000 m; curvature 5–95% quantiles. Disabling clipping is out of scope for #38.
 
 ## Write guards (refused destinations)
 
@@ -90,7 +101,7 @@ Each successful (or partially failed) run writes:
 - `<folder>/rebuild_metrics.json`
 - `<folder>/rebuild_metrics.csv`
 
-Columns / fields: `step`, `duration_seconds`, `peak_rss_bytes` (per-step process-tree peak via sampling), `status`, `error`.
+Columns / fields: `step`, `duration_seconds`, `peak_rss_bytes` (per-step process-tree peak via sampling), `status`, `error`. JSON also includes `build_settings` (selected CSV, multiscale windows, per-layer clip limits).
 
 The JSON file also records `provenance`: the git commit SHA and each source's product/version or local file date (CEH path mtime when present).
 
