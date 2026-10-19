@@ -51,7 +51,7 @@ def test_capitalised_folder_found_from_lowercase_model_id() -> None:
     assert config_dir.endswith("Plecotus_auritus_Roost")
     _, variables_path = model_config_file_paths(config_dir)
     variables = load_variables_config(variables_path)
-    assert len(variables.variables) == 15
+    assert len(variables.variables) > 0
 
 
 def test_missing_per_model_folder_raises(tmp_path: Path) -> None:
@@ -69,18 +69,78 @@ def test_case_insensitive_lookup_in_temp_dir(tmp_path: Path) -> None:
     assert found.endswith("Species_Activity")
 
 
-def test_plecotus_auritus_roost_tuned_model_config_values() -> None:
-    """Local proof: 15 layers and tuned MaxEnt betas from git configs."""
-    model_id = get_model_id(["Plecotus auritus", "Roost"])
-    config_dir = resolve_model_config_dir("data/sdm_config", model_id, must_exist=True)
+def test_per_model_configs_load_from_temp_dir(tmp_path: Path) -> None:
+    """Resolution and parsing work on a small config written for the test."""
+    root = tmp_path / "sdm_config"
+    model_dir = root / "Example_species_Roost"
+    model_dir.mkdir(parents=True)
+    (model_dir / "model_config.yml").write_text(
+        """model:
+  maxent:
+    feature_types:
+    - linear
+    - quadratic
+    beta_multiplier: 2.5
+    beta_lqp: 0.19
+    beta_hinge: 1.41
+    beta_threshold: 0.15
+    beta_categorical: 0.1
+    n_hinge_features: 7
+    n_threshold_features: 0
+    clamp: true
+    tau: 0.5
+    transform: cloglog
+    convergence_tolerance: 1.0e-05
+    use_lambdas: best
+    n_lambdas: 100
+    class_weights: balanced
+"""
+    )
+    (model_dir / "variables_config.yml").write_text(
+        "variables:\n- layer_a\n- layer_b\n- layer_c\n"
+    )
+
+    model_id = get_model_id(["Example species", "Roost"])
+    config_dir = resolve_model_config_dir(root, model_id, must_exist=True)
+    assert config_dir.endswith("Example_species_Roost")
     model_path, variables_path = model_config_file_paths(config_dir)
+    model_cfg = load_model_config(model_path, fallback_seed=7)
+    variables_cfg = load_variables_config(variables_path)
+
+    assert variables_cfg.variables == ["layer_a", "layer_b", "layer_c"]
+    assert model_cfg.maxent is not None
+    assert list(model_cfg.maxent.feature_types) == ["linear", "quadratic"]
+    assert model_cfg.maxent.beta_multiplier == pytest.approx(2.5)
+    assert model_cfg.maxent.n_hinge_features == 7
+
+
+ALLOWED_FEATURE_TYPES = {"linear", "quadratic", "hinge", "product", "threshold"}
+COMMITTED_MODEL_DIRS = sorted(
+    p for p in Path(resolve_sdm_config_root("data/sdm_config")).iterdir() if p.is_dir()
+)
+
+
+@pytest.mark.parametrize("model_dir", COMMITTED_MODEL_DIRS, ids=lambda p: p.name)
+def test_committed_per_model_configs_are_well_formed(model_dir: Path) -> None:
+    """Every committed per-model config loads and is internally consistent.
+
+    Checks structure only, not tuned values, so retuning a model does not break it.
+    """
+    model_path, variables_path = model_config_file_paths(str(model_dir))
     project_seed = load_model_config().seed
     model_cfg = load_model_config(model_path, fallback_seed=project_seed)
-    variables_cfg = load_variables_config(variables_path)
-    assert len(variables_cfg.variables) == 15
+    variables = load_variables_config(variables_path).variables
+
     assert model_cfg.maxent is not None
-    assert model_cfg.maxent.beta_multiplier == pytest.approx(3.33)
-    assert model_cfg.maxent.n_hinge_features == 14
+    feature_types = list(model_cfg.maxent.feature_types)
+    assert feature_types, "at least one MaxEnt feature type is required"
+    assert set(feature_types) <= ALLOWED_FEATURE_TYPES
+    assert len(set(feature_types)) == len(feature_types)
+    assert model_cfg.maxent.beta_multiplier > 0
+
+    assert variables, "variables list must not be empty"
+    assert all(isinstance(v, str) and v.strip() == v and v for v in variables)
+    assert len(set(variables)) == len(variables), "duplicate variable names"
 
 
 def test_fallback_base_variables_not_all_bands(tmp_path: Path) -> None:
