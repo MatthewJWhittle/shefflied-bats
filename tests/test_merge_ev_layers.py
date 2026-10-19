@@ -284,3 +284,53 @@ class TestMergeGridMatchesRelease:
             only=["merge"],
         )
         assert captured.get("boundary_buffer_m") == 7000
+
+
+class TestReprojectMatchesTemplate:
+    """Destination grid must lock to template shape+transform, not source size."""
+
+    def test_reproject_data_crops_source_that_extends_one_cell_south(self):
+        """Layer one row taller than the template must still match template shape.
+
+        Root cause (pre-fix): ``rio.reproject(..., transform=...)`` without
+        ``shape`` keeps the source height/width, so producers disagree and the
+        merge union grows an empty edge row/column.
+        """
+        from affine import Affine
+        from rasterio.enums import Resampling
+
+        from sdm.raster.utils import reproject_data
+
+        resolution = 100.0
+        # Template 3×4 (rows×cols); NW origin (0, 300) → bounds (0, 0, 400, 300).
+        template_transform = Affine(resolution, 0.0, 0.0, 0.0, -resolution, 300.0)
+        template_bounds = (0.0, 0.0, 400.0, 300.0)
+        template_shape = (3, 4)
+
+        # Same transform origin but four rows (one cell south of the template).
+        source = xr.DataArray(
+            np.ones((4, 4), dtype=np.float32),
+            dims=("y", "x"),
+            coords={
+                "y": np.array([250.0, 150.0, 50.0, -50.0]),
+                "x": np.array([50.0, 150.0, 250.0, 350.0]),
+            },
+            name="layer",
+        )
+        source = source.rio.write_crs("EPSG:27700").rio.write_transform(
+            Affine(resolution, 0.0, 0.0, 0.0, -resolution, 300.0)
+        )
+
+        out = reproject_data(
+            source,
+            crs="EPSG:27700",
+            transform=template_transform,
+            resolution=resolution,
+            resampling=Resampling.nearest,
+            bounds=template_bounds,
+        )
+
+        assert out.rio.shape == template_shape, (
+            f"expected template shape {template_shape}, got {out.rio.shape}"
+        )
+        assert out.rio.transform() == template_transform
