@@ -69,18 +69,30 @@ class StepMetricsRecorder:
         )
         return result
 
-    def write(self, output_dir: Path, *, stem: str = "rebuild_metrics") -> dict[str, Path]:
-        """Write JSON and CSV metrics next to rebuild outputs."""
+    def write(
+        self,
+        output_dir: Path,
+        *,
+        stem: str = "rebuild_metrics",
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Path]:
+        """Write JSON and CSV metrics next to rebuild outputs.
+
+        ``extra`` is merged into the JSON payload (e.g. provenance or
+        ``build_settings``). CSV remains step rows only.
+        """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         json_path = output_dir / f"{stem}.json"
         csv_path = output_dir / f"{stem}.csv"
-        payload = {
+        payload: dict[str, Any] = {
             "steps": [asdict(step) for step in self.steps],
             "total_duration_seconds": round(
                 sum(step.duration_seconds for step in self.steps), 6
             ),
         }
+        if extra:
+            payload.update(extra)
         json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(

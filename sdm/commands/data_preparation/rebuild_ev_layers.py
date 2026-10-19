@@ -33,6 +33,10 @@ from sdm.utils.ev_output_guards import (
     forbidden_output_summary,
     validate_ev_output_dir,
 )
+from sdm.utils.rebuild_provenance import (
+    DEFAULT_CEH_PATH,
+    collect_rebuild_provenance,
+)
 from sdm.utils.step_metrics import StepMetricsRecorder
 
 
@@ -60,10 +64,7 @@ def rebuild_environmental_layers(
     skip_coastal: bool = False,
     cache_dir: Path | str | None = None,
     fresh: bool = False,
-    ceh_data_path: Path = Path(
-        "data/raw/big-files/CEH/data/"
-        "7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif"
-    ),
+    ceh_data_path: Path = DEFAULT_CEH_PATH,
     buffer_distance_m: float = 7000,
     config_evs: str | Path | None = None,
     config_ev_tiff: str | Path | None = None,
@@ -195,7 +196,15 @@ def rebuild_environmental_layers(
         )
     finally:
         if recorder.steps:
-            metrics_paths = recorder.write(evs_dir, stem=metrics_stem)
+            metrics_paths = recorder.write(
+                evs_dir,
+                stem=metrics_stem,
+                extra={
+                    "provenance": collect_rebuild_provenance(
+                        ceh_data_path=ceh_data_path
+                    ),
+                },
+            )
             logging.info(
                 "Rebuild metrics written to %s and %s",
                 metrics_paths["json"],
@@ -207,6 +216,7 @@ def rebuild_environmental_layers(
 
 
 __all__ = [
+    "DEFAULT_CEH_PATH",
     "ForbiddenEvOutputError",
     "forbidden_output_summary",
     "rebuild_cache_layout",

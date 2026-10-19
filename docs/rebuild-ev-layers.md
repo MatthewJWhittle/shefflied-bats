@@ -17,6 +17,7 @@ Alias: `sdm data -o <folder>`.
 | `--fresh` | Ignore stale OS parquet and Boundary-Line caches; rebuild them from sources under `--cache-dir`. |
 | `--skip-ceh` | Skip CEH land cover (manual GeoTIFF). |
 | `--skip-coastal` | Skip coastal distance. |
+| `--ceh-path` | Manual CEH LCM 2023 10 m GeoTIFF (default: git-ignored path under `data/raw/big-files/CEH/`). |
 | `--no-live-download` | Offline mode for live OS / Boundary-Line downloads. |
 | `--verbose` | Verbose logging. |
 
@@ -60,6 +61,8 @@ Each successful (or partially failed) run writes:
 - `<folder>/rebuild_metrics.csv`
 
 Columns / fields: `step`, `duration_seconds`, `peak_rss_bytes` (per-step process-tree peak via sampling), `status`, `error`.
+
+The JSON file also records `provenance`: the git commit SHA and each source's product/version or local file date (CEH path mtime when present).
 
 ## Using the rebuilt stack
 

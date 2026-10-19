@@ -46,6 +46,49 @@ def setup(
     boundary_gdf.to_file(boundary_path, driver="GeoJSON")
     logging.info(f"Study boundary saved to: {boundary_path}")
 
+def run_data_rebuild(
+    output_dir: str,
+    *,
+    cache_dir: Optional[str] = None,
+    fresh: bool = False,
+    live_download: bool = True,
+    skip_ceh: bool = False,
+    skip_coastal: bool = False,
+    ceh_path: Optional[Path] = None,
+    verbose: bool = False,
+) -> Path:
+    """Core EV rebuild used by ``sdm data`` and ``sdm pipeline``.
+
+    Plain bool/Path defaults (not ``typer.Option``) so callers that invoke this
+    as a Python function cannot accidentally treat OptionInfo as truthy and
+    skip CEH or coastal steps.
+    """
+    from sdm.commands.data_preparation.rebuild_ev_layers import (
+        ForbiddenEvOutputError,
+        rebuild_environmental_layers,
+    )
+    from sdm.utils.rebuild_provenance import DEFAULT_CEH_PATH
+
+    try:
+        return rebuild_environmental_layers(
+            output_dir,
+            boundary_path=Path(PROJECT_CONFIG.paths.boundary),
+            resolution=PROJECT_CONFIG.spatial.resolution,
+            live_download=live_download,
+            skip_ceh=skip_ceh,
+            skip_coastal=skip_coastal,
+            cache_dir=Path(cache_dir) if cache_dir else None,
+            fresh=fresh,
+            ceh_data_path=Path(ceh_path) if ceh_path is not None else DEFAULT_CEH_PATH,
+            config_evs=PROJECT_CONFIG.paths.evs,
+            config_ev_tiff=PROJECT_CONFIG.paths.ev_tiff,
+            verbose=verbose,
+        )
+    except ForbiddenEvOutputError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+
 @app.command()
 def data(
     output_dir: str = typer.Option(
@@ -86,33 +129,28 @@ def data(
         "--skip-coastal",
         help="Skip coastal distance layer. Use for live-source smoke tests.",
     ),
+    ceh_path: Optional[Path] = typer.Option(
+        None,
+        "--ceh-path",
+        help=(
+            "Path to the manual CEH LCM 2023 10 m GeoTIFF. "
+            "Defaults to the git-ignored raw CEH path under data/raw/big-files/CEH/."
+        ),
+    ),
     verbose: bool = False,
 ) -> None:
     """Rebuild all environmental layers into a caller-chosen output folder."""
-    from sdm.commands.data_preparation.rebuild_ev_layers import (
-        ForbiddenEvOutputError,
-        rebuild_environmental_layers,
-    )
-
     setup_logging(verbose=verbose)
-
-    try:
-        rebuild_environmental_layers(
-            output_dir,
-            boundary_path=Path(PROJECT_CONFIG.paths.boundary),
-            resolution=PROJECT_CONFIG.spatial.resolution,
-            live_download=live_download,
-            skip_ceh=skip_ceh,
-            skip_coastal=skip_coastal,
-            cache_dir=Path(cache_dir) if cache_dir else None,
-            fresh=fresh,
-            config_evs=PROJECT_CONFIG.paths.evs,
-            config_ev_tiff=PROJECT_CONFIG.paths.ev_tiff,
-            verbose=verbose,
-        )
-    except ForbiddenEvOutputError as exc:
-        typer.secho(str(exc), err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=2) from exc
+    run_data_rebuild(
+        output_dir,
+        cache_dir=cache_dir,
+        fresh=fresh,
+        live_download=live_download,
+        skip_ceh=skip_ceh,
+        skip_coastal=skip_coastal,
+        ceh_path=ceh_path,
+        verbose=verbose,
+    )
 
 @app.command()
 def background(
@@ -493,14 +531,17 @@ def pipeline(
     
     logging.info("Starting complete SDM pipeline...")
     
-    # Run all steps
+    # Run all steps via core helpers (not Typer command callables) so OptionInfo
+    # defaults cannot be treated as true and silently skip CEH / coastal.
     if generate_background:
         background(verbose=verbose)
-    data(
+    run_data_rebuild(
         output_dir=output_dir,
         cache_dir=cache_dir,
         fresh=fresh,
         live_download=True,
+        skip_ceh=False,
+        skip_coastal=False,
         verbose=verbose,
     )
     rebuilt_ev = str(Path(output_dir) / "evs-to-model.tif")

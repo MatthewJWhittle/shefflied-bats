@@ -60,6 +60,28 @@ def test_skipton_bbox_tiles() -> None:
     assert osgb_100km_tiles_for_bbox(*SKIPTON_AOI_BBOX) == ["SD", "SE"]
 
 
+def test_bbox_spanning_3x3_tiles_returns_all_nine() -> None:
+    """Corner-only selection misses interior tiles; intersection must return all 9.
+
+    OSGB bbox covering e100 in {2,3,4} and n100 in {3,4,5} (300 km × 300 km).
+    """
+    bbox = (200_000.0, 300_000.0, 499_999.0, 599_999.0)
+    tiles = osgb_100km_tiles_for_bbox(*bbox)
+    assert tiles == ["NX", "NY", "NZ", "SC", "SD", "SE", "SH", "SJ", "SK"]
+    assert len(tiles) == 9
+    # Corners alone would only yield the four grid corners of that block.
+    corner_only = sorted(
+        {
+            osgb_100km_tile(bbox[0], bbox[1]),
+            osgb_100km_tile(bbox[0], bbox[3]),
+            osgb_100km_tile(bbox[2], bbox[1]),
+            osgb_100km_tile(bbox[2], bbox[3]),
+        }
+    )
+    assert corner_only == ["NX", "NZ", "SH", "SK"]
+    assert set(corner_only) < set(tiles)
+
+
 def test_list_downloads_uses_api_key_header() -> None:
     session = MagicMock()
     response = MagicMock()
