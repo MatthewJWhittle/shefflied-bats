@@ -235,6 +235,7 @@ def rebuild_environmental_layers(
                 ),
                 boundary_path=boundary_path,
                 output_path=merged_output,
+                boundary_buffer_m=buffer_distance_m,
                 verbose=verbose,
             ),
         )

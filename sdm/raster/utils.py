@@ -272,6 +272,11 @@ def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[
     """
     Construct a transform based on the bounds and resolution.
 
+    Aligns the origin down/left to the resolution grid and sizes the grid by
+    truncating partial cells on the max edges (floor), matching the release EV
+    grid. Expanding max edges with a ceil-style step added an extra row and
+    column whenever the buffered AOI was not already resolution-aligned.
+
     Parameters:
     bounds (tuple): The bounds of the boundary.
     resolution (float): The spatial resolution.
@@ -279,20 +284,15 @@ def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[
     Returns:
     tuple: A tuple containing the transform and the bounds (shifted to be a factor of the resolution).
     """
-    # get the left and the top
     xmin, ymin, xmax, ymax = bounds
-    # move the left to the left so it is a factor of the resolution
+    resolution = float(resolution)
+    # Floor-align mins; size by truncating partial cells on the max edges.
     xmin = xmin - (xmin % resolution)
-    # move the top to the top so it is a factor of the resolution
-    ymax = ymax + (resolution - (ymax % resolution))
-    # move the right to the right so it is a factor of the resolution
-    xmax = xmax + (resolution - (xmax % resolution))
-    # move the bottom to the bottom so it is a factor of the resolution
     ymin = ymin - (ymin % resolution)
-
-    # calculate the widht and height
     width = int((xmax - xmin) / resolution)
     height = int((ymax - ymin) / resolution)
+    xmax = xmin + width * resolution
+    ymax = ymin + height * resolution
 
     transform = from_bounds(
         west=xmin, south=ymin, east=xmax, north=ymax, width=width, height=height
