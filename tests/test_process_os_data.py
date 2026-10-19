@@ -1,3 +1,5 @@
+import time
+
 import pytest
 import geopandas as gpd
 import pandas as pd
@@ -222,6 +224,39 @@ def test_strtree_agrees_with_union_on_random_synthetic():
     assert tree_dist.shape == union_dist.shape == (200,)
     assert np.isfinite(tree_dist).all()
     assert np.allclose(tree_dist, union_dist, rtol=0, atol=1e-6)
+
+
+def test_nearest_distances_strtree_timing_guard():
+    """Large synthetic case stays fast — guards against regressing to union+distance.
+
+    At ~50k query cells × 50k polygons the STRtree path finishes well under 10 s;
+    a union-based path would take far longer and fail this budget.
+    """
+    rng = np.random.default_rng(7)
+    n_cells = 50_000
+    n_polys = 50_000
+    extent = 20_000.0
+    side = 20.0
+
+    query = [
+        Point(float(x), float(y))
+        for x, y in rng.uniform(0, extent, size=(n_cells, 2))
+    ]
+    features = [
+        Polygon([(x, y), (x + side, y), (x + side, y + side), (x, y + side)])
+        for x, y in rng.uniform(0, extent, size=(n_polys, 2))
+    ]
+
+    t0 = time.perf_counter()
+    distances = nearest_distances_strtree(query, features)
+    elapsed = time.perf_counter() - t0
+
+    assert distances.shape == (n_cells,)
+    assert np.isfinite(distances).all()
+    assert elapsed < 10.0, (
+        f"nearest_distances_strtree took {elapsed:.2f}s for {n_cells}×{n_polys}; "
+        "expected under 10s (union+distance would be much slower)"
+    )
 
 
 @pytest.mark.parametrize("resolution", [1, 5])
