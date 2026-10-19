@@ -117,6 +117,123 @@ def test_run_data_rebuild_parses_skip_string(tmp_path: Path) -> None:
     assert REBUILD_STEP_NAMES >= captured["skip"]
 
 
+def test_rebuild_only_merge_uses_existing_ceh_and_coastal(tmp_path, monkeypatch):
+    """``--only merge`` must still merge CEH/coastal files already in the folder.
+
+    Root cause: skip_ceh/skip_coastal tracked ``name not in active``, so
+    ``--only merge`` omitted those layers, overwrote all-evs.tif without them,
+    then build_model_ev_stack raised KeyError on selected variables.
+    """
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "evs-rebuild"
+    captured_inputs: dict = {}
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    def _capture_inputs(*args, **kwargs):
+        captured_inputs["args"] = args
+        captured_inputs["kwargs"] = kwargs
+        return ["terrain=x.tif"]
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    for name in (
+        "generate_terrain_data",
+        "generate_terrain_stats",
+        "generate_climate_data",
+        "generate_ceh_lc_data",
+        "generate_vom_data",
+        "generate_coastal_distance",
+        "process_os_data",
+        "merge_ev_layers",
+    ):
+        monkeypatch.setattr(mod, name, _ok)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", _capture_inputs)
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        only=["merge"],
+    )
+
+    kwargs = captured_inputs.get("kwargs", {})
+    assert kwargs.get("skip_ceh") is False, (
+        "--only merge must include existing CEH outputs, not skip them"
+    )
+    assert kwargs.get("skip_coastal") is False, (
+        "--only merge must include existing coastal outputs, not skip them"
+    )
+
+
+def test_rebuild_explicit_skip_still_omits_ceh_from_merge(tmp_path, monkeypatch):
+    """``--skip ceh,coastal`` may omit those layers from merge inputs."""
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "evs-rebuild"
+    captured_inputs: dict = {}
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    def _capture_inputs(*args, **kwargs):
+        captured_inputs["kwargs"] = kwargs
+        return ["terrain=x.tif"]
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    for name in (
+        "generate_terrain_data",
+        "generate_terrain_stats",
+        "generate_climate_data",
+        "generate_ceh_lc_data",
+        "generate_vom_data",
+        "generate_coastal_distance",
+        "process_os_data",
+        "merge_ev_layers",
+    ):
+        monkeypatch.setattr(mod, name, _ok)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", _capture_inputs)
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        skip=["ceh", "coastal"],
+    )
+    kwargs = captured_inputs.get("kwargs", {})
+    assert kwargs.get("skip_ceh") is True
+    assert kwargs.get("skip_coastal") is True
+
+
 def test_rebuild_only_step_skips_model_stack(tmp_path, monkeypatch):
     """--only <step> must not build the model stack (exit cleanly after the step)."""
     from sdm.commands.data_preparation import rebuild_ev_layers as mod

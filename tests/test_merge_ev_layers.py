@@ -101,6 +101,61 @@ class TestMergeEvLayersWorkflow:
                 output_path=Path("output.tif"),
                 boundary_path=Path("boundary.geojson")
             )
+
+    def test_merge_fails_before_writing_when_input_missing(self, tmp_path):
+        """Missing merge inputs must raise before overwriting all-evs.tif.
+
+        Root cause: missing layers were skipped with a warning, so a partial
+        merge could replace an existing all-evs.tif before the model stack
+        failed with KeyError.
+        """
+        from affine import Affine
+
+        boundary_file = tmp_path / "boundary.geojson"
+        boundary_file.write_text(
+            '{"type":"FeatureCollection","features":[]}',
+            encoding="utf-8",
+        )
+        present = tmp_path / "present.tif"
+        xr.DataArray(
+            np.ones((2, 2), dtype=np.float32),
+            dims=("y", "x"),
+            coords={"y": [1.0, 0.0], "x": [0.0, 1.0]},
+            name="terrain",
+        ).rio.write_crs("EPSG:27700").rio.write_transform(
+            Affine(1.0, 0.0, 0.0, 0.0, -1.0, 2.0)
+        ).rio.to_raster(present)
+        missing = tmp_path / "missing-ceh.tif"
+        output_path = tmp_path / "all-evs.tif"
+        output_path.write_text("prior-merge-product", encoding="utf-8")
+        prior = output_path.read_text(encoding="utf-8")
+
+        mock_boundary = Mock()
+        mock_boundary.crs = "EPSG:27700"
+        mock_boundary.union_all.return_value = Mock()
+
+        with patch(
+            "sdm.commands.data_preparation.processing.merge_ev_layers.load_boundary_and_transform",
+            return_value=(
+                mock_boundary,
+                Affine(100.0, 0.0, 0.0, 0.0, -100.0, 200.0),
+                (0.0, 0.0, 200.0, 200.0),
+                {"resolution": 100},
+            ),
+        ), pytest.raises(FileNotFoundError, match="missing-ceh|Cannot merge"):
+            merge_ev_layers(
+                dataset_inputs=[
+                    f"terrain={present}",
+                    f"ceh_landcover={missing}",
+                ],
+                output_path=output_path,
+                boundary_path=boundary_file,
+                verbose=False,
+            )
+
+        assert output_path.read_text(encoding="utf-8") == prior, (
+            "all-evs.tif must not be overwritten when merge inputs are missing"
+        )
     
     def test_merge_ev_layers_basic_workflow(self, tmp_path):
         """Test basic workflow with mocked dependencies."""
