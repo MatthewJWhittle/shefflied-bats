@@ -76,6 +76,18 @@ def test_rebuild_metrics_include_provenance_on_orchestrator(
         "build_ev_dataset_inputs",
         lambda *a, **k: [],
     )
+    stub_settings = {
+        "layer_clipping": {"enabled": True, "layers": {}, "applied": {}},
+    }
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(
+        mod, "build_settings_from_config", lambda *_a, **_k: stub_settings
+    )
+    monkeypatch.setattr(mod, "load_config", lambda: {})
 
     with patch.object(mod, "collect_rebuild_provenance", wraps=collect_rebuild_provenance):
         mod.rebuild_environmental_layers(
@@ -88,6 +100,7 @@ def test_rebuild_metrics_include_provenance_on_orchestrator(
     assert "provenance" in metrics
     assert metrics["provenance"]["sources"]["ceh_land_cover"]["product"]
     assert "git_commit" in metrics["provenance"]
+    assert "build_settings" in metrics
 
 
 def test_gitignore_covers_default_rebuild_output() -> None:
