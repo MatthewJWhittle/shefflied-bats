@@ -52,9 +52,12 @@ def test_calling_data_command_as_function_would_skip_without_core() -> None:
     sig = inspect.signature(data)
     skip_default = sig.parameters["skip"].default
     only_default = sig.parameters["only"].default
+    plan_default = sig.parameters["plan"].default
     assert bool(skip_default) is True
     assert bool(only_default) is True
+    assert bool(plan_default) is True
 
     core_sig = inspect.signature(run_data_rebuild)
     assert core_sig.parameters["skip"].default is None
     assert core_sig.parameters["only"].default is None
+    assert "plan" not in core_sig.parameters

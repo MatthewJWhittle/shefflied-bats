@@ -146,3 +146,33 @@ def test_cli_plan_respects_ceh_path(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["data", "--plan", "--ceh-path", str(ceh)])
     assert result.exit_code == 0, result.output
     assert str(ceh) in result.output
+
+
+def test_plan_prints_all_tiles_for_3x3_bbox(tmp_path: Path, monkeypatch) -> None:
+    """``--plan`` must list every intersecting 100 km tile, not only corners."""
+    boundary = tmp_path / "boundary.geojson"
+    gdf = gpd.GeoDataFrame(
+        {"id": [1]},
+        geometry=[box(200_000.0, 300_000.0, 499_999.0, 599_999.0)],
+        crs="EPSG:27700",
+    )
+    gdf.to_file(boundary, driver="GeoJSON")
+    ceh = tmp_path / "ceh.tif"
+    ceh.write_bytes(b"fake")
+
+    expected = ["NX", "NY", "NZ", "SC", "SD", "SE", "SH", "SJ", "SK"]
+    _steps, tiles, _notes = build_data_plan(
+        boundary_path=boundary,
+        ceh_data_path=ceh,
+        buffer_m=0,
+    )
+    assert tiles == expected
+
+    runner = CliRunner()
+    monkeypatch.setattr("sdm.cli.PROJECT_CONFIG.paths.boundary", str(boundary))
+    monkeypatch.setattr("sdm.cli.PROJECT_CONFIG.spatial.study_area_buffer", 0)
+    result = runner.invoke(app, ["data", "--plan", "--ceh-path", str(ceh)])
+    assert result.exit_code == 0, result.output
+    for tile in expected:
+        assert tile in result.output
+    assert "OS 100 km tiles" in result.output

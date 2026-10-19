@@ -105,7 +105,15 @@ def _all_sdm_config_variables() -> set[str]:
     return needed
 
 
+def test_sdm_config_has_eighteen_variables_configs() -> None:
+    """Per-model feature lists live in 18 ``variables_config.yml`` files (not 33)."""
+    paths = sorted(Path("data/sdm_config").glob("*/variables_config.yml"))
+    assert len(paths) == 18
+
+
 def test_synthetic_stack_covers_all_sdm_config_variables(tmp_path: Path) -> None:
+    """Rebuilt bands cover every variable across the 18 per-model configs."""
+
     selected_csv = Path("data/ev_clusters_selected.csv")
     selected = load_selected_variable_names(selected_csv)
     # Include curvature (clipped then dropped by include=0) plus one alias form.
