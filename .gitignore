@@ -167,6 +167,9 @@ data/raw/ons-boundaries/*
 data/raw/boundary-line/*
 test/data/test_cache/*
 
+# EV rebuild outputs and default download cache (<output-dir>/cache)
+data/evs-rebuild/
+
 
 # MLFLOW
 mlruns/*

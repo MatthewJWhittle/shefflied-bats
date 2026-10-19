@@ -18,7 +18,12 @@ def process_os_data(
     boundary_path: Path,
     buffer_distance: float = 7000,
     load_from_shp: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    *,
+    parquet_dir: Optional[Path] = None,
+    raw_dir: Optional[Path] = None,
+    overwrite_cache: bool = False,
+    live_download: bool = True,
 ) -> Tuple[Path, Path]:
     """Process Ordnance Survey data to generate environmental variables.
 
@@ -32,6 +37,10 @@ def process_os_data(
         buffer_distance: Distance in meters to buffer the boundary.
         load_from_shp: Whether to load OS data from shapefiles instead of cached parquet files.
         verbose: Enable verbose logging.
+        parquet_dir: Directory for OS parquet cache (default: data/processed/os-data).
+        raw_dir: Directory for OS Vector Map shapefile tiles.
+        overwrite_cache: Rebuild parquets even when cached files exist.
+        live_download: Download missing OS tiles when needed.
 
     Returns:
         Tuple containing:
@@ -64,7 +73,12 @@ def process_os_data(
     # Load OS data
     datasets = ["Building", "Water", "Woodland", "Road"]
     parquet_paths = generate_parquets(
-        datasets, boundary=box(*bounds), overwrite=load_from_shp
+        datasets,
+        dir=str(parquet_dir) if parquet_dir is not None else "data/processed/os-data",
+        raw_dir=raw_dir if raw_dir is not None else "data/raw/big-files/os-vector-map",
+        boundary=box(*bounds),
+        overwrite=load_from_shp or overwrite_cache,
+        live_download=live_download,
     )
     os_data = {
         name: gpd.read_parquet(path) for name, path in zip(datasets, parquet_paths)

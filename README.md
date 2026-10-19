@@ -22,7 +22,7 @@ Paths default from `config.yml` (override per command as needed).
 
 ```bash
 sdm setup          # study boundary (separate from pipeline)
-sdm data           # build and merge environmental layers
+sdm data -o data/evs-rebuild   # rebuild every EV layer into a caller-chosen folder
 sdm background     # optional — training can create these on the fly
 sdm train          # one model package per species × activity
 sdm predict        # suitability surfaces (Cloud Optimised GeoTIFF / COG, project coordinate reference system / CRS)
@@ -33,8 +33,32 @@ sdm export-rasters data/sdm_predictions/prediction_*.tif \
 Or run data → train → predict → visualise in one go (after `sdm setup`):
 
 ```bash
-sdm pipeline
+sdm pipeline -o data/evs-rebuild
 ```
+
+### Rebuild environmental layers (`sdm data`)
+
+One command rebuilds every public-source EV layer (terrain, climate, land cover, VOM, coastal, OS, merge) into an **output folder you choose**:
+
+```bash
+sdm data --output-dir data/evs-rebuild
+sdm data -o data/evs-rebuild --cache-dir /tmp/evs-cache --fresh
+# optional smoke skips (registry names):
+sdm data -o /tmp/evs-smoke --skip ceh,coastal
+```
+
+Download caches (WorldClim, OS tiles/parquets, Boundary-Line) go under `--cache-dir` or, by default, `<output-dir>/cache`. Pass `--fresh` so stale OS parquets cannot hide source changes. Full flag list: [docs/rebuild-ev-layers.md](docs/rebuild-ev-layers.md).
+
+**Write guards** — the command refuses destinations that would overwrite the live layer set:
+
+| Refused | Example |
+|---------|---------|
+| Current EV directory | `data/evs` (and anything under it) |
+| Any path with an `inputs` segment | `inputs/…`, `/mirror/inputs/data/evs` |
+| Cloud URIs | `gs://…` (including bucket `…/inputs`; taken as a string so pathlib cannot collapse `gs://`) |
+| Under `INPUT_DATA_ROOT` | local mirror of the published inputs tree |
+
+Each run writes `rebuild_metrics.json` and `rebuild_metrics.csv` next to the layers (wall time and per-step peak RSS, plus git commit and source version/date provenance). Use `--ceh-path` when the CEH LCM GeoTIFF is not at the default git-ignored location. Point train/predict at the rebuilt stack explicitly, e.g. `--ev-file data/evs-rebuild/evs-to-model.tif`.
 
 Full command list: [sdm/README.md](sdm/README.md).
 

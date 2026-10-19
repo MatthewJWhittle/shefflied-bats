@@ -46,124 +46,131 @@ def setup(
     boundary_gdf.to_file(boundary_path, driver="GeoJSON")
     logging.info(f"Study boundary saved to: {boundary_path}")
 
+def run_data_rebuild(
+    output_dir: str,
+    *,
+    cache_dir: Optional[str] = None,
+    fresh: bool = False,
+    live_download: bool = True,
+    skip: Optional[str] = None,
+    only: Optional[str] = None,
+    ceh_path: Optional[Path] = None,
+    verbose: bool = False,
+) -> Path:
+    """Core EV rebuild used by ``sdm data`` and ``sdm pipeline``.
+
+    Plain defaults (not ``typer.Option``) so callers that invoke this as a
+    Python function cannot accidentally treat OptionInfo as truthy and skip
+    steps. ``skip`` / ``only`` are comma-separated registry step names.
+    """
+    from sdm.commands.data_preparation.rebuild_ev_layers import (
+        ForbiddenEvOutputError,
+        rebuild_environmental_layers,
+    )
+    from sdm.commands.data_preparation.rebuild_steps import (
+        UnknownRebuildStepError,
+        parse_step_name_list,
+        resolve_active_steps,
+    )
+    from sdm.utils.rebuild_provenance import DEFAULT_CEH_PATH
+
+    try:
+        skip_steps = parse_step_name_list(skip)
+        only_steps = parse_step_name_list(only)
+        resolve_active_steps(skip=skip_steps, only=only_steps)
+    except (UnknownRebuildStepError, ValueError) as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        return rebuild_environmental_layers(
+            output_dir,
+            boundary_path=Path(PROJECT_CONFIG.paths.boundary),
+            resolution=PROJECT_CONFIG.spatial.resolution,
+            live_download=live_download,
+            skip=skip_steps,
+            only=only_steps,
+            cache_dir=Path(cache_dir) if cache_dir else None,
+            fresh=fresh,
+            ceh_data_path=Path(ceh_path) if ceh_path is not None else DEFAULT_CEH_PATH,
+            config_evs=PROJECT_CONFIG.paths.evs,
+            config_ev_tiff=PROJECT_CONFIG.paths.ev_tiff,
+            verbose=verbose,
+        )
+    except ForbiddenEvOutputError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+
 @app.command()
 def data(
-    live_download: bool = True,
-    skip_ceh: bool = typer.Option(
-        False,
-        "--skip-ceh",
-        help="Skip CEH land cover (manual GeoTIFF). Use for live-source smoke tests.",
+    output_dir: str = typer.Option(
+        ...,
+        "--output-dir",
+        "-o",
+        help=(
+            "Local directory for rebuilt EV layers (required; taken as a string so "
+            "gs:// URIs are not collapsed by pathlib). "
+            "Refuses data/evs, paths under inputs/, INPUT_DATA_ROOT, "
+            "and gs://…/inputs URIs so the live layer set is not overwritten."
+        ),
     ),
-    skip_coastal: bool = typer.Option(
+    cache_dir: Optional[str] = typer.Option(
+        None,
+        "--cache-dir",
+        help=(
+            "Directory for download caches (WorldClim, OS tiles/parquets, "
+            "Boundary-Line). Defaults to <output-dir>/cache."
+        ),
+    ),
+    fresh: bool = typer.Option(
         False,
-        "--skip-coastal",
-        help="Skip coastal distance layer. Use for live-source smoke tests.",
+        "--fresh",
+        help=(
+            "Ignore stale OS parquet and Boundary-Line caches and rebuild them "
+            "from sources under --cache-dir."
+        ),
+    ),
+    live_download: bool = True,
+    skip: Optional[str] = typer.Option(
+        None,
+        "--skip",
+        help=(
+            "Comma-separated rebuild step names to skip "
+            "(registry: terrain,terrain_stats,climate,ceh,vom,coastal,os,merge). "
+            "Example: --skip ceh,coastal"
+        ),
+    ),
+    only: Optional[str] = typer.Option(
+        None,
+        "--only",
+        help=(
+            "Comma-separated rebuild step names to run exclusively "
+            "(same registry as --skip). Mutually exclusive with --skip."
+        ),
+    ),
+    ceh_path: Optional[Path] = typer.Option(
+        None,
+        "--ceh-path",
+        help=(
+            "Path to the manual CEH LCM 2023 10 m GeoTIFF. "
+            "Defaults to the git-ignored raw CEH path under data/raw/big-files/CEH/."
+        ),
     ),
     verbose: bool = False,
 ) -> None:
-    """Generate all environmental data layers."""
-    from sdm.commands.data_preparation.environmental.generate_terrain_data import generate_terrain_data
-    from sdm.commands.data_preparation.environmental.generate_climate_data import generate_climate_data
-    from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import generate_ceh_lc_data
-    from sdm.commands.data_preparation.environmental.generate_vom_data import generate_vom_data
-    from sdm.commands.data_preparation.spatial.generate_coastal_distance import generate_coastal_distance
-    from sdm.commands.data_preparation.processing.process_os_data import process_os_data
-    from sdm.commands.data_preparation.environmental.generate_terrain_stats import generate_terrain_stats
-    from sdm.commands.data_preparation.processing.merge_ev_layers import (
-        build_ev_dataset_inputs,
-        merge_ev_layers,
-    )
-    
+    """Rebuild all environmental layers into a caller-chosen output folder."""
     setup_logging(verbose=verbose)
-    
-    boundary_path = Path(PROJECT_CONFIG.paths.boundary)
-    evs_dir = Path("data/evs")
-    
-    logging.info("Generating all environmental data layers...")
-    
-    # 1. Terrain data (DTM/DSM)
-    logging.info("1/7: Downloading terrain data...")
-    generate_terrain_data(
-        output_dir=evs_dir / "terrain",
-        boundary_path=boundary_path,
-        buffer_distance_m=7000,
-        verbose=verbose
+    run_data_rebuild(
+        output_dir,
+        cache_dir=cache_dir,
+        fresh=fresh,
+        live_download=live_download,
+        skip=skip,
+        only=only,
+        ceh_path=ceh_path,
+        verbose=verbose,
     )
-    
-    # 2. Terrain statistics
-    logging.info("2/7: Calculating terrain statistics...")
-    generate_terrain_stats(
-        input_dem_path=evs_dir / "terrain" / "dtm_dsm_100m.tif",
-        output_path=evs_dir / "terrain_stats.tif",
-        verbose=verbose
-    )
-    
-    # 3. Climate data
-    logging.info("3/7: Downloading climate data...")
-    generate_climate_data(
-        output_dir=evs_dir / "climate",
-        boundary_path=boundary_path,
-        worldclim_cache_dir=Path("data/raw/worldclim"),
-        verbose=verbose
-    )
-    
-    # 4. Land cover data
-    if skip_ceh:
-        logging.info("4/7: Skipping CEH land cover (--skip-ceh)")
-    else:
-        logging.info("4/7: Processing land cover data...")
-        generate_ceh_lc_data(
-            output_dir=evs_dir / "landcover",
-            boundary_path=boundary_path,
-            ceh_data_path=Path("data/raw/big-files/CEH/data/7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif"),
-            verbose=verbose
-        )
-    
-    # 5. VOM data
-    logging.info("5/7: Downloading VOM data...")
-    generate_vom_data(
-        output_dir=evs_dir / "vom",
-        boundary_path=boundary_path,
-        buffer_distance_m=7000,
-        verbose=verbose
-    )
-    
-    # 6. Coastal distance
-    if skip_coastal:
-        logging.info("6/7: Skipping coastal distance (--skip-coastal)")
-    else:
-        logging.info("6/7: Calculating coastal distance...")
-        generate_coastal_distance(
-            boundary_path=boundary_path,
-            output_dir=evs_dir,
-            live_download=live_download,
-            verbose=verbose,
-        )
-    
-    # 7. OS data
-    logging.info("7/7: Processing OS data...")
-    process_os_data(
-        output_dir=evs_dir,
-        boundary_path=boundary_path,
-        buffer_distance=7000,
-        verbose=verbose
-    )
-    
-    # Merge all layers
-    logging.info("Merging all environmental layers...")
-    merge_ev_layers(
-        dataset_inputs=build_ev_dataset_inputs(
-            evs_dir,
-            PROJECT_CONFIG.spatial.resolution,
-            skip_ceh=skip_ceh,
-            skip_coastal=skip_coastal,
-        ),
-        boundary_path=boundary_path,
-        output_path=Path(PROJECT_CONFIG.paths.ev_tiff),
-        verbose=verbose
-    )
-    
-    logging.info("Environmental data generation complete!")
 
 @app.command()
 def background(
@@ -507,6 +514,25 @@ def explain(
 
 @app.command()
 def pipeline(
+    output_dir: str = typer.Option(
+        ...,
+        "--output-dir",
+        "-o",
+        help=(
+            "Local directory for rebuilt EV layers (passed to `sdm data`). "
+            "Must not be data/evs, inputs/, or a bucket inputs URI."
+        ),
+    ),
+    cache_dir: Optional[str] = typer.Option(
+        None,
+        "--cache-dir",
+        help="Download cache root for `sdm data` (default: <output-dir>/cache).",
+    ),
+    fresh: bool = typer.Option(
+        False,
+        "--fresh",
+        help="Rebuild OS parquet / Boundary-Line caches under --cache-dir.",
+    ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     generate_background: bool = typer.Option(
@@ -525,13 +551,38 @@ def pipeline(
     
     logging.info("Starting complete SDM pipeline...")
     
-    # Run all steps
+    # Run all steps via core helpers (not Typer command callables) so OptionInfo
+    # defaults cannot be treated as true and silently skip layers.
     if generate_background:
         background(verbose=verbose)
-    data(live_download=True, verbose=verbose)
-    train(species=species, activity_types=activity_types, verbose=verbose)
-    predict(species=species, activity_types=activity_types, verbose=verbose)
-    visualize(species=species, activity_types=activity_types, verbose=verbose)
+    run_data_rebuild(
+        output_dir=output_dir,
+        cache_dir=cache_dir,
+        fresh=fresh,
+        live_download=True,
+        skip=None,
+        only=None,
+        verbose=verbose,
+    )
+    rebuilt_ev = str(Path(output_dir) / "evs-to-model.tif")
+    train(
+        species=species,
+        activity_types=activity_types,
+        ev_file=rebuilt_ev,
+        verbose=verbose,
+    )
+    predict(
+        species=species,
+        activity_types=activity_types,
+        ev_path=rebuilt_ev,
+        verbose=verbose,
+    )
+    visualize(
+        species=species,
+        activity_types=activity_types,
+        ev_raster_path=Path(rebuilt_ev),
+        verbose=verbose,
+    )
     
     logging.info("SDM pipeline complete!")
 

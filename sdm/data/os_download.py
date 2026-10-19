@@ -72,11 +72,31 @@ def osgb_100km_tiles_for_bbox(
     maxx: float,
     maxy: float,
 ) -> list[str]:
-    """Return sorted unique 100 km tile codes intersecting an OSGB bbox."""
+    """Return sorted unique 100 km tile codes intersecting an OSGB bbox.
+
+    Every 100 km National Grid square that the bbox overlaps is included, not
+    only the four corner tiles. A bbox that spans three columns and three rows
+    therefore yields all nine intersecting tiles.
+    """
+    if maxx < minx or maxy < miny:
+        raise ValueError(
+            f"Invalid bbox: expected min<=max, got "
+            f"({minx}, {miny}, {maxx}, {maxy})"
+        )
+
+    e0 = int(minx // 100_000)
+    e1 = int(maxx // 100_000)
+    n0 = int(miny // 100_000)
+    n1 = int(maxy // 100_000)
+
     tiles: set[str] = set()
-    for easting in (minx, maxx):
-        for northing in (miny, maxy):
-            tiles.add(osgb_100km_tile(easting, northing))
+    for n100 in range(n0, n1 + 1):
+        for e100 in range(e0, e1 + 1):
+            if not (0 <= e100 < len(_GRID_100KM[0]) and 0 <= n100 < len(_GRID_100KM)):
+                continue
+            tile = _GRID_100KM[n100][e100]
+            if tile:
+                tiles.add(tile)
     return sorted(tiles)
 
 

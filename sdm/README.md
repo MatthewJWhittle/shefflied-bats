@@ -11,14 +11,14 @@ uv sync   # or: pip install -e .
 | Command | Purpose |
 |---------|---------|
 | `sdm setup` | Create the study boundary GeoJSON |
-| `sdm data` | Generate and merge all environmental variable layers |
+| `sdm data -o DIR` | Rebuild and merge all EV layers into a caller-chosen folder; optional `--cache-dir` / `--fresh` (refuses `data/evs`, `inputs/`, `gs://`) |
 | `sdm background` | Generate background points for modelling |
 | `sdm train` | Train MaxEnt models and write model packages |
 | `sdm predict` | Apply trained models to the EV stack |
 | `sdm export-rasters` | Reproject and/or COG-wrap rasters for sharing |
 | `sdm visualize` | Partial dependence and related plots |
 | `sdm explain` | SHAP interpretability plots |
-| `sdm pipeline` | Run setup → data → train → predict → visualize |
+| `sdm pipeline -o DIR` | Run data → train → predict → visualize using the rebuilt EV folder |
 | `sdm tune` | Hyperparameter search with Optuna |
 | `sdm set-boundary` | Point `config.yml` at a boundary file |
 | `sdm set-occurrence` | Point `config.yml` at occurrence GeoJSON |
@@ -33,7 +33,8 @@ Run `sdm COMMAND --help` for options.
 sdm setup
 
 # Environmental variables (terrain, climate, land cover, coastal, OS, merge)
-sdm data
+# Writes into a separate folder so the live data/evs set is not overwritten.
+sdm data --output-dir data/evs-rebuild
 
 # Background points (optional)
 sdm background \
