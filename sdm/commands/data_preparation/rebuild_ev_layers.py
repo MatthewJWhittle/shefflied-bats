@@ -76,6 +76,7 @@ def rebuild_environmental_layers(
     cache_dir: Path | str | None = None,
     fresh: bool = False,
     ceh_data_path: Path = DEFAULT_CEH_PATH,
+    coastline_path: Path | None = None,
     buffer_distance_m: float = 7000,
     config_evs: str | Path | None = None,
     config_ev_tiff: str | Path | None = None,
@@ -199,6 +200,7 @@ def rebuild_environmental_layers(
             lambda: generate_coastal_distance(
                 boundary_path=boundary_path,
                 output_dir=evs_dir,
+                coastline_path=coastline_path,
                 live_download=live_download,
                 cache_dir=caches["boundary_line"],
                 overwrite_cache=fresh,
@@ -240,18 +242,25 @@ def rebuild_environmental_layers(
             ),
         )
 
-        def _build_stack() -> Path:
-            nonlocal applied_build_settings
-            path, used_settings = build_model_ev_stack(
-                merged_output,
-                model_stack_output,
-                build_settings=build_settings,
-                verbose=verbose,
-            )
-            applied_build_settings = used_settings
-            return path
+        # Model stack needs the merge product. Skip it for --only/--skip paths
+        # that did not select merge so a successful single step exits 0.
+        if "merge" in active:
+            def _build_stack() -> Path:
+                nonlocal applied_build_settings
+                path, used_settings = build_model_ev_stack(
+                    merged_output,
+                    model_stack_output,
+                    build_settings=build_settings,
+                    verbose=verbose,
+                )
+                applied_build_settings = used_settings
+                return path
 
-        recorder.run("build_model_ev_stack", _build_stack)
+            recorder.run("build_model_ev_stack", _build_stack)
+        else:
+            logging.info(
+                "Skipping build_model_ev_stack (merge not in active steps)"
+            )
     finally:
         if recorder.steps:
             metrics_paths = recorder.write(
@@ -270,7 +279,13 @@ def rebuild_environmental_layers(
                 metrics_paths["csv"],
             )
 
-    logging.info("Environmental data generation complete: %s", model_stack_output)
+    if "merge" in active:
+        logging.info("Environmental data generation complete: %s", model_stack_output)
+    else:
+        logging.info(
+            "Environmental data generation complete (active steps: %s)",
+            ", ".join(sorted(active)),
+        )
     return evs_dir
 
 

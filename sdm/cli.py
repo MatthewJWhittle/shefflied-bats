@@ -55,6 +55,7 @@ def run_data_rebuild(
     skip: Optional[str] = None,
     only: Optional[str] = None,
     ceh_path: Optional[Path] = None,
+    coastline_path: Optional[Path] = None,
     verbose: bool = False,
 ) -> Path:
     """Core EV rebuild used by ``sdm data`` and ``sdm pipeline``.
@@ -93,6 +94,7 @@ def run_data_rebuild(
             cache_dir=Path(cache_dir) if cache_dir else None,
             fresh=fresh,
             ceh_data_path=Path(ceh_path) if ceh_path is not None else DEFAULT_CEH_PATH,
+            coastline_path=Path(coastline_path) if coastline_path is not None else None,
             config_evs=PROJECT_CONFIG.paths.evs,
             config_ev_tiff=PROJECT_CONFIG.paths.ev_tiff,
             verbose=verbose,
@@ -167,6 +169,14 @@ def data(
             "Defaults to the git-ignored raw CEH path under data/raw/big-files/CEH/."
         ),
     ),
+    coastline_path: Optional[Path] = typer.Option(
+        None,
+        "--coastline-path",
+        help=(
+            "Explicit coastline file for the coastal step (e.g. BGS GeoCoast). "
+            "When set, skips the Boundary-Line download and uses this path."
+        ),
+    ),
     verbose: bool = False,
 ) -> None:
     """Rebuild all environmental layers into a caller-chosen output folder."""
@@ -211,6 +221,7 @@ def data(
         skip=skip,
         only=only,
         ceh_path=ceh_path,
+        coastline_path=coastline_path,
         verbose=verbose,
     )
 
