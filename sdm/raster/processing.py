@@ -231,10 +231,6 @@ def calculate_feature_cover(
             )
             # Open with rioxarray, specify chunks for potentially large intermediate rasters
             cover_raster: xr.DataArray = rxr.open_rasterio(f.name, chunks='auto').squeeze(drop=True)
-            
-            # Ensure nodata is handled if necessary, though rasterise_gdf sets a nodata value
-            # If rasterise_gdf output has explicit nodata, rioxarray should handle it.
-            # cover_raster = cover_raster.where(cover_raster != cover_raster.rio.nodata) # Example if needed
 
             if scale_factor > 1:
                 cover_area = cover_raster.coarsen(
@@ -287,6 +283,14 @@ def calculate_feature_cover(
 
     # Perform clipping if feature_cover has data variables
     if feature_cover.data_vars:
+        # Binary rasterise keeps 0 as valid cover (no nodata=0). Coarsen sums
+        # to integer without nodata; rio.clip then fills outside-boundary cells
+        # with a ~2^63 sentinel. Cast to float and set NaN nodata before clip
+        # so exterior cells are NaN while valid zero cover stays 0.
+        for var in feature_cover.data_vars:
+            feature_cover[var] = (
+                feature_cover[var].astype("float64").rio.write_nodata(np.nan)
+            )
         try:
             feature_cover_clipped = feature_cover.rio.clip([boundary_union], crs=boundary.crs, all_touched=True)
             return feature_cover_clipped
