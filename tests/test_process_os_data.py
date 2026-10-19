@@ -396,7 +396,11 @@ def test_os_cover_outside_boundary_is_nan_not_fill_value():
 
     transform = Affine(20.0, 0.0, 0.0, 0.0, -20.0, 200.0)
     stacked = reproject_data(
-        cover, "EPSG:27700", transform=transform, resolution=20
+        cover,
+        "EPSG:27700",
+        transform=transform,
+        resolution=20,
+        bounds=(0.0, 0.0, 200.0, 200.0),
     )
     for name in stacked.data_vars:
         arr = np.asarray(stacked[name].values, dtype=float)

@@ -117,7 +117,14 @@ def load_and_preprocess_dataset(dataset_name: str, dataset_path: Path) -> xr.Dat
     return data
 
 
-def reproject_dataset(data: xr.Dataset, target_crs: str, model_transform, target_resolution: int) -> xr.Dataset:
+def reproject_dataset(
+    data: xr.Dataset,
+    target_crs: str,
+    model_transform,
+    target_resolution: int,
+    *,
+    bounds: tuple,
+) -> xr.Dataset:
     """
     Reproject a dataset to the target coordinate system and resolution.
     
@@ -126,6 +133,7 @@ def reproject_dataset(data: xr.Dataset, target_crs: str, model_transform, target
         target_crs: Target coordinate reference system
         model_transform: Target transform
         target_resolution: Target resolution in meters
+        bounds: Template grid bounds (minx, miny, maxx, maxy)
         
     Returns:
         Reprojected dataset
@@ -136,7 +144,8 @@ def reproject_dataset(data: xr.Dataset, target_crs: str, model_transform, target
         crs=target_crs,
         transform=model_transform,
         resolution=target_resolution,
-        resampling=Resampling.bilinear
+        resampling=Resampling.bilinear,
+        bounds=bounds,
     )
 
 
@@ -221,7 +230,7 @@ def merge_ev_layers(
     logging.info("Merging %d datasets. Output: %s", len(datasets_to_merge), output_path)
 
     # Load boundary and project's spatial parameters for reprojection and final clipping
-    boundary_gdf, model_transform, _, spatial_config = load_boundary_and_transform(
+    boundary_gdf, model_transform, grid_bounds, spatial_config = load_boundary_and_transform(
         boundary_path, buffer_distance=boundary_buffer_m
     )
     target_crs = boundary_gdf.crs
@@ -235,7 +244,13 @@ def merge_ev_layers(
             data = load_and_preprocess_dataset(dataset_name, dataset_path)
             
             # Reproject the dataset
-            reprojected_data = reproject_dataset(data, target_crs, model_transform, target_resolution)
+            reprojected_data = reproject_dataset(
+                data,
+                target_crs,
+                model_transform,
+                target_resolution,
+                bounds=grid_bounds,
+            )
             processed_datasets_to_merge.append(reprojected_data)
             
         except (FileNotFoundError, RuntimeError) as e:

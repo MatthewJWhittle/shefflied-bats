@@ -140,21 +140,51 @@ def tile_bounding_box(xmin, ymin, xmax, ymax, tile_shape, resolution):
 
     return tiles
 
+def grid_shape_from_bounds(
+    bounds: Tuple[float, float, float, float], resolution: float
+) -> Tuple[int, int]:
+    """Return ``(height, width)`` for a bounds box at ``resolution``."""
+    xmin, ymin, xmax, ymax = bounds
+    resolution = float(resolution)
+    width = int(round((xmax - xmin) / resolution))
+    height = int(round((ymax - ymin) / resolution))
+    return height, width
+
+
 def reproject_data(
     array: Union[xr.DataArray, xr.Dataset],
     crs: Union[str, int, dict],
     transform: Affine,
     resolution: float,
     resampling: Resampling = Resampling.bilinear,
+    *,
+    shape: Optional[Tuple[int, int]] = None,
+    bounds: Optional[Tuple[float, float, float, float]] = None,
 ) -> Union[xr.DataArray, xr.Dataset]:
     """
-    Reprojects the given array to a specified coordinate reference system (CRS) and transform.
+    Reproject ``array`` onto the template grid given by ``transform`` and shape.
+
+    ``shape`` or ``bounds`` is required. Passing only ``transform`` lets
+    rioxarray keep the source height/width, so producers disagree and the
+    merge union grows empty edge rows/columns. Prefer ``rio.reproject`` with
+    both ``transform`` and ``shape`` (equivalent to ``reproject_match``).
     """
+    if shape is None:
+        if bounds is None:
+            raise ValueError(
+                "reproject_data requires shape= or bounds= to lock the "
+                "destination template grid"
+            )
+        shape = grid_shape_from_bounds(bounds, resolution)
+    # resolution is encoded in transform; rioxarray forbids combining it
+    # with shape/transform. ``resampling`` is still ignored here (bilinear);
+    # a follow-up commit honours the argument for zero-cover bleed.
+    _ = (resolution, resampling)
     reprojected = array.rio.reproject(
-        crs, resolution=resolution, resampling=Resampling.bilinear
-    )
-    reprojected = reprojected.rio.reproject(
-        crs, resampling=Resampling.bilinear, transform=transform
+        crs,
+        transform=transform,
+        shape=shape,
+        resampling=Resampling.bilinear,
     )
     if isinstance(reprojected, xr.DataArray):
         reprojected = reprojected.where(reprojected != reprojected.rio.nodata, np.nan)
@@ -294,8 +324,7 @@ def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[
         return round(value / resolution) * resolution
 
     xmin, ymin, xmax, ymax = _snap(xmin), _snap(ymin), _snap(xmax), _snap(ymax)
-    width = int(round((xmax - xmin) / resolution))
-    height = int(round((ymax - ymin) / resolution))
+    height, width = grid_shape_from_bounds((xmin, ymin, xmax, ymax), resolution)
     xmax = xmin + width * resolution
     ymax = ymin + height * resolution
 

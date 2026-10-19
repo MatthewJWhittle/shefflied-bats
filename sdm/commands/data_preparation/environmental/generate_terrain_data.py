@@ -51,10 +51,11 @@ async def fetch_and_process_terrain_data(
         logging.info("Reprojecting %s data to model grid (CRS: %s, Resolution: %sm)...", layer_name.upper(), model_crs, model_resolution)
         # Reproject to the consistent model CRS and resolution
         reprojected_layer_data = reproject_data(
-            raw_layer_data, 
-            crs=model_crs, 
-            transform=model_transform, 
-            resolution=model_resolution
+            raw_layer_data,
+            crs=model_crs,
+            transform=model_transform,
+            resolution=model_resolution,
+            bounds=grid_bounds,
         )
         # Store the original coverage_id (which is the variable name in reprojected_layer_data)
         # and the desired final name (dtm/dsm)

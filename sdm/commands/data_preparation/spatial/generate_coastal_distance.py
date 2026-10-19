@@ -215,6 +215,7 @@ def generate_coastal_distance(
         crs=model_crs,
         transform=model_transform,
         resolution=model_resolution,
+        bounds=grid_bounds,
     )
 
     logging.info("Squeezing dataset...")

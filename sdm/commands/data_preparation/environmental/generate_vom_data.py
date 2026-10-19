@@ -66,10 +66,11 @@ async def fetch_and_process_vom_data(
     logging.info(f"Reprojecting VOM summary data to model grid (CRS: {model_crs}, Resolution: {spatial_config['resolution']}m)...")
     # Reproject the summary dataset to the main model grid
     reprojected_vom_summary = reproject_data(
-        vom_summary_ds, 
-        crs=model_crs, 
-        transform=model_transform, 
-        resolution=spatial_config["resolution"]
+        vom_summary_ds,
+        crs=model_crs,
+        transform=model_transform,
+        resolution=spatial_config["resolution"],
+        bounds=grid_bounds,
     )
 
     logging.info("Squeezing final VOM summary dataset...")

@@ -103,6 +103,7 @@ def process_os_data(
         spatial_config["crs"],
         transform=model_transform,
         resolution=spatial_config["resolution"],
+        bounds=bounds,
     )
     logging.info("Writing feature cover raster")
     cover_path = output_dir / "os-feature-cover.tif"
@@ -117,6 +118,7 @@ def process_os_data(
         spatial_config["crs"],
         transform=model_transform,
         resolution=spatial_config["resolution"],
+        bounds=bounds,
     )
     logging.info("Writing distance matrix raster")
     distance_path = output_dir / "os-distance-to-feature.tif"

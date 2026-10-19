@@ -51,7 +51,7 @@ def generate_climate_data(
 
     # Load boundary and spatial parameters (CRS, transform, resolution)
     try:
-        boundary_gdf, model_transform, _, spatial_config = (
+        boundary_gdf, model_transform, grid_bounds, spatial_config = (
             load_boundary_and_transform(boundary_path)
         )
     except FileNotFoundError:
@@ -80,7 +80,8 @@ def generate_climate_data(
         datasets=raw_climate_datasets,
         target_crs=model_crs,
         target_transform=model_transform,
-        target_resolution=model_resolution
+        target_resolution=model_resolution,
+        target_bounds=grid_bounds,
     )
 
     # assign_climate_variable_names was used in original to set long_name attributes
