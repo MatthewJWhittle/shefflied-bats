@@ -198,7 +198,7 @@ def merge_ev_layers(
     dataset_inputs: List[str],
     output_path: Path = Path("data/evs/merged_environmental_variables.tif"),
     boundary_path: Path = Path("data/processed/boundary.geojson"),
-    boundary_buffer_m: float = 0,
+    boundary_buffer_m: float = 7000,
     verbose: bool = False
 ) -> None:
     """

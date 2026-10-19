@@ -229,8 +229,17 @@ def generate_ceh_lc_data(
 
     logging.info("Clipping land cover to boundary")
     land_cover = land_cover.rio.clip_box(*boundary.total_bounds, crs=land_cover.rio.crs)
+    # Real LCM 10 m has band 1 = class, band 2 = confidence. Select class
+    # explicitly; squeeze fails when the confidence band is present.
     if "band" in land_cover.dims:
-        land_cover = land_cover.squeeze("band", drop=True)
+        if land_cover.sizes["band"] == 1:
+            land_cover = land_cover.squeeze("band", drop=True)
+        else:
+            band_coords = land_cover.coords.get("band")
+            if band_coords is not None and 1 in np.asarray(band_coords):
+                land_cover = land_cover.sel(band=1, drop=True)
+            else:
+                land_cover = land_cover.isel(band=0, drop=True)
 
     logging.info(
         "Converting land cover to category area layers (%s)",

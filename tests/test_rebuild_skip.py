@@ -115,3 +115,136 @@ def test_run_data_rebuild_parses_skip_string(tmp_path: Path) -> None:
 
     assert captured["skip"] == frozenset({"ceh", "coastal"})
     assert REBUILD_STEP_NAMES >= captured["skip"]
+
+
+def test_rebuild_only_step_skips_model_stack(tmp_path, monkeypatch):
+    """--only <step> must not build the model stack (exit cleanly after the step)."""
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "evs-rebuild"
+    stack_calls: list = []
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    monkeypatch.setattr(mod, "generate_climate_data", _ok)
+    monkeypatch.setattr(mod, "generate_terrain_data", _ok)
+    monkeypatch.setattr(mod, "generate_terrain_stats", _ok)
+    monkeypatch.setattr(mod, "generate_ceh_lc_data", _ok)
+    monkeypatch.setattr(mod, "generate_vom_data", _ok)
+    monkeypatch.setattr(mod, "generate_coastal_distance", _ok)
+    monkeypatch.setattr(mod, "process_os_data", _ok)
+    monkeypatch.setattr(mod, "merge_ev_layers", _ok)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: [])
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+
+    def _stack(*_a, **_k):
+        stack_calls.append(True)
+        return out / "evs-to-model.tif", stub_settings
+
+    monkeypatch.setattr(mod, "build_model_ev_stack", _stack)
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        only=["climate"],
+    )
+    assert stack_calls == [], "model stack must not run when merge was not selected"
+
+
+def test_cli_passes_coastline_path_to_rebuild(tmp_path: Path) -> None:
+    """Explicit GeoCoast / coastline file must reach the rebuild orchestrator."""
+    out = tmp_path / "safe"
+    coast = tmp_path / "geocoast.shp"
+    coast.write_text("placeholder", encoding="utf-8")
+    captured: dict = {}
+
+    def _stub(output_dir, **kwargs):  # type: ignore[no-untyped-def]
+        captured["kwargs"] = kwargs
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        return Path(output_dir)
+
+    runner = CliRunner()
+    with patch(
+        "sdm.commands.data_preparation.rebuild_ev_layers.rebuild_environmental_layers",
+        _stub,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "data",
+                "--output-dir",
+                str(out),
+                "--coastline-path",
+                str(coast),
+                "--only",
+                "coastal",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured["kwargs"]["coastline_path"] == coast
+
+
+def test_rebuild_passes_coastline_path_to_coastal_step(tmp_path, monkeypatch):
+    """Orchestrator must forward coastline_path into generate_coastal_distance."""
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    coast = tmp_path / "BGS_GeoCoast.shp"
+    coast.write_text("x", encoding="utf-8")
+    out = tmp_path / "evs-rebuild"
+    captured: dict = {}
+
+    def _coastal(*_args, **kwargs):
+        captured.update(kwargs)
+        return out / "coastal_distance.tif"
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    monkeypatch.setattr(mod, "generate_coastal_distance", _coastal)
+    for name in (
+        "generate_terrain_data",
+        "generate_terrain_stats",
+        "generate_climate_data",
+        "generate_ceh_lc_data",
+        "generate_vom_data",
+        "process_os_data",
+        "merge_ev_layers",
+    ):
+        monkeypatch.setattr(mod, name, _ok)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: [])
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        only=["coastal"],
+        coastline_path=coast,
+    )
+    assert captured.get("coastline_path") == coast

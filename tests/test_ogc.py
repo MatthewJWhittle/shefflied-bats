@@ -92,8 +92,9 @@ async def test_download_to_temp_storage(test_bbox, wcs_test_params):
     )
 
     assert isinstance(result, xr.Dataset)
-    # assert it has returned a chunked array
-    assert result.chunks is not None
+    # Temp tiles are deleted on return; data must already be loaded.
+    assert result[temp_downloader.coverage_id].chunks is None
+    assert np.isfinite(result[temp_downloader.coverage_id].values).any()
 
     # check the resolution
     result_res = result.rio.resolution()
@@ -106,6 +107,75 @@ async def test_download_to_temp_storage(test_bbox, wcs_test_params):
     assert result_box[1] <= test_bbox[1]
     assert result_box[2] >= test_bbox[2]
     assert result_box[3] >= test_bbox[3]
-    
 
+
+@pytest.mark.asyncio
+async def test_temp_storage_loads_before_tile_cleanup(monkeypatch):
+    """Temp tiles must not be the only copy of data after get_coverage returns.
+
+    Rebuild failure mode (#38): ``open_mfdataset`` returns a lazy dask view of
+    ``tile_*.tif``, then the ``finally`` block deletes those files. Later reads
+    that reopen by path raise ``RasterioIOError``. The returned dataset must
+    therefore be fully loaded (or otherwise independent of the temp tiles).
+    """
+    import rasterio
+    from rasterio.transform import from_origin
+
+    coverage_id = "test_coverage_dtm"
+    downloader = WCSDownloader.__new__(WCSDownloader)
+    downloader.endpoint = "https://example.invalid/wcs"
+    downloader.coverage_id = coverage_id
+    downloader.tile_width = 4
+    downloader.tile_height = 4
+    downloader.use_temp_storage = True
+    downloader.temp_dir = None
+    downloader.axis_labels = ["x", "y"]
+    downloader.native_crs = "http://www.opengis.net/def/crs/EPSG/0/27700"
+
+    tile_specs = [
+        (420000.0, 380000.0, 420040.0, 380040.0, 1.0),
+        (420040.0, 380000.0, 420080.0, 380040.0, 2.0),
+    ]
+
+    async def fake_download_tile(session, tile_bbox, resolution):
+        minx, miny, maxx, maxy = tile_bbox
+        value = next(v for a, b, c, d, v in tile_specs if (a, b, c, d) == tile_bbox)
+        assert downloader.temp_dir is not None
+        path = downloader.temp_dir / f"tile_{hash(str(tile_bbox))}.tif"
+        transform = from_origin(minx, maxy, resolution, resolution)
+        width = int((maxx - minx) / resolution)
+        height = int((maxy - miny) / resolution)
+        data = np.full((height, width), value, dtype=np.float32)
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=1,
+            dtype="float32",
+            crs="EPSG:27700",
+            transform=transform,
+        ) as dst:
+            dst.write(data, 1)
+        return str(path)
+
+    monkeypatch.setattr(downloader, "_download_tile", fake_download_tile)
+
+    result = await downloader.get_coverage(
+        bbox=(420000.0, 380000.0, 420080.0, 380040.0),
+        resolution=10.0,
+        max_concurrent=2,
+    )
+
+    assert isinstance(result, xr.Dataset)
+    assert coverage_id in result.data_vars
+    # Temp dir is cleaned in finally; data must not still be a lazy file view.
+    assert downloader.temp_dir is None or not downloader.temp_dir.exists()
+    assert result[coverage_id].chunks is None, (
+        "lazy dask view of deleted temp tiles; load or persist before cleanup"
+    )
+    values = np.asarray(result[coverage_id].values)
+    assert values.size > 0
+    assert set(np.unique(values[np.isfinite(values)])).issuperset({1.0, 2.0})
 

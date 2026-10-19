@@ -9,6 +9,7 @@ from shapely import union_all
 from shapely.geometry import box, Point, LineString, Polygon
 from shapely.geometry.base import BaseGeometry
 import xarray as xr
+import rasterio as rio
 import rioxarray as rxr
 from rasterio.transform import from_bounds
 
@@ -316,3 +317,30 @@ def test_distance_calculation_boundary_conditions(sample_boundary):
     center_idx = len(distance_array) // 2
     assert isinstance(distance_array, np.ndarray)
 
+
+
+def test_rasterise_gdf_keeps_zero_cover_as_valid_data(tmp_path):
+    """Zero cover must remain 0, not nodata (neighbourhood means need zeros)."""
+    # One small building in a larger bbox so most cells are true zero cover.
+    buildings = gpd.GeoDataFrame(
+        {"geometry": [Polygon([(10, 10), (20, 10), (20, 20), (10, 20)])]},
+        crs="EPSG:27700",
+    )
+    output_file = str(tmp_path / "cover.tif")
+    rasterise_gdf(buildings, resolution=10, output_file=output_file, bbox=(0, 0, 100, 100))
+
+    with rio.open(output_file) as src:
+        data = src.read(1)
+        nodata = src.nodata
+        assert nodata is None or nodata != 0, (
+            f"nodata={nodata} collides with valid zero-cover cells"
+        )
+        assert (data == 0).any(), "expected background zero-cover cells"
+        assert (data == 1).any(), "expected covered cells"
+
+    # Masked reads must not turn zero cover into NaN.
+    da = rxr.open_rasterio(output_file, masked=True).squeeze(drop=True)
+    values = np.asarray(da.values)
+    assert np.isfinite(values).all() or (values == 0).sum() > 0
+    finite = values[np.isfinite(values)]
+    assert (finite == 0).any(), "zero cover lost under masked read (nodata collision)"

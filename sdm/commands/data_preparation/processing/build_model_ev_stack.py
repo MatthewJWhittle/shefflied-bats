@@ -50,7 +50,7 @@ _VOM_STAT_RE = re.compile(
 _VOM_NESTED_RE = re.compile(
     r"^vom_vegetation_height_vom_height_(mean|min|max|std)(?:_\d+m)?$"
 )
-_BIO_NUM_RE = re.compile(r"^climate_bioclim_(?:band_)?(?:bio_?)?(\d+)$")
+_BIO_NUM_RE = re.compile(r"^climate_bioclim_(?:wc2_1_30s_)?(?:band_)?(?:bio_?)?(\d+)$")
 
 
 def default_build_settings() -> dict[str, Any]:

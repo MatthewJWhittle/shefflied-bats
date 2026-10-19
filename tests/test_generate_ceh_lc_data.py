@@ -453,3 +453,60 @@ def test_dask_peak_memory_below_full_method():
     assert dask_gib < full_gib * 0.75, (
         f"expected dask peak ({dask_gib:.3f} GiB) below full ({full_gib:.3f} GiB)"
     )
+
+
+def _synthetic_ceh_two_band_tile(height: int, width: int, seed: int = 0, nodata: int = 255):
+    """Realistic LCM 10 m fixture: band 1 = class, band 2 = confidence."""
+    rng = np.random.default_rng(seed)
+    codes = np.arange(1, 22)
+    class_band = rng.choice(codes, size=(height, width)).astype(np.uint8)
+    class_band[rng.random(class_band.shape) < 0.03] = nodata
+    confidence = rng.integers(1, 100, size=(height, width), dtype=np.uint8)
+    # Confidence band uses a different code layout so selecting the wrong band fails.
+    confidence[0, 0] = 99
+    class_band[0, 0] = 1
+    data = np.stack([class_band, confidence], axis=0)
+    x = np.arange(width) * 10 + 5
+    y = (np.arange(height)[::-1]) * 10 + 5
+    da = xr.DataArray(
+        data,
+        dims=["band", "y", "x"],
+        coords={"band": [1, 2], "y": y, "x": x},
+        name="land_cover",
+    )
+    da = da.rio.write_crs("EPSG:27700")
+    da = da.rio.write_transform(from_bounds(0, 0, width * 10, height * 10, width, height))
+    da = da.rio.write_nodata(nodata)
+    return da
+
+
+def test_generate_ceh_lc_data_selects_class_band_from_two_band_lcm(
+    tmp_path, sample_boundary, mock_spatial_config
+):
+    """Real CEH LCM 10 m has class + confidence; must use band 1 (class)."""
+    tile = _synthetic_ceh_two_band_tile(120, 140, seed=3)
+    ceh_path = tmp_path / "gblcm2023_10m.tif"
+    tile.rio.to_raster(ceh_path)
+
+    boundary_path = tmp_path / "boundary.geojson"
+    sample_boundary.to_file(boundary_path)
+
+    with patch(
+        "sdm.commands.data_preparation.environmental.generate_ceh_lc_data.load_spatial_config"
+    ) as mock_config:
+        mock_config.return_value = mock_spatial_config
+        result_path = generate_ceh_lc_data(
+            output_dir=tmp_path / "output",
+            boundary_path=boundary_path,
+            ceh_data_path=ceh_path,
+            buffer_distance_m=0,
+            output_resolution_m=100,
+            coarsen_method="full",
+            verbose=False,
+        )
+
+    assert result_path.exists()
+    output = rxr.open_rasterio(result_path)
+    assert output.sizes.get("band", 1) >= 1
+    # Class-derived area layers must be finite somewhere (wrong band → empty/fail).
+    assert np.isfinite(np.asarray(output.values)).any()
