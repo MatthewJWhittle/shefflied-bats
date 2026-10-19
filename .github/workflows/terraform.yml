@@ -1,8 +1,8 @@
 name: Terraform
 
 on:
+  # Any base (incl. stacked drafts) — do not pin a branch name.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
     paths:
