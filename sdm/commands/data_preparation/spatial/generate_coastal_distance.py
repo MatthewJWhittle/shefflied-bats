@@ -6,6 +6,7 @@ import geopandas as gpd
 from shapely.geometry.base import BaseGeometry
 
 from sdm.data.coastline_download import (
+    DEFAULT_CACHE_DIR,
     coastline_source_is_polyline,
     load_mean_high_water_polylines,
     resolve_coastline_source,
@@ -115,6 +116,9 @@ def generate_coastal_distance(
     distance_calc_resolution_factor: int = 10,
     live_download: bool = True,
     verbose: bool = False,
+    *,
+    cache_dir: Optional[Path] = None,
+    overwrite_cache: bool = False,
 ) -> Path:
     """
     Generates a coastal distance raster layer.
@@ -142,6 +146,8 @@ def generate_coastal_distance(
         distance_calc_resolution_factor: Factor to multiply base model resolution for distance calc.
         live_download: Download OS Boundary-Line when no local coastline file is present.
         verbose: Enable verbose logging.
+        cache_dir: Directory for Boundary-Line downloads (default: data/raw/boundary-line).
+        overwrite_cache: Re-download / ignore existing Boundary-Line cache.
 
     Returns:
         Path to the generated coastal distance raster file.
@@ -165,7 +171,9 @@ def generate_coastal_distance(
 
     coast_path, source_kind = resolve_coastline_source(
         explicit_path,
+        cache_dir=cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR,
         live_download=live_download,
+        overwrite=overwrite_cache,
         fallback_bbox=boundary_bounds,
     )
     use_polyline_source = coastline_source_is_polyline(source_kind, coast_path)

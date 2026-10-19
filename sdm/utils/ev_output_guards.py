@@ -12,11 +12,15 @@ Protected destinations (any match fails validation):
   ``paths.ev_tiff`` / ``paths.evs`` when those resolve under ``data/evs``.
 * Any path under ``INPUT_DATA_ROOT`` when that env var is set (local mirror
   or ``gs://…/inputs``), because that root is the live published input set.
+
+``pathlib.Path`` collapses ``gs://bucket`` to ``gs:/bucket``; callers should
+pass strings, and this module normalises both forms before checking.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from sdm.utils.model_runs import INPUT_DATA_ROOT_ENV
@@ -25,13 +29,25 @@ from sdm.utils.model_runs import INPUT_DATA_ROOT_ENV
 # ``paths.ev_tiff`` / train still treat as the current EV stack location.
 DEFAULT_CURRENT_EVS_DIR = Path("data/evs")
 
+_COLLAPSED_URI_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*):/(?!/)")
+
 
 class ForbiddenEvOutputError(ValueError):
     """Raised when an EV rebuild output path would overwrite live inputs."""
 
 
+def normalize_uri_string(path_str: str) -> str:
+    """Repair pathlib-collapsed ``scheme:/rest`` back to ``scheme://rest``."""
+    match = _COLLAPSED_URI_RE.match(path_str)
+    if match:
+        return f"{match.group(1)}://{path_str[match.end():]}"
+    return path_str
+
+
 def _looks_like_uri(path_str: str) -> bool:
-    return "://" in path_str
+    if "://" in path_str:
+        return True
+    return bool(_COLLAPSED_URI_RE.match(path_str))
 
 
 def _uri_has_inputs_segment(uri: str) -> bool:
@@ -105,7 +121,7 @@ def validate_ev_output_dir(
     Cloud URI outputs are not supported for rebuild writes; they are rejected
     with a clear error (live bucket inputs must not be overwritten).
     """
-    raw = str(output_dir).strip()
+    raw = normalize_uri_string(str(output_dir).strip())
     if not raw:
         raise ForbiddenEvOutputError("Output directory must be a non-empty path.")
 
@@ -151,12 +167,7 @@ def validate_ev_output_dir(
 
     if env_root:
         if _looks_like_uri(env_root):
-            # Local output cannot equal a gs:// root; still refuse if caller
-            # somehow passed a path that mirrors the same tree via relative form.
             if _uri_has_inputs_segment(env_root):
-                # Already covered for URI outputs; for local paths under a
-                # checkout that happens to contain "inputs" we already check
-                # path segments. Nothing further for URI roots vs local dirs.
                 pass
         else:
             root_path = Path(env_root).expanduser()

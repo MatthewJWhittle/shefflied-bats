@@ -36,6 +36,20 @@ from sdm.utils.ev_output_guards import (
 from sdm.utils.step_metrics import StepMetricsRecorder
 
 
+def rebuild_cache_layout(cache_root: Path) -> dict[str, Path]:
+    """Standard cache subfolders under ``cache_root``."""
+    layout = {
+        "root": cache_root,
+        "worldclim": cache_root / "worldclim",
+        "os_raw": cache_root / "os-vector-map",
+        "os_parquets": cache_root / "os-parquets",
+        "boundary_line": cache_root / "boundary-line",
+    }
+    for path in layout.values():
+        path.mkdir(parents=True, exist_ok=True)
+    return layout
+
+
 def rebuild_environmental_layers(
     output_dir: Path | str,
     *,
@@ -44,7 +58,8 @@ def rebuild_environmental_layers(
     live_download: bool = True,
     skip_ceh: bool = False,
     skip_coastal: bool = False,
-    worldclim_cache_dir: Path = Path("data/raw/worldclim"),
+    cache_dir: Path | str | None = None,
+    fresh: bool = False,
     ceh_data_path: Path = Path(
         "data/raw/big-files/CEH/data/"
         "7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif"
@@ -56,6 +71,10 @@ def rebuild_environmental_layers(
     verbose: bool = False,
 ) -> Path:
     """Rebuild every EV layer into ``output_dir`` and write step metrics beside it.
+
+    Download caches (WorldClim, OS tiles/parquets, Boundary-Line) go under
+    ``cache_dir`` when set, otherwise ``<output_dir>/cache``. Pass ``fresh=True``
+    to ignore/rebuild stale cached parquets and Boundary-Line extracts.
 
     Raises
     ------
@@ -69,10 +88,13 @@ def rebuild_environmental_layers(
         config_ev_tiff=config_ev_tiff,
     )
     evs_dir.mkdir(parents=True, exist_ok=True)
+    cache_root = Path(cache_dir) if cache_dir is not None else evs_dir / "cache"
+    caches = rebuild_cache_layout(cache_root)
     merged_output = evs_dir / "evs-to-model.tif"
     recorder = StepMetricsRecorder()
 
     logging.info("Rebuilding environmental layers into %s", evs_dir)
+    logging.info("Cache directory: %s (fresh=%s)", cache_root, fresh)
     logging.info("Write guards: %s", forbidden_output_summary())
 
     try:
@@ -100,7 +122,7 @@ def rebuild_environmental_layers(
             lambda: generate_climate_data(
                 output_dir=evs_dir / "climate",
                 boundary_path=boundary_path,
-                worldclim_cache_dir=worldclim_cache_dir,
+                worldclim_cache_dir=caches["worldclim"],
                 verbose=verbose,
             ),
         )
@@ -137,6 +159,8 @@ def rebuild_environmental_layers(
                     boundary_path=boundary_path,
                     output_dir=evs_dir,
                     live_download=live_download,
+                    cache_dir=caches["boundary_line"],
+                    overwrite_cache=fresh,
                     verbose=verbose,
                 ),
             )
@@ -147,6 +171,10 @@ def rebuild_environmental_layers(
                 output_dir=evs_dir,
                 boundary_path=boundary_path,
                 buffer_distance=buffer_distance_m,
+                parquet_dir=caches["os_parquets"],
+                raw_dir=caches["os_raw"],
+                overwrite_cache=fresh,
+                live_download=live_download,
                 verbose=verbose,
             ),
         )
@@ -181,6 +209,7 @@ def rebuild_environmental_layers(
 __all__ = [
     "ForbiddenEvOutputError",
     "forbidden_output_summary",
+    "rebuild_cache_layout",
     "rebuild_environmental_layers",
     "validate_ev_output_dir",
 ]

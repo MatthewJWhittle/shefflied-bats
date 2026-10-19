@@ -48,14 +48,31 @@ def setup(
 
 @app.command()
 def data(
-    output_dir: Path = typer.Option(
+    output_dir: str = typer.Option(
         ...,
         "--output-dir",
         "-o",
         help=(
-            "Directory for rebuilt EV layers (required). "
+            "Local directory for rebuilt EV layers (required; taken as a string so "
+            "gs:// URIs are not collapsed by pathlib). "
             "Refuses data/evs, paths under inputs/, INPUT_DATA_ROOT, "
             "and gs://…/inputs URIs so the live layer set is not overwritten."
+        ),
+    ),
+    cache_dir: Optional[str] = typer.Option(
+        None,
+        "--cache-dir",
+        help=(
+            "Directory for download caches (WorldClim, OS tiles/parquets, "
+            "Boundary-Line). Defaults to <output-dir>/cache."
+        ),
+    ),
+    fresh: bool = typer.Option(
+        False,
+        "--fresh",
+        help=(
+            "Ignore stale OS parquet and Boundary-Line caches and rebuild them "
+            "from sources under --cache-dir."
         ),
     ),
     live_download: bool = True,
@@ -87,6 +104,8 @@ def data(
             live_download=live_download,
             skip_ceh=skip_ceh,
             skip_coastal=skip_coastal,
+            cache_dir=Path(cache_dir) if cache_dir else None,
+            fresh=fresh,
             config_evs=PROJECT_CONFIG.paths.evs,
             config_ev_tiff=PROJECT_CONFIG.paths.ev_tiff,
             verbose=verbose,
@@ -437,14 +456,24 @@ def explain(
 
 @app.command()
 def pipeline(
-    output_dir: Path = typer.Option(
+    output_dir: str = typer.Option(
         ...,
         "--output-dir",
         "-o",
         help=(
-            "Directory for rebuilt EV layers (passed to `sdm data`). "
+            "Local directory for rebuilt EV layers (passed to `sdm data`). "
             "Must not be data/evs, inputs/, or a bucket inputs URI."
         ),
+    ),
+    cache_dir: Optional[str] = typer.Option(
+        None,
+        "--cache-dir",
+        help="Download cache root for `sdm data` (default: <output-dir>/cache).",
+    ),
+    fresh: bool = typer.Option(
+        False,
+        "--fresh",
+        help="Rebuild OS parquet / Boundary-Line caches under --cache-dir.",
     ),
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
@@ -467,7 +496,13 @@ def pipeline(
     # Run all steps
     if generate_background:
         background(verbose=verbose)
-    data(output_dir=output_dir, live_download=True, verbose=verbose)
+    data(
+        output_dir=output_dir,
+        cache_dir=cache_dir,
+        fresh=fresh,
+        live_download=True,
+        verbose=verbose,
+    )
     rebuilt_ev = str(Path(output_dir) / "evs-to-model.tif")
     train(
         species=species,

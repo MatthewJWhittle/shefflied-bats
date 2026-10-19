@@ -11,9 +11,17 @@ from typer.testing import CliRunner
 from sdm.cli import app
 from sdm.utils.ev_output_guards import (
     ForbiddenEvOutputError,
+    normalize_uri_string,
     validate_ev_output_dir,
 )
 from sdm.utils.model_runs import INPUT_DATA_ROOT_ENV
+
+
+def test_normalize_repairs_pathlib_collapsed_gs_uri() -> None:
+    collapsed = str(Path("gs://bucket/x"))
+    assert collapsed == "gs:/bucket/x"
+    assert normalize_uri_string(collapsed) == "gs://bucket/x"
+    assert normalize_uri_string("gs://bucket/x") == "gs://bucket/x"
 
 
 def test_allows_caller_chosen_temp_directory(tmp_path: Path) -> None:
@@ -52,6 +60,12 @@ def test_refuses_gs_inputs_uri() -> None:
         validate_ev_output_dir("gs://habitat-suitability-modelling-data/inputs/data/evs")
 
 
+def test_refuses_pathlib_collapsed_gs_inputs_uri() -> None:
+    collapsed = str(Path("gs://habitat-suitability-modelling-data/inputs/data/evs"))
+    with pytest.raises(ForbiddenEvOutputError, match="bucket inputs|URI|local directory"):
+        validate_ev_output_dir(collapsed)
+
+
 def test_refuses_gs_inputs_root_uri() -> None:
     with pytest.raises(ForbiddenEvOutputError, match="bucket inputs"):
         validate_ev_output_dir("gs://habitat-suitability-modelling-data/inputs")
@@ -77,6 +91,18 @@ def test_cli_data_rejects_forbidden_output() -> None:
     result = runner.invoke(app, ["data", "--output-dir", "data/evs"])
     assert result.exit_code == 2
     assert "Refusing" in result.output
+
+
+def test_cli_data_rejects_gs_uri_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI takes --output-dir as str; gs:// must exit 2 and write nothing."""
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(app, ["data", "-o", "gs://bucket/x"])
+    assert result.exit_code == 2, result.output
+    assert "URI" in result.output or "Refusing" in result.output
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_cli_data_rejects_gs_inputs_uri() -> None:
@@ -109,7 +135,22 @@ def test_cli_data_accepts_allowed_temp_dir(tmp_path: Path) -> None:
         "sdm.commands.data_preparation.rebuild_ev_layers.rebuild_environmental_layers",
         _stub_rebuild,
     ):
-        result = runner.invoke(app, ["data", "--output-dir", str(allowed)])
+        result = runner.invoke(
+            app,
+            ["data", "--output-dir", str(allowed), "--cache-dir", str(tmp_path / "caches"), "--fresh"],
+        )
 
     assert result.exit_code == 0, result.output
     assert called["output"] == allowed.resolve()
+    assert called["kwargs"]["fresh"] is True
+    assert Path(str(called["kwargs"]["cache_dir"])) == tmp_path / "caches"
+
+
+def test_rebuild_cache_layout_defaults_under_output(tmp_path: Path) -> None:
+    from sdm.commands.data_preparation.rebuild_ev_layers import rebuild_cache_layout
+
+    layout = rebuild_cache_layout(tmp_path / "cache")
+    assert layout["worldclim"].is_dir()
+    assert layout["os_raw"].is_dir()
+    assert layout["os_parquets"].is_dir()
+    assert layout["boundary_line"].is_dir()

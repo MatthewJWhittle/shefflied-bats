@@ -1,4 +1,4 @@
-"""Record wall time and peak RSS for sequential rebuild steps."""
+"""Record wall time and per-step peak RSS for sequential rebuild steps."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import csv
 import json
 import resource
 import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 T = TypeVar("T")
+
+DEFAULT_SAMPLE_INTERVAL_SECONDS = 0.05
 
 
 @dataclass
@@ -28,35 +31,39 @@ class StepMetric:
 
 @dataclass
 class StepMetricsRecorder:
-    """Run callables while collecting duration and peak resident memory."""
+    """Run callables while sampling peak resident memory for each step.
+
+    Peak RSS is measured with a background sampling thread (psutil process tree
+    when available) so a later low-memory step does not inherit an earlier
+    process high-water mark from ``resource.ru_maxrss``.
+    """
 
     steps: list[StepMetric] = field(default_factory=list)
+    sample_interval_seconds: float = DEFAULT_SAMPLE_INTERVAL_SECONDS
 
     def run(self, step_name: str, fn: Callable[[], T]) -> T:
-        rss_before = _sample_rss_bytes()
         started = time.perf_counter()
-        try:
-            result = fn()
-        except Exception as exc:
-            duration = time.perf_counter() - started
-            peak = _peak_rss_bytes(rss_before)
-            self.steps.append(
-                StepMetric(
-                    step=step_name,
-                    duration_seconds=round(duration, 6),
-                    peak_rss_bytes=peak,
-                    status="error",
-                    error=f"{type(exc).__name__}: {exc}",
+        with _RssSampler(interval_seconds=self.sample_interval_seconds) as sampler:
+            try:
+                result = fn()
+            except Exception as exc:
+                duration = time.perf_counter() - started
+                self.steps.append(
+                    StepMetric(
+                        step=step_name,
+                        duration_seconds=round(duration, 6),
+                        peak_rss_bytes=sampler.peak_rss_bytes,
+                        status="error",
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
                 )
-            )
-            raise
+                raise
         duration = time.perf_counter() - started
-        peak = _peak_rss_bytes(rss_before)
         self.steps.append(
             StepMetric(
                 step=step_name,
                 duration_seconds=round(duration, 6),
-                peak_rss_bytes=peak,
+                peak_rss_bytes=sampler.peak_rss_bytes,
                 status="ok",
             )
         )
@@ -92,41 +99,75 @@ class StepMetricsRecorder:
         return {"json": json_path, "csv": csv_path}
 
 
-def _sample_rss_bytes() -> int | None:
-    proc_rss = _rss_from_proc()
-    if proc_rss is not None:
-        return proc_rss
-    return _rss_from_resource()
+class _RssSampler:
+    """Sample process-tree RSS while a step runs; track the peak."""
+
+    def __init__(self, *, interval_seconds: float = DEFAULT_SAMPLE_INTERVAL_SECONDS) -> None:
+        self.interval_seconds = max(interval_seconds, 0.01)
+        self.peak_rss_bytes: int | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> _RssSampler:
+        self._record(process_tree_rss_bytes())
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="sdm-rss-sampler",
+            daemon=True,
+        )
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(2.0, self.interval_seconds * 4))
+        self._record(process_tree_rss_bytes())
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.interval_seconds):
+            self._record(process_tree_rss_bytes())
+
+    def _record(self, sample: int | None) -> None:
+        if sample is None:
+            return
+        if self.peak_rss_bytes is None or sample > self.peak_rss_bytes:
+            self.peak_rss_bytes = sample
 
 
-def _rss_from_proc() -> int | None:
+def process_tree_rss_bytes() -> int | None:
+    """Current RSS for this process and its children (bytes)."""
+    try:
+        import psutil
+
+        proc = psutil.Process()
+        total = int(proc.memory_info().rss)
+        for child in proc.children(recursive=True):
+            try:
+                total += int(child.memory_info().rss)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return total
+    except Exception:
+        return _fallback_rss_bytes()
+
+
+def _fallback_rss_bytes() -> int | None:
     try:
         with open("/proc/self/status", encoding="utf-8") as handle:
             for line in handle:
                 if line.startswith("VmRSS:"):
-                    # Value is in kB on Linux.
                     return int(line.split()[1]) * 1024
     except (OSError, ValueError, IndexError):
-        return None
-    return None
-
-
-def _rss_from_resource() -> int | None:
+        pass
     try:
         usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     except (AttributeError, OSError, ValueError):
         return None
-    # Linux reports kilobytes; macOS reports bytes.
     if sys.platform == "darwin":
         return int(usage)
     return int(usage) * 1024
-
-
-def _peak_rss_bytes(rss_before: int | None) -> int | None:
-    samples = [value for value in (rss_before, _sample_rss_bytes()) if value is not None]
-    if not samples:
-        return None
-    return max(samples)
 
 
 def write_metrics_payload(path: Path, steps: list[dict[str, Any]]) -> None:
