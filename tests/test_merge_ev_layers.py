@@ -178,29 +178,57 @@ class TestMergeEvLayersWorkflow:
                 )
 
 class TestMergeGridMatchesRelease:
-    """Merge grid must match the release EV grid (7 km buffer, floor-aligned)."""
+    """Shared grid construction must match the release EV snap (7 km buffer)."""
 
-    def test_construct_transform_matches_release_shape_on_buffered_aoi(self):
-        """Buffered Yorkshire AOI must snap to 1930×1544, not 1931×1545."""
-        import geopandas as gpd
+    def test_construct_transform_round_aligns_partial_min_edges(self):
+        """Mins just shy of a cell line must not floor-expand SW by one cell.
+
+        Synthetic study-area box: remainders on min edges are > res/2, so
+        floor-align adds a west column and shifts a row south; release snaps
+        each edge to the nearest resolution multiple.
+        """
         from sdm.raster.utils import construct_transform_shift_bounds
 
-        boundary = gpd.read_file("data/processed/boundary.geojson")
-        buffered = boundary.copy()
-        buffered["geometry"] = buffered.geometry.buffer(7000)
-        transform, snapped = construct_transform_shift_bounds(
-            tuple(buffered.total_bounds), 100
+        resolution = 100.0
+        # Remainders: xmin≈96, ymin≈56, xmax≈10, ymax≈10 (res=100).
+        bounds = (196.02, 156.44, 410.10, 510.10)
+        transform, snapped = construct_transform_shift_bounds(bounds, resolution)
+        expected = (200.0, 200.0, 400.0, 500.0)
+        assert snapped == expected, (
+            f"expected round-aligned {expected}, got {snapped} "
+            f"(transform={transform})"
         )
-        width = int(round((snapped[2] - snapped[0]) / 100))
-        height = int(round((snapped[3] - snapped[1]) / 100))
-        assert (width, height) == (1930, 1544), (
-            f"expected release grid 1930×1544, got {width}×{height} "
-            f"(snapped={snapped}, transform={transform})"
-        )
-        # Already-aligned edges must not gain an extra cell (ceil-style bug).
-        aligned = (356100.0, 371500.0, 549100.0, 525900.0)
-        _, snapped_aligned = construct_transform_shift_bounds(aligned, 100)
+        width = int(round((snapped[2] - snapped[0]) / resolution))
+        height = int(round((snapped[3] - snapped[1]) / resolution))
+        assert (width, height) == (2, 3)
+
+        # Already-aligned edges must stay put (no ceil-style extra cell).
+        aligned = (200.0, 200.0, 400.0, 500.0)
+        _, snapped_aligned = construct_transform_shift_bounds(aligned, resolution)
         assert snapped_aligned == aligned
+
+    def test_buffered_study_area_shape_matches_round_snap(self):
+        """Study area + 7 km buffer must snap to round-aligned shape/transform."""
+        import geopandas as gpd
+        from shapely.geometry import box
+        from sdm.raster.utils import construct_transform_shift_bounds
+
+        # Synthetic study box (not a real site): unaligned after 7 km buffer.
+        study = gpd.GeoDataFrame(
+            geometry=[box(1103.98, 2203.56, 2896.02, 3796.44)],
+            crs="EPSG:27700",
+        )
+        buffered = study.copy()
+        buffered["geometry"] = buffered.geometry.buffer(7000)
+        raw = tuple(buffered.total_bounds)
+        resolution = 100.0
+        _, snapped = construct_transform_shift_bounds(raw, resolution)
+        expected = tuple(round(v / resolution) * resolution for v in raw)
+        assert snapped == expected
+        # Floor-align of mins would differ on this box (SW expand).
+        floored_xmin = raw[0] - (raw[0] % resolution)
+        floored_ymin = raw[1] - (raw[1] % resolution)
+        assert snapped[0] != floored_xmin or snapped[1] != floored_ymin
 
     def test_rebuild_passes_study_area_buffer_to_merge(self, tmp_path, monkeypatch):
         """Merge inside sdm data must use the 7 km study-area buffer, not 0."""
