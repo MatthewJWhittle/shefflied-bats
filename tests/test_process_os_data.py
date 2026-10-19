@@ -344,3 +344,67 @@ def test_rasterise_gdf_keeps_zero_cover_as_valid_data(tmp_path):
     assert np.isfinite(values).all() or (values == 0).sum() > 0
     finite = values[np.isfinite(values)]
     assert (finite == 0).any(), "zero cover lost under masked read (nodata collision)"
+
+
+def test_os_cover_outside_boundary_is_nan_not_fill_value():
+    """Outside-boundary cover cells must be NaN; valid zeros stay 0; no cell > 1.
+
+    Without float NaN nodata before clip, coarsened integer cover uses a
+    ~2^63 fill for cells outside the boundary polygon; those values reach
+    the final stack. Cover counts are checked as a fraction of the coarsen
+    window (must be <= 1).
+    """
+    from affine import Affine
+    from sdm.raster.utils import reproject_data
+
+    # Triangle so many cells of the bbox fall outside the boundary polygon.
+    boundary = gpd.GeoDataFrame(
+        geometry=[Polygon([(0, 0), (200, 0), (100, 200)])],
+        crs="EPSG:27700",
+    )
+    features = {
+        "buildings": gpd.GeoDataFrame(
+            {"geometry": [Polygon([(80, 20), (120, 20), (120, 60), (80, 60)])]},
+            crs="EPSG:27700",
+        )
+    }
+    # Coarsen like production: integer sum without nodata triggers the fill.
+    base_resolution = 10
+    target_resolution = 20
+    window = (target_resolution // base_resolution) ** 2
+    cover = calculate_feature_cover(
+        features,
+        boundary,
+        target_resolution=target_resolution,
+        base_resolution=base_resolution,
+    ).compute()
+
+    for name in cover.data_vars:
+        arr = np.asarray(cover[name].values, dtype=float)
+        assert cover[name].rio.nodata is not None and np.isnan(
+            float(cover[name].rio.nodata)
+        )
+        assert np.isnan(arr).any(), f"{name}: expected NaN outside boundary"
+        finite = arr[np.isfinite(arr)]
+        assert finite.size > 0
+        assert (finite == 0).any(), f"{name}: valid zero cover must remain 0"
+        fraction = finite / window
+        assert float(np.max(fraction)) <= 1.0 + 1e-9, (
+            f"{name}: os_cover cell exceeds 1 (max fraction={np.max(fraction)}, "
+            f"raw max={np.max(finite)})"
+        )
+
+    transform = Affine(20.0, 0.0, 0.0, 0.0, -20.0, 200.0)
+    stacked = reproject_data(
+        cover, "EPSG:27700", transform=transform, resolution=20
+    )
+    for name in stacked.data_vars:
+        arr = np.asarray(stacked[name].values, dtype=float)
+        finite = arr[np.isfinite(arr)]
+        assert finite.size > 0
+        assert float(np.max(finite / window)) <= 1.0 + 1e-9, (
+            f"{name}: stack os_cover cell exceeds 1 "
+            f"(max fraction={np.max(finite / window)})"
+        )
+        assert np.isnan(arr).any(), f"{name}: expected NaN outside boundary in stack"
+        assert (finite == 0).any(), f"{name}: zero cover lost after reproject"

@@ -273,10 +273,12 @@ def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[
     """
     Construct a transform based on the bounds and resolution.
 
-    Aligns the origin down/left to the resolution grid and sizes the grid by
-    truncating partial cells on the max edges (floor), matching the release EV
-    grid. Expanding max edges with a ceil-style step added an extra row and
-    column whenever the buffered AOI was not already resolution-aligned.
+    Snap each edge to the nearest resolution multiple so the shared model
+    grid matches the release EV transform. Floor-aligning only the min edges
+    pulled the SW corner one cell west/south whenever a buffered bound sat
+    just below a cell line (remainder > res/2), adding a west column and
+    shifting a row south. Ceil-expanding max edges when already aligned used
+    to add an extra cell; nearest-multiple snap is a no-op on aligned edges.
 
     Parameters:
     bounds (tuple): The bounds of the boundary.
@@ -287,11 +289,13 @@ def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[
     """
     xmin, ymin, xmax, ymax = bounds
     resolution = float(resolution)
-    # Floor-align mins; size by truncating partial cells on the max edges.
-    xmin = xmin - (xmin % resolution)
-    ymin = ymin - (ymin % resolution)
-    width = int((xmax - xmin) / resolution)
-    height = int((ymax - ymin) / resolution)
+
+    def _snap(value: float) -> float:
+        return round(value / resolution) * resolution
+
+    xmin, ymin, xmax, ymax = _snap(xmin), _snap(ymin), _snap(xmax), _snap(ymax)
+    width = int(round((xmax - xmin) / resolution))
+    height = int(round((ymax - ymin) / resolution))
     xmax = xmin + width * resolution
     ymax = ymin + height * resolution
 
