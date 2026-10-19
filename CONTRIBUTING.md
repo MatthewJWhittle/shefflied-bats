@@ -2,7 +2,7 @@
 
 Thanks for helping improve the HSM toolchain.
 
-Working principles for coding agents (and useful for contributors) live in [AGENTS.md](AGENTS.md).
+General project principles for coding agents (and useful for contributors) live in [AGENTS.md](AGENTS.md).
 
 ## Setup
 
