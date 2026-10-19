@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -225,8 +226,7 @@ def _write_layer_csv(path: Path, results: Sequence) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=LAYER_CSV_COLUMNS)
         writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+        writer.writerows(rows)
     logging.info("Wrote layer comparison table: %s", path)
 
 
@@ -243,15 +243,5 @@ def _write_model_hooks_csv(path: Path, hooks: Sequence) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for hook in hooks:
-            writer.writerow(
-                {
-                    "model_id": hook.model_id,
-                    "auc_current": hook.auc_current,
-                    "auc_rebuilt": hook.auc_rebuilt,
-                    "share_cutoff_switch": hook.share_cutoff_switch,
-                    "verdict": hook.verdict,
-                    "notes": hook.notes,
-                }
-            )
+        writer.writerows(asdict(hook) for hook in hooks)
     logging.info("Wrote model comparison stub table: %s", path)

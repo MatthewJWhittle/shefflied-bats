@@ -21,6 +21,7 @@ from sdm.raster.layer_compare import (
     DuplicateLayerError,
     LayerValueKind,
     LayerVerdict,
+    _valid_mask,
     analyze_mismatch_patches,
     classify_value_kind,
     compare_layer_pair,
@@ -524,6 +525,17 @@ def test_nodata_cells_must_match(tmp_path: Path):
     assert result.grid_ok is False
     assert "nodata_cells" in result.grid_check
     assert result.verdict is LayerVerdict.FAIL
+
+
+def test_near_nodata_value_counts_as_valid():
+    """Exact nodata match only — values just off the sentinel are real data."""
+    nodata = -9999.0
+    data = np.array(
+        [[nodata, nodata + 0.05], [np.nan, 1.0]],
+        dtype=np.float32,
+    )
+    mask = _valid_mask(data, nodata)
+    assert mask.tolist() == [[False, True], [False, True]]
 
 
 def test_validate_comparison_write_path_refuses_data_evs(tmp_path: Path, monkeypatch):

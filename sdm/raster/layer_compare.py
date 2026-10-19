@@ -14,7 +14,7 @@ from __future__ import annotations
 import csv
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Iterable, Mapping, Optional, Sequence
@@ -445,13 +445,28 @@ def check_grid(
 
 
 def _valid_mask(data: np.ndarray, nodata) -> np.ndarray:
-    mask = np.ones(data.shape, dtype=bool)
-    if nodata is not None:
-        try:
-            mask &= ~np.isclose(data.astype(np.float64), float(nodata), equal_nan=True)
-        except (TypeError, ValueError):
-            mask &= data != nodata
-    mask &= ~np.isnan(data.astype(np.float64, copy=False))
+    """True where cells are valid (GDAL / rasterio ``read(masked=True)``).
+
+    A cell is invalid only when it is NaN, or exactly equal to the nodata
+    sentinel. Approximate (``isclose``) matching wrongly treats near-nodata
+    values such as ``-9999.05`` as missing and is much slower on large stacks.
+    """
+    if nodata is None:
+        if np.issubdtype(data.dtype, np.floating):
+            return ~np.isnan(data)
+        return np.ones(data.shape, dtype=bool)
+
+    try:
+        nodata_is_nan = bool(np.isnan(nodata))
+    except (TypeError, ValueError):
+        nodata_is_nan = False
+
+    if nodata_is_nan:
+        return ~np.isnan(data)
+
+    mask = data != nodata
+    if np.issubdtype(data.dtype, np.floating):
+        mask &= ~np.isnan(data)
     return mask
 
 
@@ -744,18 +759,7 @@ def _write_patch_table(path: Path, patches: Sequence[PatchInfo]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for patch in patches:
-            writer.writerow(
-                {
-                    "component_id": patch.component_id,
-                    "cell_count": patch.cell_count,
-                    "row_min": patch.row_min,
-                    "row_max": patch.row_max,
-                    "col_min": patch.col_min,
-                    "col_max": patch.col_max,
-                    "bbox_fill_ratio": patch.bbox_fill_ratio,
-                }
-            )
+        writer.writerows(asdict(patch) for patch in patches)
 
 
 def model_compare_hooks(model_ids: Sequence[str] | None = None) -> list[ModelCompareHookResult]:
@@ -765,20 +769,8 @@ def model_compare_hooks(model_ids: Sequence[str] | None = None) -> list[ModelCom
 
 
 def result_to_row(result: LayerCompareResult) -> dict:
-    return {
-        "layer_name": result.layer_name,
-        "value_kind": result.value_kind.value,
-        "grid_check": result.grid_check,
-        "grid_ok": result.grid_ok,
-        "share_within_tolerance": result.share_within_tolerance,
-        "max_difference": result.max_difference,
-        "difference_map_path": result.difference_map_path,
-        "differences_local": result.differences_local,
-        "n_mismatch_components": result.n_mismatch_components,
-        "patch_table_path": result.patch_table_path,
-        "source_version_current": result.source_version_current,
-        "source_version_rebuilt": result.source_version_rebuilt,
-        "reason": result.reason,
-        "verdict": result.verdict.value,
-        "notes": result.notes,
-    }
+    row = asdict(result)
+    row.pop("patches", None)
+    row["value_kind"] = result.value_kind.value
+    row["verdict"] = result.verdict.value
+    return row
