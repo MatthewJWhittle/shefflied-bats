@@ -4,7 +4,6 @@ import rioxarray as rxr
 import logging
 import geopandas as gpd
 import numpy as np
-from scipy.spatial import cKDTree
 from typing import Dict, Optional, Union, List
 from tempfile import NamedTemporaryFile
 from shapely.geometry import Polygon
@@ -90,25 +89,28 @@ def calculate_distances(
     grid = generate_point_grid(bbox, resolution, boundary.crs)
     logging.info("Generated point grid with %d points", len(grid))
 
-    grid_points = np.array(grid[["x", "y"]])
     for name, gdf in feature_gdfs.items():
         logging.info("Calculating distances to %s features", name)
-        # Ensure geometry is not empty and contains points
-        if gdf.empty or not gdf.geometry.apply(lambda geom: geom.type == 'Point').all():
-            logging.warning("Skipping %s due to empty or non-point geometry", name)
-            grid[f"distance_to_{name}"] = np.nan
-            continue
-        
-        feature_points = np.array(
-            [[geom.x, geom.y] for geom in gdf.geometry]
-        )
-        if feature_points.size == 0:
-            logging.warning("Skipping %s due to no valid feature points after extraction", name)
+        if gdf.empty:
+            logging.warning("Skipping %s due to empty GeoDataFrame", name)
             grid[f"distance_to_{name}"] = np.nan
             continue
 
-        tree = cKDTree(feature_points)
-        grid[f"distance_to_{name}"] = tree.query(grid_points, k=1)[0]
+        working = gdf
+        if working.crs is not None and boundary.crs is not None and working.crs != boundary.crs:
+            logging.info("Reprojecting %s from %s to %s", name, working.crs, boundary.crs)
+            working = working.to_crs(boundary.crs)
+
+        valid = working[~working.geometry.isna() & ~working.geometry.is_empty]
+        if valid.empty:
+            logging.warning("Skipping %s due to no valid geometries", name)
+            grid[f"distance_to_{name}"] = np.nan
+            continue
+
+        # Distance to nearest feature for any shapely type (Point, LineString, Polygon, …).
+        # Matches calculate_distance_to_geom: grid.geometry.distance against a unioned geom.
+        feature_geom = valid.union_all()
+        grid[f"distance_to_{name}"] = grid.geometry.distance(feature_geom)
         logging.debug("Completed distance calculation for %s", name)
 
     logging.info("Converting distance grid to xarray")

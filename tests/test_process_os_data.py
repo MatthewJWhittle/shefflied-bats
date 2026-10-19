@@ -87,6 +87,60 @@ def test_calculate_distances(sample_boundary, sample_features):
     assert "distance_to_water" in distances
     assert not np.any(np.isnan(distances.distance_to_buildings))
 
+
+def test_calculate_distances_point_geometry(sample_boundary):
+    """Point features yield finite, non-empty distance values."""
+    features = {
+        "points": gpd.GeoDataFrame(
+            {"geometry": [Point(25, 25), Point(75, 75)]},
+            crs="EPSG:27700",
+        )
+    }
+    distances = calculate_distances(features, sample_boundary, resolution=20)
+    values = distances.distance_to_points.values
+
+    assert values.size > 0
+    assert np.isfinite(values).all()
+    assert (values >= 0).all()
+
+
+def test_calculate_distances_line_geometry(sample_boundary):
+    """LineString features (e.g. roads) yield finite, non-empty distance values."""
+    features = {
+        "roads": gpd.GeoDataFrame(
+            {"geometry": [LineString([(10, 10), (90, 10)]), LineString([(50, 0), (50, 100)])]},
+            crs="EPSG:27700",
+        )
+    }
+    distances = calculate_distances(features, sample_boundary, resolution=20)
+    values = distances.distance_to_roads.values
+
+    assert values.size > 0
+    assert np.isfinite(values).all()
+    assert (values >= 0).all()
+
+
+def test_calculate_distances_polygon_geometry(sample_boundary):
+    """Polygon features (e.g. buildings/woodland) yield finite, non-empty distance values."""
+    features = {
+        "buildings": gpd.GeoDataFrame(
+            {
+                "geometry": [
+                    Polygon([(20, 20), (40, 20), (40, 40), (20, 40)]),
+                    Polygon([(60, 60), (80, 60), (80, 80), (60, 80)]),
+                ]
+            },
+            crs="EPSG:27700",
+        )
+    }
+    distances = calculate_distances(features, sample_boundary, resolution=20)
+    values = distances.distance_to_buildings.values
+
+    assert values.size > 0
+    assert np.isfinite(values).all()
+    assert (values >= 0).all()
+
+
 @pytest.mark.parametrize("resolution", [1, 5])
 def test_rasterise_gdf(sample_features, tmp_path, resolution):
     """Test GeoDataFrame rasterization."""
