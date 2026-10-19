@@ -114,3 +114,56 @@ def test_generate_climate_data_hardcoded_variables():
     assert 'variables' not in sig.parameters
     
     # The function now hardcodes variables = ["bio", "tavg", "prec", "wind"]
+
+
+def test_rebuild_enables_climate_run_stats(tmp_path, monkeypatch):
+    """sdm data must request climate_stats.tif (merge lists climate_stats)."""
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "evs-rebuild"
+    captured: dict = {}
+
+    def _climate(*_args, **kwargs):
+        captured.update(kwargs)
+        climate_dir = Path(kwargs.get("output_dir", out / "climate"))
+        climate_dir.mkdir(parents=True, exist_ok=True)
+        return {"bio": climate_dir / "bio.tif"}
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    monkeypatch.setattr(mod, "generate_terrain_data", _ok)
+    monkeypatch.setattr(mod, "generate_terrain_stats", _ok)
+    monkeypatch.setattr(mod, "generate_climate_data", _climate)
+    monkeypatch.setattr(mod, "generate_ceh_lc_data", _ok)
+    monkeypatch.setattr(mod, "generate_vom_data", _ok)
+    monkeypatch.setattr(mod, "generate_coastal_distance", _ok)
+    monkeypatch.setattr(mod, "process_os_data", _ok)
+    monkeypatch.setattr(mod, "merge_ev_layers", _ok)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: [])
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        only=["climate"],
+    )
+
+    assert captured.get("run_stats") is True, (
+        "rebuild must pass run_stats=True so climate_stats.tif is written for merge"
+    )
