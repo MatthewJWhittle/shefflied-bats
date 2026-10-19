@@ -4,13 +4,46 @@ import rioxarray as rxr
 import logging
 import geopandas as gpd
 import numpy as np
-from scipy.spatial import cKDTree
-from typing import Dict, Optional, Union, List
+from typing import Dict, Optional, Sequence, Union, List
 from tempfile import NamedTemporaryFile
+from shapely import STRtree
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
 from .utils import generate_point_grid, rasterise_gdf
+
+
+def nearest_distances_strtree(
+    query_geoms: Sequence[BaseGeometry],
+    feature_geoms: Sequence[BaseGeometry],
+) -> np.ndarray:
+    """Distance from each query geometry to the nearest feature via STRtree.
+
+    Uses ``STRtree.query_nearest(..., return_distance=True)``. Distance is 0
+    when a query geometry intersects a feature. Prefer this over union +
+    ``geometry.distance`` for large feature sets (O(log n) nearest search).
+    """
+    n_query = len(query_geoms)
+    if n_query == 0:
+        return np.array([], dtype=float)
+    if len(feature_geoms) == 0:
+        return np.full(n_query, np.nan)
+
+    tree = STRtree(feature_geoms)
+    indices, distances = tree.query_nearest(
+        query_geoms, return_distance=True, all_matches=False
+    )
+    # Scatter into query order: with all_matches=False there is one hit per
+    # non-empty query geometry; empty/None queries are omitted from the result.
+    out = np.full(n_query, np.nan)
+    if distances.size == 0:
+        return out
+    if indices.ndim == 1:
+        # Scalar query path (single geometry) — indices are tree indices only.
+        out[0] = distances[0] if distances.size else np.nan
+        return out
+    out[indices[0]] = distances
+    return out
 
 
 def load_dataset(path: Path):
@@ -90,25 +123,29 @@ def calculate_distances(
     grid = generate_point_grid(bbox, resolution, boundary.crs)
     logging.info("Generated point grid with %d points", len(grid))
 
-    grid_points = np.array(grid[["x", "y"]])
     for name, gdf in feature_gdfs.items():
         logging.info("Calculating distances to %s features", name)
-        # Ensure geometry is not empty and contains points
-        if gdf.empty or not gdf.geometry.apply(lambda geom: geom.type == 'Point').all():
-            logging.warning("Skipping %s due to empty or non-point geometry", name)
-            grid[f"distance_to_{name}"] = np.nan
-            continue
-        
-        feature_points = np.array(
-            [[geom.x, geom.y] for geom in gdf.geometry]
-        )
-        if feature_points.size == 0:
-            logging.warning("Skipping %s due to no valid feature points after extraction", name)
+        if gdf.empty:
+            logging.warning("Skipping %s due to empty GeoDataFrame", name)
             grid[f"distance_to_{name}"] = np.nan
             continue
 
-        tree = cKDTree(feature_points)
-        grid[f"distance_to_{name}"] = tree.query(grid_points, k=1)[0]
+        working = gdf
+        if working.crs is not None and boundary.crs is not None and working.crs != boundary.crs:
+            logging.info("Reprojecting %s from %s to %s", name, working.crs, boundary.crs)
+            working = working.to_crs(boundary.crs)
+
+        valid = working[~working.geometry.isna() & ~working.geometry.is_empty]
+        if valid.empty:
+            logging.warning("Skipping %s due to no valid geometries", name)
+            grid[f"distance_to_{name}"] = np.nan
+            continue
+
+        # Nearest distance for any shapely type (Point, LineString, Polygon, …)
+        # via STRtree — not union + distance, which is O(cells × features).
+        grid[f"distance_to_{name}"] = nearest_distances_strtree(
+            grid.geometry.values, valid.geometry.values
+        )
         logging.debug("Completed distance calculation for %s", name)
 
     logging.info("Converting distance grid to xarray")
