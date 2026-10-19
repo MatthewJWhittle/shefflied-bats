@@ -29,7 +29,7 @@ Prefer a shared base with thin adapters over one-off patches. Bug fixes should s
 
 ## Modelling practice
 
-One modelling change at a time; write the reason first. Fit caps, percentiles, and thresholds on training folds only. Do not clip or cap inside the model pipeline — do that when building environmental layers. Adding or dropping a layer needs a stated ecological mechanism and scale, checks on held-out areas, and a per-layer table. Prefer the ecologically plausible model over a small accuracy gain.
+One modelling change at a time; write the reason first. Layer-level clipping in the environmental-layer build (for example distance layers 0–7000 m, curvature 5th–95th percentile) uses the whole map's values and never looks at the species records. Anything the model learns from the records — thresholds, caps, percentiles, or scaling fitted to training data — is fitted on training folds only. Still do not clip or cap inside the model pipeline. Adding or dropping a layer needs a stated ecological mechanism and scale, checks on held-out areas, and a per-layer table. Prefer the ecologically plausible model over a small accuracy gain.
 
 ## Data and safety
 
