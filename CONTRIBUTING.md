@@ -2,6 +2,8 @@
 
 Thanks for helping improve the HSM toolchain.
 
+General project principles for coding agents (and useful for contributors) live in [AGENTS.md](AGENTS.md).
+
 ## Setup
 
 ```bash
