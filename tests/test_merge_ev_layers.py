@@ -176,3 +176,82 @@ class TestMergeEvLayersWorkflow:
                     boundary_path=boundary_file,
                     verbose=False
                 )
+
+class TestMergeGridMatchesRelease:
+    """Merge grid must match the release EV grid (7 km buffer, floor-aligned)."""
+
+    def test_construct_transform_matches_release_shape_on_buffered_aoi(self):
+        """Buffered Yorkshire AOI must snap to 1930×1544, not 1931×1545."""
+        import geopandas as gpd
+        from sdm.raster.utils import construct_transform_shift_bounds
+
+        boundary = gpd.read_file("data/processed/boundary.geojson")
+        buffered = boundary.copy()
+        buffered["geometry"] = buffered.geometry.buffer(7000)
+        transform, snapped = construct_transform_shift_bounds(
+            tuple(buffered.total_bounds), 100
+        )
+        width = int(round((snapped[2] - snapped[0]) / 100))
+        height = int(round((snapped[3] - snapped[1]) / 100))
+        assert (width, height) == (1930, 1544), (
+            f"expected release grid 1930×1544, got {width}×{height} "
+            f"(snapped={snapped}, transform={transform})"
+        )
+        # Already-aligned edges must not gain an extra cell (ceil-style bug).
+        aligned = (356100.0, 371500.0, 549100.0, 525900.0)
+        _, snapped_aligned = construct_transform_shift_bounds(aligned, 100)
+        assert snapped_aligned == aligned
+
+    def test_rebuild_passes_study_area_buffer_to_merge(self, tmp_path, monkeypatch):
+        """Merge inside sdm data must use the 7 km study-area buffer, not 0."""
+        from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+        boundary = tmp_path / "boundary.geojson"
+        boundary.write_text(
+            '{"type":"FeatureCollection","features":[]}',
+            encoding="utf-8",
+        )
+        out = tmp_path / "evs-rebuild"
+        captured: dict = {}
+
+        def _merge(*_args, **kwargs):
+            captured.update(kwargs)
+
+        def _ok(*_args, **_kwargs):
+            return out
+
+        monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+        for name in (
+            "generate_terrain_data",
+            "generate_terrain_stats",
+            "generate_climate_data",
+            "generate_ceh_lc_data",
+            "generate_vom_data",
+            "generate_coastal_distance",
+            "process_os_data",
+        ):
+            monkeypatch.setattr(mod, name, _ok)
+        monkeypatch.setattr(mod, "merge_ev_layers", _merge)
+        monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: ["x=y.tif"])
+        stub_settings = {
+            "layer_clipping": {"enabled": True, "layers": {}, "applied": {}}
+        }
+        monkeypatch.setattr(
+            mod,
+            "build_model_ev_stack",
+            lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+        )
+        monkeypatch.setattr(
+            mod, "build_settings_from_config", lambda *_a, **_k: stub_settings
+        )
+        monkeypatch.setattr(mod, "load_config", lambda: {})
+        monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+        mod.rebuild_environmental_layers(
+            out,
+            boundary_path=boundary,
+            resolution=100,
+            buffer_distance_m=7000,
+            only=["merge"],
+        )
+        assert captured.get("boundary_buffer_m") == 7000
