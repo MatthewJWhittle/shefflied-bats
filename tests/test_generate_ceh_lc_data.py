@@ -8,6 +8,11 @@ from shapely.geometry import box
 from rasterio.transform import from_bounds
 
 from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import generate_ceh_lc_data
+from sdm.raster.processing import calculate_multiscale_variables
+
+# At 100 m cells: window 10/20/30 → 500/1000/1500 m neighbourhood means
+# (matches notebooks/feature-engineering.ipynb and calculate_multiscale_variables).
+LANDCOVER_NEIGHBOURHOOD_WINDOWS = (10, 20, 30)
 
 
 @pytest.fixture
@@ -295,3 +300,109 @@ def test_chunked_matches_when_requested_window_splits_output_cell():
     assert set(full.data_vars) == set(chunked.data_vars)
     for name in full.data_vars:
         np.testing.assert_array_equal(full[name].values, chunked[name].values)
+
+
+def _load_ceh_output_dataset(path):
+    """Load CEH GeoTIFF bands as a Dataset keyed by long_name."""
+    da = rxr.open_rasterio(path)
+    names = da.attrs.get("long_name")
+    if isinstance(names, str):
+        names = [names]
+    names = list(names)
+    assert len(names) == int(da.sizes["band"])
+    da = da.assign_coords(band=names)
+    ds = da.to_dataset(dim="band")
+    for name in ds.data_vars:
+        if hasattr(da, "rio") and da.rio.crs is not None:
+            ds[name] = ds[name].rio.write_crs(da.rio.crs)
+        nodata = da.rio.nodata
+        if nodata is not None:
+            ds[name].rio.write_nodata(nodata, inplace=True)
+    return ds
+
+
+def _landcover_step_with_neighbourhood(ceh_tif_path):
+    """
+    Full land-cover step outputs: in-cell class layers plus 500/1000/1500 m means.
+
+    Neighbourhood averages use the existing multiscale path
+    (``calculate_multiscale_variables``), not chunked CEH aggregation.
+    """
+    class_layers = _load_ceh_output_dataset(ceh_tif_path)
+    parts = [class_layers]
+    for window in LANDCOVER_NEIGHBOURHOOD_WINDOWS:
+        parts.append(calculate_multiscale_variables(class_layers, window))
+    return xr.merge(parts)
+
+
+def test_e2e_landcover_step_matches_a97f7d9_baseline_with_neighbourhood(
+    tmp_path, mock_spatial_config
+):
+    """
+    Full land-cover step (class layers + 500/1000/1500 m neighbourhood averages)
+    from chunked aggregation must match the a97f7d9 single-pass baseline
+    (``coarsen_method="full"``) on a synthetic AOI where chunk edges fall
+    mid-neighbourhood-window.
+    """
+    # 600×620 @ 10 m → after trim/coarsen ~60×62 @ 100 m. window_pixels=105
+    # snaps to 100 source px = 10 coarse cells, so chunk seams every 10 cells.
+    # Neighbourhood windows 20 and 30 (radius 10 / 15) therefore straddle seams.
+    height, width = 600, 620
+    tile = _synthetic_ceh_tile(height, width, seed=42)
+    ceh_path = tmp_path / "ceh.tif"
+    tile.rio.to_raster(ceh_path)
+
+    # Boundary inset so clip keeps a multi-chunk interior; no extra buffer.
+    margin = 80
+    boundary = gpd.GeoDataFrame(
+        geometry=[box(margin, margin, width * 10 - margin, height * 10 - margin)],
+        crs="EPSG:27700",
+    )
+    boundary_path = tmp_path / "boundary.geojson"
+    boundary.to_file(boundary_path)
+
+    with patch(
+        "sdm.commands.data_preparation.environmental.generate_ceh_lc_data.load_spatial_config"
+    ) as mock_config:
+        mock_config.return_value = mock_spatial_config
+
+        baseline_path = generate_ceh_lc_data(
+            output_dir=tmp_path / "baseline",
+            boundary_path=boundary_path,
+            ceh_data_path=ceh_path,
+            buffer_distance_m=0,
+            output_resolution_m=100,
+            window_pixels=105,
+            coarsen_method="full",  # a97f7d9 single-pass path
+            verbose=False,
+        )
+        chunked_path = generate_ceh_lc_data(
+            output_dir=tmp_path / "chunked",
+            boundary_path=boundary_path,
+            ceh_data_path=ceh_path,
+            buffer_distance_m=0,
+            output_resolution_m=100,
+            window_pixels=105,  # mid-100 m cell request → snaps; seams mid-window
+            coarsen_method="chunked",
+            verbose=False,
+        )
+
+    baseline = _landcover_step_with_neighbourhood(baseline_path)
+    chunked = _landcover_step_with_neighbourhood(chunked_path)
+
+    # Class layers plus neighbourhood suffixes must all be present and equal.
+    assert set(baseline.data_vars) == set(chunked.data_vars)
+    neighbourhood_vars = [
+        v for v in baseline.data_vars if str(v).endswith(("_500m", "_1000m", "_1500m"))
+    ]
+    assert neighbourhood_vars, "expected 500/1000/1500 m neighbourhood layers"
+    class_vars = [v for v in baseline.data_vars if v not in neighbourhood_vars]
+    assert class_vars, "expected in-cell class layers"
+
+    for name in baseline.data_vars:
+        np.testing.assert_allclose(
+            baseline[name].values,
+            chunked[name].values,
+            equal_nan=True,
+            err_msg=f"mismatch in land-cover step layer {name!r}",
+        )
