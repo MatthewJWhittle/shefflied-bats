@@ -179,3 +179,76 @@ async def test_temp_storage_loads_before_tile_cleanup(monkeypatch):
     assert values.size > 0
     assert set(np.unique(values[np.isfinite(values)])).issuperset({1.0, 2.0})
 
+
+def _wcs_downloader_for_tile_layout(
+    tile_pixels: tuple[int, int] = (1024, 1024),
+) -> WCSDownloader:
+    """Build a WCSDownloader without DescribeCoverage / network."""
+    downloader = WCSDownloader.__new__(WCSDownloader)
+    downloader.endpoint = "https://example.invalid/wcs"
+    downloader.coverage_id = "test_coverage"
+    downloader.tile_width, downloader.tile_height = tile_pixels
+    downloader.use_temp_storage = False
+    downloader.temp_dir = None
+    downloader.axis_labels = ["x", "y"]
+    downloader.native_crs = "http://www.opengis.net/def/crs/EPSG/0/27700"
+    return downloader
+
+
+def test_wcs_tiles_use_fixed_national_grid_independent_of_study_origin():
+    """Shared cells must request the same boxes regardless of study bounds.
+
+    Rebuild failure mode (#38 / 67312d9): tile loops started at the study-area
+    corner, so the same ground cell produced different GetCoverage boxes when
+    the AOI shifted. Tile edges must fall on multiples of
+    ``tile_pixels × resolution`` metres from (0, 0) in EPSG:27700.
+    """
+    resolution = 10.0
+    tile_pixels = (1024, 1024)
+    tile_m = tile_pixels[0] * resolution  # 10_240 m
+    downloader = _wcs_downloader_for_tile_layout(tile_pixels)
+
+    # Two overlapping study boxes that do not share a SW corner (neither on
+    # a national tile edge). Synthetic metres only — not a real site.
+    bbox_a = (12_300.0, 45_600.0, 35_000.0, 68_000.0)
+    bbox_b = (18_100.0, 50_200.0, 40_500.0, 72_400.0)
+
+    tiles_a = set(downloader.tile_bboxes_for_coverage(bbox_a, resolution))
+    tiles_b = set(downloader.tile_bboxes_for_coverage(bbox_b, resolution))
+    shared = tiles_a & tiles_b
+
+    assert shared, "overlapping study areas must share at least one national tile"
+    for minx, miny, maxx, maxy in shared:
+        assert minx % tile_m == 0
+        assert miny % tile_m == 0
+        assert maxx - minx == tile_m
+        assert maxy - miny == tile_m
+
+    # Same shared tile identity from either AOI (set intersection already
+    # requires identical request boxes).
+    assert shared == {
+        t for t in tiles_a
+        if t[0] < bbox_b[2] and t[2] > bbox_b[0] and t[1] < bbox_b[3] and t[3] > bbox_b[1]
+    }
+    assert shared == {
+        t for t in tiles_b
+        if t[0] < bbox_a[2] and t[2] > bbox_a[0] and t[1] < bbox_a[3] and t[3] > bbox_a[1]
+    }
+
+    # These AOIs are deliberately off the national grid so corner-anchored
+    # tiling (67312d9) would produce different request boxes.
+    def _corner_anchored(bbox):
+        minx, miny, maxx, maxy = bbox
+        out = []
+        x = minx
+        while x < maxx:
+            y = miny
+            while y < maxy:
+                out.append((x, y, min(x + tile_m, maxx), min(y + tile_m, maxy)))
+                y += tile_m
+            x += tile_m
+        return set(out)
+
+    assert _corner_anchored(bbox_a) != tiles_a
+    assert _corner_anchored(bbox_b) != tiles_b
+

@@ -15,6 +15,8 @@ import aiohttp
 import xarray as xr
 import rioxarray as rxr
 
+from sdm.raster.utils import BoxTiler
+
 logger = logging.getLogger(__name__)
 
 class WCSDownloader:
@@ -33,6 +35,26 @@ class WCSDownloader:
         self.use_temp_storage = use_temp_storage
         self.temp_dir: Optional[Path] = None
         self.axis_labels, self.native_crs = self._fetch_coverage_description()
+
+    def tile_bboxes_for_coverage(
+        self,
+        bbox: Tuple[float, float, float, float],
+        resolution: float,
+    ) -> List[Tuple[float, float, float, float]]:
+        """Return GetCoverage boxes on the fixed national tile grid.
+
+        Tile edges fall on multiples of ``tile_pixels × resolution`` metres
+        from origin (0, 0) in the coverage CRS (EPSG:27700 for EA products).
+        Request boxes for a given cell are therefore independent of the
+        study-area corner.
+        """
+        tile_width_crs = self.tile_width * resolution
+        tile_height_crs = self.tile_height * resolution
+        tiler = BoxTiler(
+            tile_size=(tile_width_crs, tile_height_crs),
+            origin=(0.0, 0.0),
+        )
+        return tiler.tile_bbox(bbox)
 
     def _fetch_coverage_description(self) -> Tuple[List[str], str]:
         """Retrieves the coverage description (axis labels and native CRS) via DescribeCoverage."""
@@ -68,23 +90,8 @@ class WCSDownloader:
             self.temp_dir = Path(tempfile.mkdtemp())
             
         try:
-            # Calculate tile bounds using BoxTiler approach from old implementation
-            minx, miny, maxx, maxy = bbox
-            tile_width_crs = self.tile_width * resolution
-            tile_height_crs = self.tile_height * resolution
-            
-            # Generate tiles using BoxTiler logic
-            tiles = []
-            x = minx
-            while x < maxx:
-                y = miny
-                while y < maxy:
-                    tile_maxx = min(x + tile_width_crs, maxx)
-                    tile_maxy = min(y + tile_height_crs, maxy)
-                    tiles.append((x, y, tile_maxx, tile_maxy))
-                    y += tile_height_crs
-                x += tile_width_crs
-            
+            tiles = self.tile_bboxes_for_coverage(bbox, resolution)
+
             # Download tiles
             async with aiohttp.ClientSession() as session:
                 tasks = []
