@@ -79,7 +79,7 @@ class StepMetricsRecorder:
         """Write JSON and CSV metrics next to rebuild outputs.
 
         ``extra`` is merged into the JSON payload (e.g. provenance or
-        ``build_settings``). CSV remains step rows only.
+        ``build_settings`` for layer clipping limits). CSV remains step rows only.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

@@ -6,8 +6,8 @@ name: Python application
 on:
   push:
     branches: [ "main" ]
+  # Any base (incl. stacked drafts) — do not pin a branch name.
   pull_request:
-    branches: [ "main" ]
 
 permissions:
   contents: read
