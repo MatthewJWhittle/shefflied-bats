@@ -227,6 +227,18 @@ def merge_ev_layers(
     if not datasets_to_merge:
         raise ValueError("No valid datasets provided to merge.")
 
+    missing = {
+        name: path
+        for name, path in datasets_to_merge.items()
+        if not path.exists()
+    }
+    if missing:
+        details = ", ".join(f"{name}={path}" for name, path in sorted(missing.items()))
+        raise FileNotFoundError(
+            "Cannot merge; missing required inputs "
+            f"(refusing to overwrite {output_path}): {details}"
+        )
+
     logging.info("Merging %d datasets. Output: %s", len(datasets_to_merge), output_path)
 
     # Load boundary and project's spatial parameters for reprojection and final clipping

@@ -223,8 +223,13 @@ def rebuild_environmental_layers(
             ),
         )
 
-        skip_ceh = "ceh" not in active
-        skip_coastal = "coastal" not in active
+        # Omit CEH/coastal from merge only when explicitly ``--skip``'d.
+        # ``--only merge`` leaves those steps inactive for generation but must
+        # still consume existing outputs in the folder (otherwise all-evs.tif
+        # is rewritten without them and the model stack KeyErrors).
+        explicit_skip = frozenset(skip)
+        skip_ceh = "ceh" in explicit_skip
+        skip_coastal = "coastal" in explicit_skip
         _run_or_skip(
             "merge",
             "merge_ev_layers",

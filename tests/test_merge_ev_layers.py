@@ -203,34 +203,24 @@ class TestMergeEvLayersWorkflow:
             mock_clip_save.assert_called_once()
     
     def test_no_datasets_processed(self, tmp_path):
-        """Test error handling when no datasets are successfully processed."""
+        """Missing inputs fail before merge starts (no partial overwrite)."""
         boundary_file = tmp_path / "boundary.geojson"
         boundary_file.touch()
-        
+
         missing_file1 = tmp_path / "missing1.tif"
         missing_file2 = tmp_path / "missing2.tif"
         output_path = tmp_path / "output.tif"
-        
-        with patch('sdm.commands.data_preparation.processing.merge_ev_layers.load_boundary_and_transform') as mock_load_boundary, \
-             patch('sdm.commands.data_preparation.processing.merge_ev_layers.load_and_preprocess_dataset') as mock_load:
-            
-            # Mock boundary loading
-            mock_boundary_gdf = Mock()
-            mock_boundary_gdf.crs = "EPSG:27700"
-            mock_transform = Mock()
-            mock_spatial_config = {"resolution": 100}
-            mock_load_boundary.return_value = (mock_boundary_gdf, mock_transform, None, mock_spatial_config)
-            
-            # Mock load function to always raise FileNotFoundError
-            mock_load.side_effect = FileNotFoundError("File not found")
-            
-            with pytest.raises(ValueError, match="No datasets were successfully processed"):
-                merge_ev_layers(
-                    dataset_inputs=[f"missing1={missing_file1}", f"missing2={missing_file2}"],
-                    output_path=output_path,
-                    boundary_path=boundary_file,
-                    verbose=False
-                )
+
+        with pytest.raises(FileNotFoundError, match="Cannot merge"):
+            merge_ev_layers(
+                dataset_inputs=[
+                    f"missing1={missing_file1}",
+                    f"missing2={missing_file2}",
+                ],
+                output_path=output_path,
+                boundary_path=boundary_file,
+                verbose=False,
+            )
 
 class TestMergeGridMatchesRelease:
     """Shared grid construction must match the release EV snap (7 km buffer)."""
