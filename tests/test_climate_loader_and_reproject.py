@@ -60,6 +60,7 @@ def test_reproject_climate_datasets_uses_two_step_reproject(mock_reproject_data)
         target_crs="EPSG:27700",
         target_transform=target_transform,
         target_resolution=100,
+        target_bounds=(0.0, 0.0, 1000.0, 1000.0),
     )
 
     mock_reproject_data.assert_called_once_with(
@@ -67,5 +68,6 @@ def test_reproject_climate_datasets_uses_two_step_reproject(mock_reproject_data)
         crs="EPSG:27700",
         transform=target_transform,
         resolution=100,
+        bounds=(0.0, 0.0, 1000.0, 1000.0),
     )
     assert "tavg" in result

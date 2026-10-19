@@ -101,6 +101,61 @@ class TestMergeEvLayersWorkflow:
                 output_path=Path("output.tif"),
                 boundary_path=Path("boundary.geojson")
             )
+
+    def test_merge_fails_before_writing_when_input_missing(self, tmp_path):
+        """Missing merge inputs must raise before overwriting all-evs.tif.
+
+        Root cause: missing layers were skipped with a warning, so a partial
+        merge could replace an existing all-evs.tif before the model stack
+        failed with KeyError.
+        """
+        from affine import Affine
+
+        boundary_file = tmp_path / "boundary.geojson"
+        boundary_file.write_text(
+            '{"type":"FeatureCollection","features":[]}',
+            encoding="utf-8",
+        )
+        present = tmp_path / "present.tif"
+        xr.DataArray(
+            np.ones((2, 2), dtype=np.float32),
+            dims=("y", "x"),
+            coords={"y": [1.0, 0.0], "x": [0.0, 1.0]},
+            name="terrain",
+        ).rio.write_crs("EPSG:27700").rio.write_transform(
+            Affine(1.0, 0.0, 0.0, 0.0, -1.0, 2.0)
+        ).rio.to_raster(present)
+        missing = tmp_path / "missing-ceh.tif"
+        output_path = tmp_path / "all-evs.tif"
+        output_path.write_text("prior-merge-product", encoding="utf-8")
+        prior = output_path.read_text(encoding="utf-8")
+
+        mock_boundary = Mock()
+        mock_boundary.crs = "EPSG:27700"
+        mock_boundary.union_all.return_value = Mock()
+
+        with patch(
+            "sdm.commands.data_preparation.processing.merge_ev_layers.load_boundary_and_transform",
+            return_value=(
+                mock_boundary,
+                Affine(100.0, 0.0, 0.0, 0.0, -100.0, 200.0),
+                (0.0, 0.0, 200.0, 200.0),
+                {"resolution": 100},
+            ),
+        ), pytest.raises(FileNotFoundError, match="missing-ceh|Cannot merge"):
+            merge_ev_layers(
+                dataset_inputs=[
+                    f"terrain={present}",
+                    f"ceh_landcover={missing}",
+                ],
+                output_path=output_path,
+                boundary_path=boundary_file,
+                verbose=False,
+            )
+
+        assert output_path.read_text(encoding="utf-8") == prior, (
+            "all-evs.tif must not be overwritten when merge inputs are missing"
+        )
     
     def test_merge_ev_layers_basic_workflow(self, tmp_path):
         """Test basic workflow with mocked dependencies."""
@@ -148,34 +203,24 @@ class TestMergeEvLayersWorkflow:
             mock_clip_save.assert_called_once()
     
     def test_no_datasets_processed(self, tmp_path):
-        """Test error handling when no datasets are successfully processed."""
+        """Missing inputs fail before merge starts (no partial overwrite)."""
         boundary_file = tmp_path / "boundary.geojson"
         boundary_file.touch()
-        
+
         missing_file1 = tmp_path / "missing1.tif"
         missing_file2 = tmp_path / "missing2.tif"
         output_path = tmp_path / "output.tif"
-        
-        with patch('sdm.commands.data_preparation.processing.merge_ev_layers.load_boundary_and_transform') as mock_load_boundary, \
-             patch('sdm.commands.data_preparation.processing.merge_ev_layers.load_and_preprocess_dataset') as mock_load:
-            
-            # Mock boundary loading
-            mock_boundary_gdf = Mock()
-            mock_boundary_gdf.crs = "EPSG:27700"
-            mock_transform = Mock()
-            mock_spatial_config = {"resolution": 100}
-            mock_load_boundary.return_value = (mock_boundary_gdf, mock_transform, None, mock_spatial_config)
-            
-            # Mock load function to always raise FileNotFoundError
-            mock_load.side_effect = FileNotFoundError("File not found")
-            
-            with pytest.raises(ValueError, match="No datasets were successfully processed"):
-                merge_ev_layers(
-                    dataset_inputs=[f"missing1={missing_file1}", f"missing2={missing_file2}"],
-                    output_path=output_path,
-                    boundary_path=boundary_file,
-                    verbose=False
-                )
+
+        with pytest.raises(FileNotFoundError, match="Cannot merge"):
+            merge_ev_layers(
+                dataset_inputs=[
+                    f"missing1={missing_file1}",
+                    f"missing2={missing_file2}",
+                ],
+                output_path=output_path,
+                boundary_path=boundary_file,
+                verbose=False,
+            )
 
 class TestMergeGridMatchesRelease:
     """Shared grid construction must match the release EV snap (7 km buffer)."""
@@ -284,3 +329,53 @@ class TestMergeGridMatchesRelease:
             only=["merge"],
         )
         assert captured.get("boundary_buffer_m") == 7000
+
+
+class TestReprojectMatchesTemplate:
+    """Destination grid must lock to template shape+transform, not source size."""
+
+    def test_reproject_data_crops_source_that_extends_one_cell_south(self):
+        """Layer one row taller than the template must still match template shape.
+
+        Root cause (pre-fix): ``rio.reproject(..., transform=...)`` without
+        ``shape`` keeps the source height/width, so producers disagree and the
+        merge union grows an empty edge row/column.
+        """
+        from affine import Affine
+        from rasterio.enums import Resampling
+
+        from sdm.raster.utils import reproject_data
+
+        resolution = 100.0
+        # Template 3×4 (rows×cols); NW origin (0, 300) → bounds (0, 0, 400, 300).
+        template_transform = Affine(resolution, 0.0, 0.0, 0.0, -resolution, 300.0)
+        template_bounds = (0.0, 0.0, 400.0, 300.0)
+        template_shape = (3, 4)
+
+        # Same transform origin but four rows (one cell south of the template).
+        source = xr.DataArray(
+            np.ones((4, 4), dtype=np.float32),
+            dims=("y", "x"),
+            coords={
+                "y": np.array([250.0, 150.0, 50.0, -50.0]),
+                "x": np.array([50.0, 150.0, 250.0, 350.0]),
+            },
+            name="layer",
+        )
+        source = source.rio.write_crs("EPSG:27700").rio.write_transform(
+            Affine(resolution, 0.0, 0.0, 0.0, -resolution, 300.0)
+        )
+
+        out = reproject_data(
+            source,
+            crs="EPSG:27700",
+            transform=template_transform,
+            resolution=resolution,
+            resampling=Resampling.nearest,
+            bounds=template_bounds,
+        )
+
+        assert out.rio.shape == template_shape, (
+            f"expected template shape {template_shape}, got {out.rio.shape}"
+        )
+        assert out.rio.transform() == template_transform

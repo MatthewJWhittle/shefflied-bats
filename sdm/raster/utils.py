@@ -18,13 +18,17 @@ def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=
     # Define the raster size and transform
     # Here, I'm assuming a 1x1 meter resolution and using the bounds of the GeoDataFrame
     if bbox is None:
-        x_min, y_min, x_max, y_max = gdf.total_bounds
-    else: 
-        x_min, y_min, x_max, y_max = bbox
+        raw_bounds = tuple(gdf.total_bounds)
+    else:
+        raw_bounds = tuple(bbox)
 
-    width = int((x_max - x_min) / resolution)
-    height = int((y_max - y_min) / resolution)
-    transform = from_bounds(x_min, y_min, x_max, y_max, width, height)
+    # Snap to the shared resolution grid so the 10 m OS cover origin sits on a
+    # cell line (same helper as the model transform). Raw buffered bounds left
+    # the fine grid offset and bilinear resample bled fractions into zeros.
+    transform, (x_min, y_min, x_max, y_max) = construct_transform_shift_bounds(
+        raw_bounds, resolution
+    )
+    height, width = grid_shape_from_bounds((x_min, y_min, x_max, y_max), resolution)
 
     # Create a mask: rasterize the GeoDataFrame. This gives a value of True where the geometry covers a square
     mask = geometry_mask(gdf.geometry, transform=transform, invert=True, out_shape=(height, width))
@@ -140,21 +144,50 @@ def tile_bounding_box(xmin, ymin, xmax, ymax, tile_shape, resolution):
 
     return tiles
 
+def grid_shape_from_bounds(
+    bounds: Tuple[float, float, float, float], resolution: float
+) -> Tuple[int, int]:
+    """Return ``(height, width)`` for a bounds box at ``resolution``."""
+    xmin, ymin, xmax, ymax = bounds
+    resolution = float(resolution)
+    width = int(round((xmax - xmin) / resolution))
+    height = int(round((ymax - ymin) / resolution))
+    return height, width
+
+
 def reproject_data(
     array: Union[xr.DataArray, xr.Dataset],
     crs: Union[str, int, dict],
     transform: Affine,
     resolution: float,
     resampling: Resampling = Resampling.bilinear,
+    *,
+    shape: Optional[Tuple[int, int]] = None,
+    bounds: Optional[Tuple[float, float, float, float]] = None,
 ) -> Union[xr.DataArray, xr.Dataset]:
     """
-    Reprojects the given array to a specified coordinate reference system (CRS) and transform.
+    Reproject ``array`` onto the template grid given by ``transform`` and shape.
+
+    ``shape`` or ``bounds`` is required. Passing only ``transform`` lets
+    rioxarray keep the source height/width, so producers disagree and the
+    merge union grows empty edge rows/columns. Prefer ``rio.reproject`` with
+    both ``transform`` and ``shape`` (equivalent to ``reproject_match``).
     """
+    if shape is None:
+        if bounds is None:
+            raise ValueError(
+                "reproject_data requires shape= or bounds= to lock the "
+                "destination template grid"
+            )
+        shape = grid_shape_from_bounds(bounds, resolution)
+    # resolution is encoded in transform; rioxarray forbids combining it
+    # with shape/transform.
+    _ = resolution
     reprojected = array.rio.reproject(
-        crs, resolution=resolution, resampling=Resampling.bilinear
-    )
-    reprojected = reprojected.rio.reproject(
-        crs, resampling=Resampling.bilinear, transform=transform
+        crs,
+        transform=transform,
+        shape=shape,
+        resampling=resampling,
     )
     if isinstance(reprojected, xr.DataArray):
         reprojected = reprojected.where(reprojected != reprojected.rio.nodata, np.nan)
@@ -294,8 +327,7 @@ def construct_transform_shift_bounds(bounds: tuple, resolution: float) -> tuple[
         return round(value / resolution) * resolution
 
     xmin, ymin, xmax, ymax = _snap(xmin), _snap(ymin), _snap(xmax), _snap(ymax)
-    width = int(round((xmax - xmin) / resolution))
-    height = int(round((ymax - ymin) / resolution))
+    height, width = grid_shape_from_bounds((xmin, ymin, xmax, ymax), resolution)
     xmax = xmin + width * resolution
     ymax = ymin + height * resolution
 

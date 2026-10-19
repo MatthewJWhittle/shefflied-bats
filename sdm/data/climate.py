@@ -35,7 +35,9 @@ def reproject_climate_datasets(
     datasets: Dict[str, xr.DataArray],
     target_crs: str,
     target_transform,  # Can be Affine or tuple
-    target_resolution: float
+    target_resolution: float,
+    *,
+    target_bounds: tuple,
 ) -> Dict[str, xr.DataArray]:
     """Reproject climate datasets to target CRS and resolution."""
     reprojected = {}
@@ -47,6 +49,7 @@ def reproject_climate_datasets(
                 crs=target_crs,
                 transform=target_transform,
                 resolution=target_resolution,
+                bounds=target_bounds,
             )
         except Exception as e:
             print(f"Error reprojecting {var}: {e}")

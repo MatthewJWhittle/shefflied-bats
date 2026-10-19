@@ -27,7 +27,7 @@ from sdm.raster.processing import (
     aggregate_categorical_rasters,
     create_binary_raster_from_category,
 )
-from sdm.raster.utils import construct_transform_shift_bounds
+from sdm.raster.utils import construct_transform_shift_bounds, reproject_data
 from sdm.utils.io import load_boundary, load_spatial_config
 from sdm.utils.logging_utils import setup_logging
 
@@ -263,14 +263,17 @@ def generate_ceh_lc_data(
     )
 
     spatial_config = load_spatial_config()
-    model_transform, _bounds = construct_transform_shift_bounds(
+    model_transform, grid_bounds = construct_transform_shift_bounds(
         tuple(boundary.to_crs(spatial_config["crs"]).total_bounds), output_resolution_m
     )
 
-    lc_projected = lc_processed.rio.reproject(
-        spatial_config["crs"],
+    lc_projected = reproject_data(
+        lc_processed,
+        crs=spatial_config["crs"],
         transform=model_transform,
+        resolution=output_resolution_m,
         resampling=Resampling.nearest,
+        bounds=grid_bounds,
     )
 
     output_path = output_dir / f"ceh-land-cover-{output_resolution_m}m.tif"

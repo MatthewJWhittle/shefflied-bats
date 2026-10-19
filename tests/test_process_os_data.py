@@ -319,6 +319,76 @@ def test_distance_calculation_boundary_conditions(sample_boundary):
 
 
 
+def test_rasterise_gdf_snaps_origin_to_resolution(tmp_path):
+    """10 m OS cover grid must start on a cell line, not the raw bbox origin.
+
+    Root cause: rasterise_gdf used from_bounds on the raw buffered boundary, so
+    the fine grid was offset from the model snap and bilinear resample bled
+    fractional cover into true zero cells.
+    """
+    from sdm.raster.utils import construct_transform_shift_bounds
+
+    buildings = gpd.GeoDataFrame(
+        {"geometry": [Polygon([(40, 40), (60, 40), (60, 60), (40, 60)])]},
+        crs="EPSG:27700",
+    )
+    # Unaligned buffered-style bbox (remainders 3 m / 7 m at 10 m).
+    bbox = (3.0, 7.0, 103.0, 107.0)
+    resolution = 10.0
+    output_file = str(tmp_path / "snapped.tif")
+    rasterise_gdf(buildings, resolution=resolution, output_file=output_file, bbox=bbox)
+
+    expected_transform, expected_bounds = construct_transform_shift_bounds(
+        bbox, resolution
+    )
+    with rio.open(output_file) as src:
+        assert src.transform == expected_transform
+        assert src.transform.c == expected_bounds[0]
+        assert src.transform.f == expected_bounds[3]
+
+
+def test_reproject_data_honours_nearest_resampling():
+    """Nearest must keep binary cover as 0/1; bilinear bleeds fractions into zeros.
+
+    Root cause: reproject_data ignored its resampling argument and always used
+    bilinear.
+    """
+    from affine import Affine
+    from rasterio.enums import Resampling
+
+    from sdm.raster.utils import reproject_data
+
+    src_transform = Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0)
+    data = np.zeros((10, 10), dtype=np.float32)
+    data[2:5, 2:5] = 1.0
+    source = xr.DataArray(
+        data,
+        dims=("y", "x"),
+        coords={
+            "y": np.arange(95.0, -1.0, -10.0),
+            "x": np.arange(5.0, 100.0, 10.0),
+        },
+    )
+    source = source.rio.write_crs("EPSG:27700").rio.write_transform(src_transform)
+
+    dst_transform = Affine(20.0, 0.0, 0.0, 0.0, -20.0, 100.0)
+    bounds = (0.0, 0.0, 100.0, 100.0)
+    out = reproject_data(
+        source,
+        crs="EPSG:27700",
+        transform=dst_transform,
+        resolution=20.0,
+        resampling=Resampling.nearest,
+        bounds=bounds,
+    )
+    values = np.asarray(out.values, dtype=float)
+    finite = values[np.isfinite(values)]
+    assert set(np.unique(finite)).issubset({0.0, 1.0}), (
+        f"nearest resampling must not invent fractional cover; got {np.unique(finite)}"
+    )
+    assert (finite == 0).any() and (finite == 1).any()
+
+
 def test_rasterise_gdf_keeps_zero_cover_as_valid_data(tmp_path):
     """Zero cover must remain 0, not nodata (neighbourhood means need zeros)."""
     # One small building in a larger bbox so most cells are true zero cover.
@@ -396,7 +466,11 @@ def test_os_cover_outside_boundary_is_nan_not_fill_value():
 
     transform = Affine(20.0, 0.0, 0.0, 0.0, -20.0, 200.0)
     stacked = reproject_data(
-        cover, "EPSG:27700", transform=transform, resolution=20
+        cover,
+        "EPSG:27700",
+        transform=transform,
+        resolution=20,
+        bounds=(0.0, 0.0, 200.0, 200.0),
     )
     for name in stacked.data_vars:
         arr = np.asarray(stacked[name].values, dtype=float)

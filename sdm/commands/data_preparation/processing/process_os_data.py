@@ -5,6 +5,7 @@ from typing import Union, Tuple, List, Dict, Optional
 import geopandas as gpd
 import pandas as pd
 import xarray as xr
+from rasterio.enums import Resampling
 from shapely.geometry import box
 
 from sdm.utils.logging_utils import setup_logging
@@ -98,11 +99,14 @@ def process_os_data(
 
     # Calculate and save feature cover
     feature_cover = calculate_feature_cover(feature_gdfs, boundary)
+    # Nearest keeps valid zero cover exactly 0 (bilinear bleeds fractions).
     feature_cover = reproject_data(
         feature_cover,
         spatial_config["crs"],
         transform=model_transform,
         resolution=spatial_config["resolution"],
+        resampling=Resampling.nearest,
+        bounds=bounds,
     )
     logging.info("Writing feature cover raster")
     cover_path = output_dir / "os-feature-cover.tif"
@@ -117,6 +121,7 @@ def process_os_data(
         spatial_config["crs"],
         transform=model_transform,
         resolution=spatial_config["resolution"],
+        bounds=bounds,
     )
     logging.info("Writing distance matrix raster")
     distance_path = output_dir / "os-distance-to-feature.tif"
