@@ -225,17 +225,30 @@ def subset_selected_variables(
     return dataset[list(selected)]
 
 
+def _band_source_nodata(data_array: xr.DataArray) -> Any:
+    """Return the GeoTIFF source nodata tag for a band.
+
+    After ``open_rasterio(..., masked=True)``, ``rio.nodata`` is already NaN
+    (masked), while the file's original tag lives in ``rio.encoded_nodata``.
+    Prefer ``encoded_nodata``; fall back to ``rio.nodata``.
+    """
+    encoded = data_array.rio.encoded_nodata
+    if encoded is not None:
+        return encoded
+    return data_array.rio.nodata
+
+
 def _capture_nodata(dataset: xr.Dataset) -> dict[str, Any]:
-    """Snapshot each band's rio nodata (notebook preserves source tags on write)."""
-    return {str(var): dataset[var].rio.nodata for var in dataset.data_vars}
+    """Snapshot each band's source nodata tag for later restore on write."""
+    return {str(var): _band_source_nodata(dataset[var]) for var in dataset.data_vars}
 
 
 def _restore_nodata(dataset: xr.Dataset, nodata_by_var: Mapping[str, Any]) -> xr.Dataset:
     """Re-apply source nodata after ops (clip/astype) that drop encoding.
 
-    Does not invent NaN when every source band lacked a nodata tag. When some
-    source bands had a tag, neighbourhood / clip survivors inherit that source
-    value so the Dataset write stays consistent.
+    Does not invent a tag when every source band lacked one (``None``). Explicit
+    NaN tags from the source file are preserved. Neighbourhood / clip survivors
+    inherit a sibling source tag so the Dataset write stays consistent.
     """
     out = dataset
     fallback = next(
@@ -367,12 +380,9 @@ def build_model_ev_stack(
         windows_cells=multi["windows_cells"],
     )
 
-    # float32 + long_name for GeoTIFF band descriptions. Restore source nodata
-    # rather than inventing NaN when the source tag was unset (notebook write
-    # path: ``rio.to_raster`` only, no forced NaN fill).
-    # Note: load uses masked=True (same as the notebook), so a tagged source
-    # nodata such as -9999 is already NaN in ``source_nodata`` before write —
-    # that is why today's evs-to-model.tif carries NaN nodata.
+    # float32 + long_name for GeoTIFF band descriptions. Restore the source
+    # nodata tag (from ``encoded_nodata`` after a masked read) rather than
+    # inventing NaN when unset — matching notebook replay of a -9999 source.
     for var in dataset.data_vars:
         dataset[var] = dataset[var].astype(np.float32)
         dataset[var].attrs["long_name"] = str(var)
