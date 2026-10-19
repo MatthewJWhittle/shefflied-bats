@@ -234,3 +234,64 @@ def test_generate_ceh_lc_data_output_structure(
     
     # Check that we have some data
     assert len(output_data.data_vars) > 0
+
+
+def _synthetic_ceh_tile(height: int, width: int, seed: int = 0, nodata: int = 255):
+    """Build a synthetic 10 m CEH-like categorical tile (EPSG:27700)."""
+    rng = np.random.default_rng(seed)
+    codes = np.arange(1, 22)
+    data = rng.choice(codes, size=(height, width)).astype(np.uint8)
+    data[rng.random(data.shape) < 0.03] = nodata
+    x = np.arange(width) * 10 + 5
+    y = (np.arange(height)[::-1]) * 10 + 5
+    da = xr.DataArray(data, dims=["y", "x"], coords={"y": y, "x": x}, name="land_cover")
+    da = da.rio.write_crs("EPSG:27700")
+    da = da.rio.write_transform(from_bounds(0, 0, width * 10, height * 10, width, height))
+    da = da.rio.write_nodata(nodata)
+    return da
+
+
+def test_chunked_matches_single_pass_exactly():
+    """Chunked coarsen must match the legacy single-pass stack on a small tile."""
+    from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import (
+        coarsen_land_cover_categories,
+    )
+
+    tile = _synthetic_ceh_tile(240, 260, seed=7)
+    # window=80 → multiple chunks on this tile; 80 is already a multiple of 10.
+    full = coarsen_land_cover_categories(tile, 100, window_pixels=80, method="full")
+    chunked = coarsen_land_cover_categories(tile, 100, window_pixels=80, method="chunked")
+
+    assert set(full.data_vars) == set(chunked.data_vars)
+    assert np.allclose(full.x.values, chunked.x.values)
+    assert np.allclose(full.y.values, chunked.y.values)
+    for name in full.data_vars:
+        np.testing.assert_array_equal(full[name].values, chunked[name].values)
+
+
+def test_chunked_matches_when_requested_window_splits_output_cell():
+    """
+    Requested window mid-way through a 100 m cell (105 source px) must snap to
+    the output grid so no coarse cell is split; result still matches single-pass.
+    """
+    from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import (
+        _aligned_window_starts,
+        coarsen_land_cover_categories,
+    )
+
+    coarsen_factor = 10  # 10 m → 100 m
+    # 105 is deliberately not a multiple of 10 — would split a 100 m cell if used raw.
+    starts = list(_aligned_window_starts(350, window=105, coarsen_factor=coarsen_factor))
+    assert starts, "expected at least one aligned chunk"
+    for start, size in starts:
+        assert start % coarsen_factor == 0
+        assert size % coarsen_factor == 0
+        assert size <= 100  # 105 snapped down to 100
+
+    tile = _synthetic_ceh_tile(350, 370, seed=11)
+    full = coarsen_land_cover_categories(tile, 100, window_pixels=105, method="full")
+    chunked = coarsen_land_cover_categories(tile, 100, window_pixels=105, method="chunked")
+
+    assert set(full.data_vars) == set(chunked.data_vars)
+    for name in full.data_vars:
+        np.testing.assert_array_equal(full[name].values, chunked[name].values)
