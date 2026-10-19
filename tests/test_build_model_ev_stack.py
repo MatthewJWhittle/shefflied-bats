@@ -223,17 +223,27 @@ def test_does_not_invent_nodata_when_source_unset(tmp_path: Path) -> None:
 
 
 def test_preserves_encoded_nodata_minus_9999(tmp_path: Path) -> None:
-    """Masked read puts NaN in ``rio.nodata``; restore ``encoded_nodata`` (-9999)."""
+    """Masked read puts NaN in ``rio.nodata``; restore tag and cell values (-9999)."""
     selected_csv = tmp_path / "selected.csv"
     selected_csv.write_text(
         "column_name,include\nterrain_dtm,1\nos_cover_water,1\n",
         encoding="utf-8",
     )
     height = width = 12
+    nodata = -9999.0
+    terrain = np.ones((height, width), dtype=np.float32)
+    # Plant source nodata cells — must survive masked read → write as -9999,
+    # not as NaN (tag-only restore left cells as NaN).
+    nodata_positions = ((0, 0), (1, 2), (5, 7), (11, 11))
+    for row, col in nodata_positions:
+        terrain[row, col] = nodata
+    water = np.zeros((height, width), dtype=np.float32)
+    for row, col in ((2, 3), (4, 4)):
+        water[row, col] = nodata
     ds = xr.Dataset(
         {
-            "terrain_dtm": (("y", "x"), np.ones((height, width), dtype=np.float32)),
-            "os_cover_water": (("y", "x"), np.zeros((height, width), dtype=np.float32)),
+            "terrain_dtm": (("y", "x"), terrain),
+            "os_cover_water": (("y", "x"), water),
             "terrain_stats_curvature": (
                 ("y", "x"),
                 np.linspace(-1, 1, height * width, dtype=np.float32).reshape(
@@ -249,15 +259,17 @@ def test_preserves_encoded_nodata_minus_9999(tmp_path: Path) -> None:
     ds = ds.rio.write_crs("EPSG:27700")
     for var in ds.data_vars:
         ds[var].attrs["long_name"] = var
-        ds[var].rio.write_nodata(-9999.0, inplace=True)
+        ds[var].rio.write_nodata(nodata, inplace=True)
     all_evs = tmp_path / "all-evs.tif"
     out = tmp_path / "evs-to-model.tif"
     ds.rio.to_raster(all_evs)
 
     opened = rxr.open_rasterio(all_evs, masked=True, band_as_variable=True)
     assert np.isnan(float(opened["band_1"].rio.nodata))
-    assert float(opened["band_1"].rio.encoded_nodata) == -9999.0
-    assert float(_band_source_nodata(opened["band_1"])) == -9999.0
+    assert float(opened["band_1"].rio.encoded_nodata) == nodata
+    assert float(_band_source_nodata(opened["band_1"])) == nodata
+    # Masked open turns planted -9999 cells into NaN in memory.
+    assert np.isnan(float(opened["band_1"].values[0, 0]))
 
     settings = default_build_settings()
     settings["selected_variables_csv"] = str(selected_csv)
@@ -266,5 +278,20 @@ def test_preserves_encoded_nodata_minus_9999(tmp_path: Path) -> None:
     build_model_ev_stack(all_evs, out, build_settings=settings)
 
     written = rxr.open_rasterio(out, masked=False, band_as_variable=True)
-    for var in written.data_vars:
-        assert float(written[var].rio.nodata) == -9999.0
+    by_name = {
+        str(written[var].attrs.get("long_name", var)): written[var]
+        for var in written.data_vars
+    }
+    for arr in by_name.values():
+        assert float(arr.rio.nodata) == nodata
+    terrain_out = by_name["terrain_dtm"].values
+    water_out = by_name["os_cover_water"].values
+    for row, col in nodata_positions:
+        assert float(terrain_out[row, col]) == nodata
+        assert not np.isnan(float(terrain_out[row, col]))
+    for row, col in ((2, 3), (4, 4)):
+        assert float(water_out[row, col]) == nodata
+    assert int(np.sum(terrain_out == nodata)) == len(nodata_positions)
+    assert int(np.sum(np.isnan(terrain_out))) == 0
+    assert int(np.sum(water_out == nodata)) == 2
+    assert int(np.sum(np.isnan(water_out))) == 0
