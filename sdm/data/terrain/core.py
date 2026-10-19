@@ -102,9 +102,15 @@ class WCSDownloader:
             # Merge tiles using the same approach as old implementation
             if results:
                 if self.use_temp_storage:
-                    # Use xarray.open_mfdataset for disk-based merging
-                    merged = xr.open_mfdataset(results, engine="rasterio", chunks={"x": self.tile_width, "y": self.tile_height})
-                    merged = merged.rename({"band_data": self.coverage_id})
+                    # Use xarray.open_mfdataset for disk-based merging.
+                    # Load before finally deletes tile_*.tif — callers need a
+                    # concrete array, not a lazy view of removed paths.
+                    merged = xr.open_mfdataset(
+                        results,
+                        engine="rasterio",
+                        chunks={"x": self.tile_width, "y": self.tile_height},
+                    )
+                    merged = merged.rename({"band_data": self.coverage_id}).load()
                 else:
                     # Merge arrays in memory - results are bytes that need to be converted to xarray
                     arrays = []

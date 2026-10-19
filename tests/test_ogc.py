@@ -92,8 +92,9 @@ async def test_download_to_temp_storage(test_bbox, wcs_test_params):
     )
 
     assert isinstance(result, xr.Dataset)
-    # assert it has returned a chunked array
-    assert result.chunks is not None
+    # Temp tiles are deleted on return; data must already be loaded.
+    assert result[temp_downloader.coverage_id].chunks is None
+    assert np.isfinite(result[temp_downloader.coverage_id].values).any()
 
     # check the resolution
     result_res = result.rio.resolution()
