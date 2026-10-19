@@ -420,12 +420,15 @@ def summarise_raster_metrics(
             f"{var_name_prefix}_std_{target_resolution}m": data_std,
         }
     )
-    # Attempt to copy spatial attributes if they exist and are meaningful after aggregation
-    if hasattr(data_array, 'rio'):
+    # Copy CRS / transform from the coarsened result. After xarray.coarsen the
+    # cached rio affine still describes the source resolution; recalc from the
+    # result coordinates so later reproject does not smear window stats.
+    if hasattr(data_array, "rio"):
         summary_ds = summary_ds.rio.write_crs(data_array.rio.crs)
-        # Transform might need adjustment based on coarsening, or use original if extent is similar
-        # For simplicity, assign the transform of the (potentially) coarsened mean array
-        summary_ds = summary_ds.rio.write_transform(data_mean.rio.transform() if hasattr(data_mean, 'rio') else None)
+        if hasattr(data_mean, "rio"):
+            summary_ds = summary_ds.rio.write_transform(
+                data_mean.rio.transform(recalc=True)
+            )
 
     return summary_ds
 
