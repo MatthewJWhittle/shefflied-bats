@@ -213,9 +213,10 @@ class TestMergeGridMatchesRelease:
         from shapely.geometry import box
         from sdm.raster.utils import construct_transform_shift_bounds
 
-        # Synthetic study box (not a real site): unaligned after 7 km buffer.
+        # Synthetic study box (not a real site): after 7 km buffer, min-edge
+        # remainders are > res/2 so floor-align and round-align disagree.
         study = gpd.GeoDataFrame(
-            geometry=[box(1103.98, 2203.56, 2896.02, 3796.44)],
+            geometry=[box(10096.02, 8056.44, 12948.88, 11401.38)],
             crs="EPSG:27700",
         )
         buffered = study.copy()
