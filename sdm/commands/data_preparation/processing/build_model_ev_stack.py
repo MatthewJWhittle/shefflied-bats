@@ -243,12 +243,26 @@ def _capture_nodata(dataset: xr.Dataset) -> dict[str, Any]:
     return {str(var): _band_source_nodata(dataset[var]) for var in dataset.data_vars}
 
 
+def _is_nan_nodata(nodata: Any) -> bool:
+    """True when ``nodata`` is a floating NaN sentinel (not a finite tag)."""
+    try:
+        return bool(np.isnan(nodata))
+    except (TypeError, ValueError):
+        return False
+
+
 def _restore_nodata(dataset: xr.Dataset, nodata_by_var: Mapping[str, Any]) -> xr.Dataset:
     """Re-apply source nodata after ops (clip/astype) that drop encoding.
 
     Does not invent a tag when every source band lacked one (``None``). Explicit
     NaN tags from the source file are preserved. Neighbourhood / clip survivors
     inherit a sibling source tag so the Dataset write stays consistent.
+
+    After a masked read, nodata cells are NaN in memory. ``write_nodata`` with
+    the default ``encoded=False`` only sets the metadata tag, so a float32
+    GeoTIFF still stores NaN in those cells. Fill finite source tags back into
+    the array and pass ``encoded=True`` so notebook replay keeps e.g. -9999
+    in both the tag and the cell values.
     """
     out = dataset
     fallback = next(
@@ -265,7 +279,9 @@ def _restore_nodata(dataset: xr.Dataset, nodata_by_var: Mapping[str, Any]) -> xr
         if nodata is None:
             nodata = fallback
         if nodata is not None:
-            out[var].rio.write_nodata(nodata, inplace=True)
+            if not _is_nan_nodata(nodata):
+                out[var] = out[var].fillna(nodata)
+            out[var].rio.write_nodata(nodata, encoded=True, inplace=True)
     return out
 
 
@@ -380,9 +396,9 @@ def build_model_ev_stack(
         windows_cells=multi["windows_cells"],
     )
 
-    # float32 + long_name for GeoTIFF band descriptions. Restore the source
-    # nodata tag (from ``encoded_nodata`` after a masked read) rather than
-    # inventing NaN when unset — matching notebook replay of a -9999 source.
+    # float32 + long_name for GeoTIFF band descriptions. Restore source nodata
+    # tag + cell values (fill NaN, ``encoded=True``) rather than inventing NaN
+    # when unset — matching notebook replay of a -9999 source.
     for var in dataset.data_vars:
         dataset[var] = dataset[var].astype(np.float32)
         dataset[var].attrs["long_name"] = str(var)

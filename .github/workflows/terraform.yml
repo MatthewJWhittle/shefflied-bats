@@ -2,10 +2,7 @@ name: Terraform
 
 on:
   pull_request:
-    # Include the #44 stack base so draft #45 (and siblings) still get CI.
-    branches:
-      - main
-      - cursor/ev-rebuild-output-guards-b9f0
+    branches: [main]
   push:
     branches: [main]
     paths:
