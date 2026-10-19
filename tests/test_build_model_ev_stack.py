@@ -29,6 +29,16 @@ def test_canonicalize_band_names() -> None:
     assert canonicalize_band_name("bgs_coast") == "bgs_coast_distance_to_coast"
     assert canonicalize_band_name("climate_bio_bio_4") == "climate_bioclim_bio_4"
     assert canonicalize_band_name("climate_bioclim_4") == "climate_bioclim_bio_4"
+    # Rebuilt WorldClim bands keep the wc2.1_30s stem after tidy_variable_name.
+    assert canonicalize_band_name("climate_bioclim_wc2_1_30s_bio_3") == (
+        "climate_bioclim_bio_3"
+    )
+    assert canonicalize_band_name("climate_bioclim_wc2_1_30s_bio_7") == (
+        "climate_bioclim_bio_7"
+    )
+    assert canonicalize_band_name("climate_bioclim_wc2_1_30s_bio_9") == (
+        "climate_bioclim_bio_9"
+    )
     assert canonicalize_band_name("vom_height_mean_100m") == "vom_vegetation_height_mean"
     assert (
         canonicalize_band_name("vom_vegetation_height_vom_height_max_100m")
