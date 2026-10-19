@@ -4,12 +4,46 @@ import rioxarray as rxr
 import logging
 import geopandas as gpd
 import numpy as np
-from typing import Dict, Optional, Union, List
+from typing import Dict, Optional, Sequence, Union, List
 from tempfile import NamedTemporaryFile
+from shapely import STRtree
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
 from .utils import generate_point_grid, rasterise_gdf
+
+
+def nearest_distances_strtree(
+    query_geoms: Sequence[BaseGeometry],
+    feature_geoms: Sequence[BaseGeometry],
+) -> np.ndarray:
+    """Distance from each query geometry to the nearest feature via STRtree.
+
+    Uses ``STRtree.query_nearest(..., return_distance=True)``. Distance is 0
+    when a query geometry intersects a feature. Prefer this over union +
+    ``geometry.distance`` for large feature sets (O(log n) nearest search).
+    """
+    n_query = len(query_geoms)
+    if n_query == 0:
+        return np.array([], dtype=float)
+    if len(feature_geoms) == 0:
+        return np.full(n_query, np.nan)
+
+    tree = STRtree(feature_geoms)
+    indices, distances = tree.query_nearest(
+        query_geoms, return_distance=True, all_matches=False
+    )
+    # Scatter into query order: with all_matches=False there is one hit per
+    # non-empty query geometry; empty/None queries are omitted from the result.
+    out = np.full(n_query, np.nan)
+    if distances.size == 0:
+        return out
+    if indices.ndim == 1:
+        # Scalar query path (single geometry) — indices are tree indices only.
+        out[0] = distances[0] if distances.size else np.nan
+        return out
+    out[indices[0]] = distances
+    return out
 
 
 def load_dataset(path: Path):
@@ -107,10 +141,11 @@ def calculate_distances(
             grid[f"distance_to_{name}"] = np.nan
             continue
 
-        # Distance to nearest feature for any shapely type (Point, LineString, Polygon, …).
-        # Matches calculate_distance_to_geom: grid.geometry.distance against a unioned geom.
-        feature_geom = valid.union_all()
-        grid[f"distance_to_{name}"] = grid.geometry.distance(feature_geom)
+        # Nearest distance for any shapely type (Point, LineString, Polygon, …)
+        # via STRtree — not union + distance, which is O(cells × features).
+        grid[f"distance_to_{name}"] = nearest_distances_strtree(
+            grid.geometry.values, valid.geometry.values
+        )
         logging.debug("Completed distance calculation for %s", name)
 
     logging.info("Converting distance grid to xarray")
