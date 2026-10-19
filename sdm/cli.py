@@ -501,6 +501,82 @@ def visualize(
     
     logging.info("Visualizations generated!")
 
+
+@app.command("compare-layers")
+def compare_layers(
+    rebuilt_dir: Path = typer.Argument(
+        ...,
+        help="Folder of rebuilt environmental layers (GeoTIFF files or multi-band stacks).",
+    ),
+    current_dir: Path = typer.Argument(
+        ...,
+        help="Folder of the current / reference environmental layers.",
+    ),
+    output_csv: Path = typer.Option(
+        Path("data/evs/layer_comparison.csv"),
+        "--output-csv",
+        "-o",
+        help="CSV table with one row per layer.",
+    ),
+    variables_config_path: Path = typer.Option(
+        Path("data/sdm_config/Plecotus_auritus_Roost/variables_config.yml"),
+        "--variables-config",
+        help="Variables YAML whose layer list is compared first (Plecotus roost by default).",
+    ),
+    difference_maps_dir: Optional[Path] = typer.Option(
+        None,
+        "--difference-maps-dir",
+        help="Directory for per-layer difference GeoTIFFs (default: alongside the CSV).",
+    ),
+    source_versions: Optional[Path] = typer.Option(
+        None,
+        "--source-versions",
+        help="Optional YAML mapping layer → {current, rebuilt} source versions.",
+    ),
+    model_hooks_csv: Optional[Path] = typer.Option(
+        None,
+        "--model-hooks-csv",
+        help="Optional stub CSV for later model AUC / cut-off checks (not run here).",
+    ),
+    verbose: bool = False,
+) -> None:
+    """Compare rebuilt environmental layers to the current set (issue #38).
+
+    Pass marks: identical grid/shape; ≥95% of cells within tolerance (exact for
+    category/percentage-cover; 1% of layer range for continuous); difference
+    maps for local patches; source-version changes flagged, not failed.
+    """
+    from sdm.commands.data_preparation.processing.compare_ev_layers import (
+        compare_ev_layers,
+    )
+
+    setup_logging(verbose=verbose)
+    summary = compare_ev_layers(
+        rebuilt_dir=rebuilt_dir,
+        current_dir=current_dir,
+        output_csv=output_csv,
+        variables_config_path=variables_config_path,
+        difference_maps_dir=difference_maps_dir,
+        source_versions_path=source_versions,
+        write_model_hooks_csv=model_hooks_csv,
+        verbose=verbose,
+    )
+    n_pass = sum(1 for r in summary.layers if r.verdict.value == "pass")
+    n_fail = sum(1 for r in summary.layers if r.verdict.value == "fail")
+    n_flag = sum(
+        1 for r in summary.layers if r.verdict.value == "flagged_source_change"
+    )
+    n_missing = sum(1 for r in summary.layers if r.verdict.value == "missing")
+    logging.info(
+        "Layer comparison complete: %s pass, %s fail, %s flagged, %s missing → %s",
+        n_pass,
+        n_fail,
+        n_flag,
+        n_missing,
+        output_csv,
+    )
+
+
 @app.command()
 def explain(
     ev_path: str = typer.Option(

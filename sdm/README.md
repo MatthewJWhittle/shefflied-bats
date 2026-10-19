@@ -16,6 +16,7 @@ uv sync   # or: pip install -e .
 | `sdm train` | Train MaxEnt models and write model packages |
 | `sdm predict` | Apply trained models to the EV stack |
 | `sdm export-rasters` | Reproject and/or COG-wrap rasters for sharing |
+| `sdm compare-layers` | Compare rebuilt vs current environmental layers (#38) |
 | `sdm visualize` | Partial dependence and related plots |
 | `sdm explain` | SHAP interpretability plots |
 | `sdm pipeline -o DIR` | Run data → train → predict → visualize using the rebuilt EV folder |
@@ -67,6 +68,8 @@ sdm visualize \
 **`sdm predict`** writes `all_predictions.tif` and, by default, per-model `prediction_{model_id}.tif` files. Outputs use the project CRS (`config.yml`, typically EPSG:27700) and are COG-encoded unless `--no-cog` is passed. Use `--prediction-crs` to change the output CRS.
 
 **`sdm export-rasters`** is for secondary bundles: pass explicit GeoTIFF paths, optionally `--output-crs EPSG:3857` and/or `--cog`. At least one of reprojection or COG encoding must be requested.
+
+**`sdm compare-layers`** compares a rebuilt layer folder to the current set and writes a per-layer CSV (shape check, share within tolerance, difference maps, verdict). Details: [docs/layer-comparison.md](../docs/layer-comparison.md).
 
 Model package layout and consumer expectations: [docs/model-package-contract.md](../docs/model-package-contract.md).
 
