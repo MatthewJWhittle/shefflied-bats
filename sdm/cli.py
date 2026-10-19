@@ -591,7 +591,8 @@ def compare_layers(
     Closeness, not exactness: grid must align; continuous layers pass when ≥95%
     of cells are within 1% of the layer range; categorical layers when ≥95%
     match. Nodata mismatches count as not-close and are reported separately.
-    Intended method changes use --flag-layer / --flag-prefix (flagged, not fail).
+    Patch compactness is report-only. Intended method changes use --flag-layer /
+    --flag-prefix (flagged, not fail).
     """
     from sdm.commands.data_preparation.processing.compare_ev_layers import (
         compare_ev_layers,

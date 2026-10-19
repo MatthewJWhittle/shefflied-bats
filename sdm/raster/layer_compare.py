@@ -4,10 +4,12 @@ Pass marks follow the revised architecture review on issue #38
 (comment that replaces earlier per-layer tolerance rules): closeness,
 not exactness. Grid alignment is a hard precondition; continuous and
 categorical layers are judged by share-close; intended method changes
-are flagged rather than failed.
+are flagged rather than failed. Patch compactness is reported only —
+it is not a pass/fail criterion.
 
-Comparison of multi-band stacks uses lazy rioxarray + dask arrays and a
-single vectorised ``.compute()`` — no per-cell / per-tile Python loops.
+Multi-band stacks are opened lazily with rioxarray + dask and reduced
+**per band** (chunked spatial reductions, one ``.compute()`` per band) so
+peak memory stays bounded. No per-cell / per-tile Python loops.
 
 Model AUC checks remain stub hooks only.
 """
@@ -15,6 +17,7 @@ Model AUC checks remain stub hooks only.
 from __future__ import annotations
 
 import csv
+import gc
 import logging
 import re
 import time
@@ -667,18 +670,26 @@ def analyze_mismatch_patches(
     return differences_local, patches, int(n_components)
 
 
-def _build_closeness_graph(
+def _drop_band_dim(da: xr.DataArray) -> xr.DataArray:
+    """Return a 2-D spatial DataArray (drop a length-1 band dim if present)."""
+    if "band" in da.dims:
+        if da.sizes["band"] != 1:
+            raise ValueError("Expected a single band when dropping band dim")
+        return da.isel(band=0, drop=True)
+    return da.squeeze(drop=True)
+
+
+def _build_band_closeness_graph(
     current: xr.DataArray,
     rebuilt: xr.DataArray,
     *,
-    value_kinds: Sequence[LayerValueKind],
+    kind: LayerValueKind,
 ) -> xr.Dataset:
-    """Lazy vectorised closeness metrics over (band, y, x) — call ``.compute()`` once."""
-    y_dim, x_dim = _spatial_dims(current)
+    """Lazy chunked closeness metrics for one band (y, x) — then ``.compute()``."""
+    cur = _drop_band_dim(current).astype("float64")
+    reb = _drop_band_dim(rebuilt).astype("float64")
+    y_dim, x_dim = _spatial_dims(cur)
     spatial = (y_dim, x_dim)
-
-    cur = current.astype("float64")
-    reb = rebuilt.astype("float64")
 
     cur_valid = cur.notnull()
     reb_valid = reb.notnull()
@@ -691,25 +702,21 @@ def _build_closeness_graph(
     layer_min = cur.where(both_valid).min(dim=spatial, skipna=True)
     layer_max = cur.where(both_valid).max(dim=spatial, skipna=True)
     layer_range = (layer_max - layer_min).clip(min=0)
+    is_continuous = kind is LayerValueKind.CONTINUOUS
 
-    is_exact = xr.DataArray(
-        [kind is LayerValueKind.EXACT for kind in value_kinds],
-        dims=("band",),
-        coords={"band": current.coords["band"]},
-    )
-    is_continuous = ~is_exact
+    if is_continuous:
+        safe_range = xr.where(layer_range > 0, layer_range, 1.0)
+        norm_abs = abs_diff / safe_range
+        continuous_close = both_valid & (norm_abs <= CONTINUOUS_RANGE_FRACTION)
+        continuous_close = continuous_close | (
+            both_valid & (layer_range == 0) & (abs_diff == 0)
+        )
+        close = continuous_close
+        norm_for_stats = norm_abs.where(both_valid)
+    else:
+        close = both_valid & (cur == reb)
+        norm_for_stats = None
 
-    # Denominator only for continuous bands; exact bands skip normalised stats.
-    safe_range = xr.where((layer_range > 0) & is_continuous, layer_range, 1.0)
-    norm_abs = xr.where(is_continuous, abs_diff / safe_range, np.nan)
-
-    exact_close = both_valid & (cur == reb)
-    continuous_close = both_valid & (norm_abs <= CONTINUOUS_RANGE_FRACTION)
-    # Zero-range continuous: only exact equality counts as close.
-    continuous_close = continuous_close | (
-        both_valid & is_continuous & (layer_range == 0) & (abs_diff == 0)
-    )
-    close = xr.where(is_exact, exact_close, continuous_close)
     # Nodata mismatches are never close.
     close = close & ~nodata_mismatch
 
@@ -717,27 +724,23 @@ def _build_closeness_graph(
     share = close.sum(dim=spatial) / comparable_count.clip(min=1)
     share = xr.where(comparable_count == 0, 1.0, share)
 
-    norm_for_stats = norm_abs.where(both_valid & is_continuous)
     corr = xr.corr(cur.where(both_valid), reb.where(both_valid), dim=spatial)
-
     not_close = comparable & ~close
 
-    return xr.Dataset(
-        {
-            "share_within_tolerance": share,
-            "n_nodata_mismatch": nodata_mismatch.sum(dim=spatial),
-            "norm_abs_diff_mean": norm_for_stats.mean(dim=spatial, skipna=True),
-            "norm_abs_diff_median": norm_for_stats.median(dim=spatial, skipna=True),
-            "norm_abs_diff_p95": norm_for_stats.quantile(
-                0.95, dim=spatial, skipna=True
-            ),
-            "norm_abs_diff_max": norm_for_stats.max(dim=spatial, skipna=True),
-            "correlation": corr,
-            "max_difference": abs_diff.where(both_valid).max(dim=spatial, skipna=True),
-            "not_close": not_close,
-            "both_valid": both_valid,
-        }
-    )
+    metrics: dict[str, xr.DataArray] = {
+        "share_within_tolerance": share,
+        "n_nodata_mismatch": nodata_mismatch.sum(dim=spatial),
+        "correlation": corr,
+        "max_difference": abs_diff.where(both_valid).max(dim=spatial, skipna=True),
+        "not_close": not_close,
+    }
+    if is_continuous and norm_for_stats is not None:
+        # Chunked mean/max over spatial dims; median/p95 from the 2-D field after
+        # compute (dask cannot nanmedian over both axes at once; one band fits).
+        metrics["norm_abs_diff_mean"] = norm_for_stats.mean(dim=spatial, skipna=True)
+        metrics["norm_abs_diff_max"] = norm_for_stats.max(dim=spatial, skipna=True)
+        metrics["norm_for_stats"] = norm_for_stats
+    return xr.Dataset(metrics)
 
 
 def write_difference_map(
@@ -786,8 +789,10 @@ def _write_difference_map_from_arrays(
 ) -> Path:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    both = current_band.notnull() & rebuilt_band.notnull()
-    abs_diff = abs(rebuilt_band.astype("float64") - current_band.astype("float64"))
+    cur = _drop_band_dim(current_band)
+    reb = _drop_band_dim(rebuilt_band)
+    both = cur.notnull() & reb.notnull()
+    abs_diff = abs(reb.astype("float64") - cur.astype("float64"))
     out_nodata = -9999.0
     written = abs_diff.where(both, other=out_nodata).astype("float32")
     written = written.rio.write_nodata(out_nodata, inplace=False)
@@ -799,11 +804,14 @@ def decide_verdict(
     *,
     grid_ok: bool,
     share_within: Optional[float],
-    differences_local: Optional[bool],
     source_changed: bool,
     method_flagged: bool,
     both_present: bool,
 ) -> LayerVerdict:
+    """Pass/fail from revised #38: grid + share-close (+ configurable flags).
+
+    Patch compactness is report-only and must not affect the verdict.
+    """
     if not both_present:
         return LayerVerdict.MISSING
     if not grid_ok:
@@ -815,12 +823,19 @@ def decide_verdict(
         return LayerVerdict.FLAGGED
     if source_changed:
         return LayerVerdict.FLAGGED_SOURCE_CHANGE
-    values_ok = share_within >= SHARE_WITHIN_TOLERANCE_PASS
-    # Local-patch check applies when there are not-close cells; None means none.
-    local_ok = differences_local is True or differences_local is None
-    if values_ok and local_ok:
+    if share_within >= SHARE_WITHIN_TOLERANCE_PASS:
         return LayerVerdict.PASS
     return LayerVerdict.FAIL
+
+
+def _as_optional_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if np.isnan(out) else out
 
 
 def compare_layer_stacks(
@@ -833,7 +848,13 @@ def compare_layer_stacks(
     flag_prefixes: Sequence[str] = (),
     align: bool = False,
 ) -> tuple[list[LayerCompareResult], StackCompareTiming]:
-    """Compare two multi-band stacks with one vectorised xarray ``.compute()``."""
+    """Compare two multi-band stacks band-by-band with bounded peak memory.
+
+    Each band is reduced with chunked xarray/dask ops and a single
+    ``dask.compute()`` for that band only (metrics + arrays for the difference
+    map). Results match a full-stack vectorised reduction; peak RSS scales with
+    one band rather than the whole stack.
+    """
     source_versions = source_versions or {}
     diff_dir = Path(diff_dir)
     diff_dir.mkdir(parents=True, exist_ok=True)
@@ -844,25 +865,24 @@ def compare_layer_stacks(
         rebuilt = rebuilt.expand_dims(band=[str(rebuilt.name or "layer")])
 
     grid = check_grid_arrays(current, rebuilt)
-    aligned = False
+    need_align = False
     if not grid.ok and align:
-        logging.info("Aligning rebuilt stack onto current reference grid (--align)")
-        rebuilt = align_to_reference(rebuilt, current)
-        grid = check_grid_arrays(current, rebuilt)
-        grid.aligned = True
-        aligned = True
+        logging.info(
+            "Will align each rebuilt band onto the current reference grid (--align)"
+        )
+        need_align = True
     elif grid.ok:
         grid.aligned = False
 
     band_names = [tidy_variable_name(str(n)) for n in current.coords["band"].values]
     reb_names = [tidy_variable_name(str(n)) for n in rebuilt.coords["band"].values]
     if band_names != reb_names:
-        # Reorder rebuilt bands to match current when names are a permutation.
         if set(band_names) == set(reb_names):
             rebuilt = rebuilt.sel(band=list(current.coords["band"].values))
             reb_names = band_names
             grid = check_grid_arrays(current, rebuilt)
-            grid.aligned = aligned
+            if not grid.ok and align:
+                need_align = True
         else:
             grid.name_match = False
 
@@ -871,7 +891,7 @@ def compare_layer_stacks(
     height = int(current.sizes[y_dim])
     width = int(current.sizes[x_dim])
 
-    if not grid.ok:
+    if not grid.ok and not need_align:
         results = [
             LayerCompareResult(
                 layer_name=name,
@@ -881,7 +901,7 @@ def compare_layer_stacks(
                 share_within_tolerance=None,
                 verdict=LayerVerdict.FAIL,
                 notes="grid precondition failed"
-                + ("; --align could not reconcile grids" if align else ""),
+                + ("; pass --align to crop/snap onto the reference grid" if align else ""),
             )
             for name, kind in zip(band_names, kinds)
         ]
@@ -894,10 +914,10 @@ def compare_layer_stacks(
             note="grid_failed_before_compute",
         )
 
-    graph = _build_closeness_graph(current, rebuilt, value_kinds=kinds)
-
     peak = process_tree_rss_bytes()
     started = time.perf_counter()
+    aligned_any = False
+    results: list[LayerCompareResult] = []
 
     def _sample_peak() -> None:
         nonlocal peak
@@ -905,20 +925,44 @@ def compare_layer_stacks(
         if sample is not None and (peak is None or sample > peak):
             peak = sample
 
-    _sample_peak()
-    # One fused compute for metrics + both stacks (feeds difference maps / patches).
-    current_np, rebuilt_np, computed = dask.compute(current, rebuilt, graph)
-    _sample_peak()
-    duration = time.perf_counter() - started
-    current_np = xr.DataArray(current_np) if not isinstance(current_np, xr.DataArray) else current_np
-    rebuilt_np = xr.DataArray(rebuilt_np) if not isinstance(rebuilt_np, xr.DataArray) else rebuilt_np
-    if not isinstance(computed, xr.Dataset):
-        raise TypeError("closeness graph compute did not return an xarray Dataset")
-
-    not_close = np.asarray(computed["not_close"].values, dtype=bool)
-    results: list[LayerCompareResult] = []
-
     for band_i, (name, kind) in enumerate(zip(band_names, kinds)):
+        cur_b = _drop_band_dim(current.isel(band=band_i))
+        reb_b = _drop_band_dim(rebuilt.isel(band=band_i))
+        if need_align:
+            reb_b = align_to_reference(reb_b, cur_b)
+            aligned_any = True
+            band_grid = check_grid_arrays(
+                cur_b.expand_dims(band=[name]),
+                reb_b.expand_dims(band=[name]),
+            )
+            if not band_grid.ok:
+                results.append(
+                    LayerCompareResult(
+                        layer_name=name,
+                        value_kind=kind,
+                        grid_check=band_grid.summary(),
+                        grid_ok=False,
+                        share_within_tolerance=None,
+                        verdict=LayerVerdict.FAIL,
+                        notes="grid precondition failed; --align could not reconcile grids",
+                    )
+                )
+                _sample_peak()
+                continue
+            grid = band_grid
+            grid.aligned = True
+
+        graph = _build_band_closeness_graph(cur_b, reb_b, kind=kind)
+        _sample_peak()
+        cur_v, reb_v, computed = dask.compute(cur_b, reb_b, graph)
+        _sample_peak()
+        if not isinstance(computed, xr.Dataset):
+            raise TypeError("closeness graph compute did not return an xarray Dataset")
+        if not isinstance(cur_v, xr.DataArray):
+            cur_v = xr.DataArray(cur_v)
+        if not isinstance(reb_v, xr.DataArray):
+            reb_v = xr.DataArray(reb_v)
+
         versions = source_versions.get(name, {})
         source_current = str(versions.get("current", "") or "")
         source_rebuilt = str(versions.get("rebuilt", "") or "")
@@ -929,49 +973,26 @@ def compare_layer_stacks(
             name, flag_names=flag_names, flag_prefixes=flag_prefixes
         )
 
-        share = float(computed["share_within_tolerance"].isel(band=band_i).values)
-        n_nodata = int(computed["n_nodata_mismatch"].isel(band=band_i).values)
+        share = float(computed["share_within_tolerance"].values)
+        n_nodata = int(computed["n_nodata_mismatch"].values)
+        correlation = _as_optional_float(computed["correlation"].values)
+        max_diff = _as_optional_float(computed["max_difference"].values)
 
-        def _opt_float(key: str) -> Optional[float]:
-            val = computed[key].isel(band=band_i).values
-            if val is None or (isinstance(val, float) and np.isnan(val)):
-                return None
-            try:
-                out = float(val)
-            except (TypeError, ValueError):
-                return None
-            return None if np.isnan(out) else out
+        norm_mean = norm_median = norm_p95 = norm_max = None
+        if kind is LayerValueKind.CONTINUOUS:
+            norm_mean = _as_optional_float(computed["norm_abs_diff_mean"].values)
+            norm_max = _as_optional_float(computed["norm_abs_diff_max"].values)
+            norm_field = np.asarray(computed["norm_for_stats"].values, dtype=np.float64)
+            if np.isfinite(norm_field).any():
+                norm_median = float(np.nanmedian(norm_field))
+                norm_p95 = float(np.nanquantile(norm_field, 0.95))
+            del norm_field
 
-        norm_mean = _opt_float("norm_abs_diff_mean") if kind is LayerValueKind.CONTINUOUS else None
-        norm_median = (
-            _opt_float("norm_abs_diff_median") if kind is LayerValueKind.CONTINUOUS else None
-        )
-        # quantile adds a quantile coord — squeeze if present
-        p95_da = computed["norm_abs_diff_p95"]
-        if "quantile" in p95_da.dims:
-            p95_da = p95_da.squeeze("quantile", drop=True)
-        p95_val = p95_da.isel(band=band_i).values
-        try:
-            norm_p95 = float(p95_val)
-            if np.isnan(norm_p95):
-                norm_p95 = None
-        except (TypeError, ValueError):
-            norm_p95 = None
-        if kind is not LayerValueKind.CONTINUOUS:
-            norm_p95 = None
-        norm_max = _opt_float("norm_abs_diff_max") if kind is LayerValueKind.CONTINUOUS else None
-        correlation = _opt_float("correlation")
-        max_diff = _opt_float("max_difference")
-
-        band_not_close = not_close[band_i]
+        band_not_close = np.asarray(computed["not_close"].values, dtype=bool)
         local, patches, n_components = analyze_mismatch_patches(band_not_close)
 
         out_file = diff_dir / f"{name}_difference.tif"
-        _write_difference_map_from_arrays(
-            current_np.isel(band=band_i),
-            rebuilt_np.isel(band=band_i),
-            out_file,
-        )
+        _write_difference_map_from_arrays(cur_v, reb_v, out_file)
         patch_file = diff_dir / f"{name}_patches.csv"
         _write_patch_table(patch_file, patches)
 
@@ -980,13 +1001,12 @@ def compare_layer_stacks(
             notes_parts.append("intended method change (flag list)")
         if source_changed:
             notes_parts.append("source versions differ")
-        if aligned:
+        if aligned_any:
             notes_parts.append("rebuilt aligned to current grid")
 
         verdict = decide_verdict(
             grid_ok=True,
             share_within=share,
-            differences_local=local,
             source_changed=source_changed,
             method_flagged=method_flagged,
             both_present=True,
@@ -1018,13 +1038,19 @@ def compare_layer_stacks(
             )
         )
 
+        # Release this band before opening the next (bounded peak RSS).
+        del cur_v, reb_v, computed, band_not_close, graph, cur_b, reb_b
+        gc.collect()
+        _sample_peak()
+
+    duration = time.perf_counter() - started
     timing = StackCompareTiming(
         duration_seconds=round(duration, 4),
         peak_rss_bytes=peak,
         n_bands=len(band_names),
         height=height,
         width=width,
-        note="vectorised xarray/dask closeness graph + single compute",
+        note="per-band xarray/dask reductions (bounded memory)",
     )
     return results, timing
 

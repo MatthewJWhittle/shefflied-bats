@@ -320,6 +320,34 @@ def test_sparse_road_shaped_patch_fails_local_check():
     assert local is False
 
 
+def test_sparse_patches_report_only_do_not_fail(tmp_path: Path):
+    """Revised #38: patch compactness is report-only; share-close decides pass."""
+    name = "climate_bioclim_bio_2"
+    # 40x40 = 1600 cells; plus-sign = 79 not-close (~4.9%) → share ≥95% but
+    # bbox fill is low so differences_local is False.
+    current = np.zeros((40, 40), dtype=np.float32)
+    current[0, :] = np.linspace(0, 100, 40)
+    rebuilt = current.copy()
+    rebuilt[20, :] = 50.0
+    rebuilt[:, 20] = 50.0
+
+    cur_dir = tmp_path / "current"
+    reb_dir = tmp_path / "rebuilt"
+    _write_raster(cur_dir / f"{name}.tif", current, description=name)
+    _write_raster(reb_dir / f"{name}.tif", rebuilt, description=name)
+
+    result = compare_layer_pair(
+        name,
+        discover_layers(cur_dir)[name],
+        discover_layers(reb_dir)[name],
+        diff_dir=tmp_path / "diffs",
+    )
+    assert result.share_within_tolerance is not None
+    assert result.share_within_tolerance >= 0.95
+    assert result.differences_local is False
+    assert result.verdict is LayerVerdict.PASS
+
+
 def test_exact_category_mismatch_share(tmp_path: Path):
     name = "ceh_landcover_arable"
     current = np.ones((5, 5), dtype=np.float32)

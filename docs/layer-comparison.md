@@ -10,13 +10,15 @@ The objective is **closeness, not exactness** (revised architecture review on #3
 2. **Continuous layers** — cell-wise `(rebuilt − current) / layer_range` (range from the current layer’s jointly valid min/max). Report mean, median, 95th percentile and max of the absolute normalised difference, the share of cells within **1% of range**, and the **correlation**. Pass when at least **95%** of comparable cells are within 1% of range.
 3. **Category / percentage layers** — report the share of cells with the same value. Pass when at least **95%** match.
 4. **No-data** — cells empty in one layer but not the other count as **not-close** in the share figure, and the mismatch count is reported in its own column (`n_nodata_mismatch`). Cells empty in both are excluded.
-5. **Differences local** — not-close cells should form compact patches (component count + bbox fill). Each layer gets a difference GeoTIFF and a per-patch table.
+5. **Patch stats (report-only)** — not-close cells are labelled into components (difference GeoTIFF + per-patch table, `differences_local`). Compactness is **not** a pass/fail criterion under the revised #38 rule.
 6. **Intended method changes** — configurable `--flag-layer` / `--flag-prefix` (e.g. `os_distance` after the #42 edge-distance change). Matching layers are reported as **`flagged`** with stats, **not** as failures.
 7. **Source changes** — optional `--source-versions` YAML. When before/after versions differ, verdict is `flagged_source_change`.
 
+**Pass rule:** grid exact, continuous ≥95% within 1% of range (or categorical ≥95% match), then configurable flags. Patch locality does not change the verdict.
+
 Value-kind rules live in `is_exact_match_layer` / `is_neighbourhood_average` in `sdm/raster/layer_compare.py`.
 
-**Engine:** both sides are opened lazily with **rioxarray + dask chunks**, compared with vectorised xarray ops (`(new − old) / range`, `.mean` / `.median` / `.quantile`, `xr.corr`, combined `notnull` masks), and reduced with a **single** `dask.compute()`. Patches use `scipy.ndimage.label` on the computed boolean array. No per-cell / per-tile Python loops.
+**Engine:** both sides open lazily with **rioxarray + dask chunks**. Each band is reduced with vectorised xarray ops (`(new − old) / range`, `.mean` / `.median` / `.quantile`, `xr.corr`, combined `notnull` masks) and one **`dask.compute()` per band**, so peak memory stays bounded. Patches use `scipy.ndimage.label` on that band’s boolean array. No per-cell / per-tile Python loops.
 
 Model checks (held-out AUC, cut-off map switch, brown long-eared roost marks from #29) are **not** run here. Pass `--model-hooks-csv` to write stub rows documenting those later checks after a real rebuild + retrain.
 
@@ -74,7 +76,7 @@ Folders may contain single-band GeoTIFFs (stem or band description = layer name)
 | `correlation` | `xr.corr` over spatial dims |
 | `max_difference` | Max absolute difference on jointly valid cells |
 | `difference_map_path` | GeoTIFF of absolute differences |
-| `differences_local` | Compact-patch heuristic (component count + bbox fill) |
+| `differences_local` | Compact-patch heuristic (report-only; not a fail criterion) |
 | `patch_table_path` | Per-component CSV (id, cell count, bbox, fill ratio) |
 | `source_version_*` / `reason` | Fillable / optional metadata |
 | `verdict` | `pass`, `fail`, `flagged`, `flagged_source_change`, or `missing` |
