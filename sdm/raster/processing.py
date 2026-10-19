@@ -83,11 +83,23 @@ def interpolate_nas(dataset: xr.Dataset) -> xr.Dataset:
 
 
 def calculate_multiscale_variables(dataset: xr.Dataset, window: int) -> xr.Dataset:
+    """Neighbourhood means via rolling windows on ``x`` and ``y``.
+
+    ``Dataset.rolling(..., center=True)`` with an even window is half-cell
+    asymmetric toward higher array indices. North-up GeoTIFFs store ``y``
+    descending, so that bias points south and shifts every neighbourhood
+    layer by one row relative to south-up / historical stacks. Sort ``y``
+    ascending before rolling so the bias is geographic-north for any input
+    orientation, then restore the caller's row order.
+    """
     original_names = dataset.data_vars
+    y_order = dataset.y
 
     vars = (
-        dataset.rolling(x=window, y=window, center=True)
+        dataset.sortby("y")
+        .rolling(x=window, y=window, center=True)
         .mean(skipna=True)
+        .reindex(y=y_order)
         .rename(
             {name: f"{name}_{round((window/2) * 100)}m" for name in dataset.data_vars}
         )
@@ -97,7 +109,6 @@ def calculate_multiscale_variables(dataset: xr.Dataset, window: int) -> xr.Datas
         vars[new_name].rio.write_nodata(
             dataset[old_name].rio.nodata, inplace=True
         )
-
 
     return vars
 
