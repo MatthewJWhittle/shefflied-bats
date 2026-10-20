@@ -1,0 +1,172 @@
+{
+  "source": "scripts/profile_ev_scaling.py on public EA WCS / OS Vector Map / WorldClim + synthetic CEH & coast stand-ins",
+  "machine_note": "single Cloud Agent VM; sequential steps in one process (later peak RSS includes retained allocations)",
+  "study_area_baseline_provided": {
+    "process_os_data": {
+      "duration_seconds": 422,
+      "peak_rss_gb": 6.9
+    },
+    "generate_vom_data": {
+      "duration_seconds": 235,
+      "peak_rss_gb": 0.5
+    },
+    "generate_terrain_data": {
+      "duration_seconds": 92,
+      "peak_rss_gb": 0.5
+    },
+    "generate_climate_data": {
+      "duration_seconds": 52,
+      "peak_rss_gb": 2.5
+    },
+    "climate_stats": {
+      "duration_seconds": 17,
+      "peak_rss_gb": 3.0
+    },
+    "generate_coastal_distance": {
+      "duration_seconds_lo": 32,
+      "duration_seconds_hi": 52,
+      "peak_rss_gb_lo": 0.9,
+      "peak_rss_gb_hi": 1.3
+    },
+    "generate_ceh_lc_data": {
+      "duration_seconds": 1,
+      "peak_rss_gb": 0.5
+    },
+    "merge_ev_layers": {
+      "duration_seconds": 21,
+      "peak_rss_gb": 5.6
+    },
+    "full_run_peak_rss_gb": 10.3
+  },
+  "area_km2": {
+    "10km": 100.0,
+    "50km": 2500.0,
+    "study": 14369.0,
+    "england": 130279.0,
+    "great_britain": 209331.0
+  },
+  "runs": [
+    {
+      "label": "10km",
+      "area_km2": 100.0,
+      "total_duration_seconds": 68.878913,
+      "steps": [
+        {
+          "step": "generate_terrain_data",
+          "duration_seconds": 14.731806,
+          "peak_rss_gb": 0.66,
+          "status": "ok"
+        },
+        {
+          "step": "generate_terrain_stats",
+          "duration_seconds": 3.633245,
+          "peak_rss_gb": 0.654,
+          "status": "ok"
+        },
+        {
+          "step": "generate_climate_data",
+          "duration_seconds": 16.85246,
+          "peak_rss_gb": 1.818,
+          "status": "ok"
+        },
+        {
+          "step": "generate_vom_data",
+          "duration_seconds": 12.593499,
+          "peak_rss_gb": 1.676,
+          "status": "ok"
+        },
+        {
+          "step": "process_os_data",
+          "duration_seconds": 15.584469,
+          "peak_rss_gb": 1.685,
+          "status": "ok"
+        },
+        {
+          "step": "generate_coastal_distance",
+          "duration_seconds": 0.041819,
+          "peak_rss_gb": 1.669,
+          "status": "ok"
+        },
+        {
+          "step": "generate_ceh_lc_data",
+          "duration_seconds": 0.311403,
+          "peak_rss_gb": 1.67,
+          "status": "ok"
+        },
+        {
+          "step": "merge_ev_layers",
+          "duration_seconds": 1.219382,
+          "peak_rss_gb": 1.67,
+          "status": "ok"
+        },
+        {
+          "step": "build_model_ev_stack",
+          "duration_seconds": 3.91083,
+          "peak_rss_gb": 1.67,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "label": "50km",
+      "area_km2": 2500.0,
+      "total_duration_seconds": 230.62854,
+      "steps": [
+        {
+          "step": "generate_terrain_data",
+          "duration_seconds": 68.163358,
+          "peak_rss_gb": 1.508,
+          "status": "ok"
+        },
+        {
+          "step": "generate_terrain_stats",
+          "duration_seconds": 0.403656,
+          "peak_rss_gb": 1.354,
+          "status": "ok"
+        },
+        {
+          "step": "generate_climate_data",
+          "duration_seconds": 16.667421,
+          "peak_rss_gb": 2.457,
+          "status": "ok"
+        },
+        {
+          "step": "generate_vom_data",
+          "duration_seconds": 69.276819,
+          "peak_rss_gb": 2.391,
+          "status": "ok"
+        },
+        {
+          "step": "process_os_data",
+          "duration_seconds": 48.091246,
+          "peak_rss_gb": 2.564,
+          "status": "ok"
+        },
+        {
+          "step": "generate_coastal_distance",
+          "duration_seconds": 0.070839,
+          "peak_rss_gb": 2.05,
+          "status": "ok"
+        },
+        {
+          "step": "generate_ceh_lc_data",
+          "duration_seconds": 1.260501,
+          "peak_rss_gb": 2.051,
+          "status": "ok"
+        },
+        {
+          "step": "merge_ev_layers",
+          "duration_seconds": 2.713237,
+          "peak_rss_gb": 2.372,
+          "status": "ok"
+        },
+        {
+          "step": "build_model_ev_stack",
+          "duration_seconds": 23.981463,
+          "peak_rss_gb": 2.92,
+          "status": "ok"
+        }
+      ]
+    }
+  ]
+}
