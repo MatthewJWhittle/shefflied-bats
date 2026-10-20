@@ -1,4 +1,7 @@
 model:
+  # Publish no suitability cut-off for this model (continuous map only).
+  # Limited by its data — see docs/thresholds/METHOD.md.
+  model_limited: true
   maxent:
     feature_types:
     - linear

@@ -140,6 +140,8 @@ class ModelConfig(BaseModel):
     sampling: Optional[SamplingConfig] = None
     background: Optional[BackgroundConfig] = None
     cv: Optional[CvConfig] = None
+    # When true, publish no cut-off (no threshold value / thresholded map).
+    model_limited: bool = False
 
 
 class SDMModel(BaseModel):
@@ -156,6 +158,7 @@ class TrainingData(SDMModel):
     occurrence: gpd.GeoDataFrame
     maxent_config: Any  # DefaultMaxentConfig - using Any to avoid circular imports, required for training
     model_features: List[str]  # Required for training - list of feature column names to use
+    model_limited: bool = False
 
 
 class TrainingResults(SDMModel):

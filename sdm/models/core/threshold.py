@@ -4,9 +4,10 @@ Rules fit cut-offs on training folds and are scored on held-out folds so the
 evaluation fold never informs the cut-off. When no ``fold`` column is present,
 rules fit and evaluate on the same scores (pooled).
 
-The published training-run rule ``p5_fold_median`` follows
-``docs/thresholds/METHOD.md``: 5th-percentile held-out presence cut-offs per
-fold, then the median across folds, applied directly to the final model.
+The published training-run rule ``pooled_oof_percentile`` follows
+``docs/thresholds/METHOD.md``: pool every held-out presence score across folds,
+then take the 5th percentile of that pool (never the median of per-fold
+percentiles). The cut-off is fit only on held-out predictions.
 """
 
 from __future__ import annotations
@@ -22,12 +23,16 @@ from sklearn.metrics import roc_auc_score, roc_curve
 
 RuleFn = Callable[[np.ndarray, np.ndarray, Mapping[str, Any]], float]
 
-P5_FOLD_MEDIAN_RULE = "p5_fold_median"
+POOLED_OOF_PERCENTILE_RULE = "pooled_oof_percentile"
+# Backward-compatible alias for older docs/tests referring to the replaced rule name.
+P5_FOLD_MEDIAN_RULE = POOLED_OOF_PERCENTILE_RULE
 AUC_MODEL_LIMITED = 0.75
 FEW_RECORDS_MAX = 50
+DEFAULT_PERCENTILE = 5.0
 RUN_THRESHOLDS_JSON = "thresholds.json"
 RUN_THRESHOLDS_CSV = "thresholds.csv"
 VALIDATION_SCORES_FILENAME = "validation_scores.parquet"
+MODEL_LIMITED_NO_CUTOFF_REASON = "model_limited"
 
 
 def presence_percentile_cutoff(presence_scores: np.ndarray, percentile: float) -> float:
@@ -289,15 +294,19 @@ def _threshold_flags(*, n_presence: int, oof_auc: float) -> str:
     return "; ".join(parts)
 
 
-def compute_p5_fold_median(
+def compute_pooled_oof_percentile(
     validation_scores: pd.DataFrame,
     *,
     map_scores: Optional[np.ndarray] = None,
+    model_limited: bool = False,
+    percentile: float = DEFAULT_PERCENTILE,
 ) -> Dict[str, Any]:
-    """Publishable cut-off: median of per-fold 5th-percentile held-out presence.
+    """Publishable cut-off: percentile of pooled held-out presence scores.
 
-    See ``docs/thresholds/METHOD.md``. The median fold cut-off is applied
-    directly to the final model's suitability scores.
+    See ``docs/thresholds/METHOD.md``. All out-of-fold presence scores are pooled
+    first; the cut-off is the 5th percentile of that pool by default (never a
+    median of per-fold percentiles). When ``model_limited`` is true, no cut-off
+    is published.
     """
     required = {"class", "held_out_score", "fold"}
     missing = required - set(validation_scores.columns)
@@ -305,6 +314,33 @@ def compute_p5_fold_median(
         raise ValueError(f"validation scores missing columns: {sorted(missing)}")
 
     presence_all, _background_all = _split_classes(validation_scores)
+    n_presence = int((validation_scores["class"] == 1).sum())
+    oof_auc = _oof_auc(validation_scores)
+    flag = _threshold_flags(n_presence=n_presence, oof_auc=oof_auc)
+    chosen_percentile = float(percentile)
+
+    base: Dict[str, Any] = {
+        "rule": POOLED_OOF_PERCENTILE_RULE,
+        "n_presence": n_presence,
+        "oof_auc": oof_auc,
+        "flag": flag,
+        "percentile": chosen_percentile,
+        "model_limited": bool(model_limited),
+        "no_cutoff_reason": None,
+        "threshold": None,
+        "heldout_caught": None,
+        "worst_fold_caught": None,
+        "map_share": None,
+    }
+
+    if model_limited:
+        base["no_cutoff_reason"] = MODEL_LIMITED_NO_CUTOFF_REASON
+        if flag:
+            base["flag"] = f"{flag}; {MODEL_LIMITED_NO_CUTOFF_REASON} (no cut-off)"
+        else:
+            base["flag"] = f"{MODEL_LIMITED_NO_CUTOFF_REASON} (no cut-off)"
+        return base
+
     if presence_all.size == 0:
         raise ValueError("Cannot compute threshold: no presence scores")
 
@@ -312,23 +348,20 @@ def compute_p5_fold_median(
     if not fold_ids:
         raise ValueError("Cannot compute threshold: no folds in validation scores")
 
-    fold_cutoffs: list[float] = []
     fold_caught: list[float] = []
+    threshold = presence_percentile_cutoff(presence_all, chosen_percentile)
     for fold in fold_ids:
         fold_frame = validation_scores[validation_scores["fold"] == fold]
         fold_presence, _ = _split_classes(fold_frame)
         if fold_presence.size == 0:
             continue
-        cutoff = presence_percentile_cutoff(fold_presence, 5.0)
-        fold_cutoffs.append(cutoff)
-        fold_caught.append(float(np.mean(fold_presence >= cutoff)))
+        fold_caught.append(float(np.mean(fold_presence >= threshold)))
 
-    if not fold_cutoffs:
+    if not fold_caught:
         raise ValueError("Cannot compute threshold: no folds with presence scores")
 
-    threshold = float(np.median(fold_cutoffs))
     heldout_caught = float(np.mean(presence_all >= threshold))
-    worst_fold_caught = float(min(fold_caught)) if fold_caught else float("nan")
+    worst_fold_caught = float(min(fold_caught))
 
     map_share: Optional[float]
     if map_scores is None:
@@ -337,21 +370,19 @@ def compute_p5_fold_median(
         maps = np.asarray(map_scores, dtype=float)
         map_share = float(np.mean(maps >= threshold)) if maps.size else None
 
-    n_presence = int((validation_scores["class"] == 1).sum())
-    oof_auc = _oof_auc(validation_scores)
-    flag = _threshold_flags(n_presence=n_presence, oof_auc=oof_auc)
+    base.update(
+        {
+            "threshold": threshold,
+            "heldout_caught": heldout_caught,
+            "worst_fold_caught": worst_fold_caught,
+            "map_share": map_share,
+        }
+    )
+    return base
 
-    return {
-        "rule": P5_FOLD_MEDIAN_RULE,
-        "threshold": threshold,
-        "heldout_caught": heldout_caught,
-        "worst_fold_caught": worst_fold_caught,
-        "map_share": map_share,
-        "fold_median_cutoff": threshold,
-        "n_presence": n_presence,
-        "oof_auc": oof_auc,
-        "flag": flag,
-    }
+
+# Compatibility alias while callers migrate from the #61 median rule name.
+compute_p5_fold_median = compute_pooled_oof_percentile
 
 
 def existing_run_threshold_paths(
@@ -376,11 +407,22 @@ def existing_run_threshold_paths(
     return [path for path in candidates if path.exists()]
 
 
+def _package_model_limited(package_dir: Path) -> bool:
+    package_path = package_dir / "package.json"
+    if not package_path.exists():
+        return False
+    with open(package_path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return bool(payload.get("model_limited", False))
+
+
 def write_run_thresholds(
     run_dir: Path,
     *,
     map_scores_by_model: Optional[Mapping[str, np.ndarray]] = None,
     model_ids: Optional[Sequence[str]] = None,
+    model_limited_by_id: Optional[Mapping[str, bool]] = None,
+    percentile: float = DEFAULT_PERCENTILE,
 ) -> list[dict[str, Any]]:
     """Write ``thresholds.json`` / ``.csv`` into ``run_dir`` and each package dir.
 
@@ -389,6 +431,9 @@ def write_run_thresholds(
 
     Refuses to overwrite existing threshold artefacts (same spirit as the EV
     layer merge guard: error by default, no overwrite opt-in).
+
+    Models with ``model_limited`` (from ``model_limited_by_id`` or
+    ``package.json``) publish no cut-off value.
     """
     run_dir = Path(run_dir)
     package_dirs = sorted(
@@ -407,32 +452,43 @@ def write_run_thresholds(
         )
 
     rows: list[dict[str, Any]] = []
-    thresholds_map: dict[str, float] = {}
+    thresholds_map: dict[str, Optional[float]] = {}
     for package_dir in package_dirs:
         model_id = package_dir.name
         validation_scores = pd.read_parquet(package_dir / VALIDATION_SCORES_FILENAME)
         map_scores = None
         if map_scores_by_model is not None:
             map_scores = map_scores_by_model.get(model_id)
-        result = compute_p5_fold_median(
+        limited = False
+        if model_limited_by_id is not None and model_id in model_limited_by_id:
+            limited = bool(model_limited_by_id[model_id])
+        else:
+            limited = _package_model_limited(package_dir)
+        result = compute_pooled_oof_percentile(
             validation_scores,
             map_scores=map_scores,
+            model_limited=limited,
+            percentile=percentile,
         )
         row = {"model_id": model_id, **result}
         rows.append(row)
-        thresholds_map[model_id] = float(result["threshold"])
+        thresholds_map[model_id] = (
+            None if result["threshold"] is None else float(result["threshold"])
+        )
 
         package_payload = _json_safe(
             {
-                "rule": P5_FOLD_MEDIAN_RULE,
+                "rule": POOLED_OOF_PERCENTILE_RULE,
                 "model_id": model_id,
-                "threshold": float(result["threshold"]),
+                "threshold": result["threshold"],
                 "heldout_caught": result["heldout_caught"],
                 "map_share": result["map_share"],
                 "flag": result["flag"],
-                "fold_median_cutoff": result["fold_median_cutoff"],
+                "percentile": result["percentile"],
                 "n_presence": result["n_presence"],
                 "oof_auc": result["oof_auc"],
+                "model_limited": result["model_limited"],
+                "no_cutoff_reason": result["no_cutoff_reason"],
             }
         )
         with open(package_dir / RUN_THRESHOLDS_JSON, "w", encoding="utf-8") as handle:
@@ -445,8 +501,9 @@ def write_run_thresholds(
 
     run_payload = _json_safe(
         {
-            "rule": P5_FOLD_MEDIAN_RULE,
+            "rule": POOLED_OOF_PERCENTILE_RULE,
             "method_doc": "docs/thresholds/METHOD.md",
+            "percentile": float(percentile),
             "thresholds": thresholds_map,
             "models": rows,
         }
