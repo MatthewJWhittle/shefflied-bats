@@ -49,8 +49,8 @@ sdm train \
   --ev-file data/evs/evs-to-model.tif
 
 # Suitability thresholds (fit on training folds, score on held-out folds)
-# Training already writes thresholds.json/csv into the run folder (docs/thresholds/METHOD.md).
-# Use --publish-run to rewrite those for an existing run; omit it to write a comparison table only.
+# Training writes thresholds.json/csv into the run folder (docs/thresholds/METHOD.md).
+# Use --publish-run only when those files are missing (refuses overwrite); omit it for a comparison table.
 sdm threshold \
   --models-dir data/sdm_models \
   --output-dir data/sdm_predictions/thresholds

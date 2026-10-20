@@ -406,7 +406,8 @@ def threshold(
         help=(
             "Write p5_median_transfer cut-offs into models_dir (run folder) as "
             "thresholds.json/csv next to each package. Requires training_data.parquet "
-            "and model.pkl. See docs/thresholds/METHOD.md."
+            "and model.pkl. Refuses to overwrite existing threshold files. "
+            "See docs/thresholds/METHOD.md."
         ),
     ),
     verbose: bool = False,
@@ -452,6 +453,9 @@ def threshold(
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
     except FileNotFoundError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    except FileExistsError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
     logging.info("Threshold computation complete!")

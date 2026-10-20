@@ -378,6 +378,28 @@ def compute_p5_median_transfer(
     }
 
 
+def existing_run_threshold_paths(
+    run_dir: Path,
+    *,
+    model_ids: Optional[Sequence[str]] = None,
+) -> list[Path]:
+    """Return threshold artefact paths under ``run_dir`` that already exist."""
+    run_dir = Path(run_dir)
+    package_dirs = sorted(
+        path.parent for path in run_dir.glob(f"*/{VALIDATION_SCORES_FILENAME}")
+    )
+    if model_ids is not None:
+        wanted = {mid.lower() for mid in model_ids}
+        package_dirs = [d for d in package_dirs if d.name.lower() in wanted]
+
+    candidates = [
+        run_dir / RUN_THRESHOLDS_JSON,
+        run_dir / RUN_THRESHOLDS_CSV,
+        *[package_dir / RUN_THRESHOLDS_JSON for package_dir in package_dirs],
+    ]
+    return [path for path in candidates if path.exists()]
+
+
 def write_run_thresholds(
     run_dir: Path,
     *,
@@ -389,6 +411,9 @@ def write_run_thresholds(
 
     Expects ``{run_dir}/{model_id}/validation_scores.parquet``. Does not modify
     ``package.json``. Cut-offs are model outputs only (no locations or site names).
+
+    Refuses to overwrite existing threshold artefacts (same spirit as the EV
+    layer merge guard: error by default, no overwrite opt-in).
     """
     run_dir = Path(run_dir)
     package_dirs = sorted(
@@ -397,6 +422,14 @@ def write_run_thresholds(
     if model_ids is not None:
         wanted = {mid.lower() for mid in model_ids}
         package_dirs = [d for d in package_dirs if d.name.lower() in wanted]
+
+    existing = existing_run_threshold_paths(run_dir, model_ids=model_ids)
+    if existing:
+        details = ", ".join(str(path) for path in existing)
+        raise FileExistsError(
+            "Cannot publish thresholds "
+            f"(refusing to overwrite {details})"
+        )
 
     rows: list[dict[str, Any]] = []
     thresholds_map: dict[str, float] = {}

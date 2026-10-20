@@ -236,6 +236,9 @@ def publish_run_thresholds(
     transferred. Writes ``thresholds.json`` / ``thresholds.csv`` next to the
     packages (and a per-package ``thresholds.json``). Does not modify
     ``package.json``.
+
+    Raises ``FileExistsError`` if threshold artefacts already exist in the run
+    folder (refuses overwrite; same spirit as the EV layer merge guard).
     """
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
     models_dir = Path(models_dir)

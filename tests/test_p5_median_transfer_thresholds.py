@@ -260,6 +260,58 @@ class TestWriteRunThresholds:
         assert "threshold" not in package
         assert "thresholds" not in package
 
+    def test_refuses_overwrite_when_run_thresholds_exist(self, tmp_path: Path) -> None:
+        """Same spirit as merge: error before writing when outputs already exist."""
+        run_dir = tmp_path / "runs" / "existing"
+        pkg = run_dir / "demo_species_roost"
+        pkg.mkdir(parents=True)
+        fold_presence = {
+            0: list(np.linspace(0.1, 0.9, 12)),
+            1: list(np.linspace(0.1, 0.9, 12)),
+            2: list(np.linspace(0.1, 0.9, 12)),
+        }
+        scores = _fold_scores(fold_presence)
+        scores.to_parquet(pkg / "validation_scores.parquet", index=False)
+        presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
+        prior = '{"rule":"prior","thresholds":{}}'
+        (run_dir / "thresholds.json").write_text(prior, encoding="utf-8")
+
+        with pytest.raises(FileExistsError, match="refusing to overwrite"):
+            write_run_thresholds(
+                run_dir,
+                final_presence_by_model={"demo_species_roost": presence},
+            )
+
+        assert (run_dir / "thresholds.json").read_text(encoding="utf-8") == prior
+        assert not (run_dir / "thresholds.csv").exists()
+        assert not (pkg / "thresholds.json").exists()
+
+    def test_refuses_overwrite_when_package_thresholds_exist(
+        self, tmp_path: Path
+    ) -> None:
+        run_dir = tmp_path / "runs" / "pkg-existing"
+        pkg = run_dir / "demo_species_roost"
+        pkg.mkdir(parents=True)
+        fold_presence = {
+            0: list(np.linspace(0.1, 0.9, 12)),
+            1: list(np.linspace(0.1, 0.9, 12)),
+            2: list(np.linspace(0.1, 0.9, 12)),
+        }
+        scores = _fold_scores(fold_presence)
+        scores.to_parquet(pkg / "validation_scores.parquet", index=False)
+        presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
+        prior_pkg = '{"model_id":"demo_species_roost","threshold":0.5}'
+        (pkg / "thresholds.json").write_text(prior_pkg, encoding="utf-8")
+
+        with pytest.raises(FileExistsError, match="refusing to overwrite"):
+            write_run_thresholds(
+                run_dir,
+                final_presence_by_model={"demo_species_roost": presence},
+            )
+
+        assert (pkg / "thresholds.json").read_text(encoding="utf-8") == prior_pkg
+        assert not (run_dir / "thresholds.json").exists()
+
 
 class TestSaveRunThresholdsFromTraining:
     def test_train_helper_writes_run_thresholds(self, tmp_path: Path) -> None:
@@ -329,3 +381,8 @@ class TestSaveRunThresholdsFromTraining:
         assert (run_dir / "thresholds.json").is_file()
         assert len(published) == 1
         assert published[0]["model_id"] == "species_delta_in_flight"
+
+        prior = (run_dir / "thresholds.json").read_text(encoding="utf-8")
+        with pytest.raises(FileExistsError, match="refusing to overwrite"):
+            publish_run_thresholds(run_dir)
+        assert (run_dir / "thresholds.json").read_text(encoding="utf-8") == prior
