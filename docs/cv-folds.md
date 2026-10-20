@@ -72,8 +72,8 @@ CLI flags override the matching keys under `model.cv`.
 ## Suitability cut-offs
 
 Cut-offs follow [thresholds/METHOD.md](thresholds/METHOD.md): pool every
-held-out presence score across folds, then take the **5th percentile** of that
+held-out presence score across folds, then take the **10th percentile** of that
 pool (`pooled_oof_percentile`).
 
 For **`buffered_loo`**, each fold holds out one presence; those held-out scores
-are pooled and the same 5th-percentile rule applies.
+are pooled and the same 10th-percentile rule applies.

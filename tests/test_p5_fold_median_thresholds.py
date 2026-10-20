@@ -76,8 +76,8 @@ class TestPooledOofPercentile:
         }
         scores = _fold_scores(fold_presence)
         all_presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
-        # 60 presences → 5th percentile of the pool (not median of per-fold p5).
-        expected = float(np.percentile(all_presence, 5.0))
+        # 60 presences → 10th percentile of the pool (not median of per-fold p5).
+        expected = float(np.percentile(all_presence, 10.0))
         fold_cutoffs = [
             float(np.percentile(fold_presence[f], 5.0)) for f in (0, 1, 2)
         ]
@@ -87,15 +87,15 @@ class TestPooledOofPercentile:
         assert result["threshold"] == pytest.approx(expected)
         assert result["threshold"] != pytest.approx(median_of_fold_p5)
         assert result["rule"] == "pooled_oof_percentile"
-        assert result["percentile"] == pytest.approx(5.0)
+        assert result["percentile"] == pytest.approx(10.0)
         assert result["heldout_caught"] == pytest.approx(
             float(np.mean(all_presence >= expected))
         )
         assert result["no_cutoff_reason"] is None
         assert "fold_median_cutoff" not in result
 
-    def test_uses_fifth_percentile_below_fifty_records(self) -> None:
-        """Few-record models use the same 5th percentile (no special rule)."""
+    def test_uses_tenth_percentile_below_fifty_records(self) -> None:
+        """Few-record models use the same 10th percentile (no special rule)."""
         fold_presence = {
             0: list(np.linspace(0.10, 0.90, 10)),
             1: list(np.linspace(0.10, 0.90, 10)),
@@ -104,11 +104,11 @@ class TestPooledOofPercentile:
         scores = _fold_scores(fold_presence)
         all_presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
         assert len(all_presence) == 30
-        expected = float(np.percentile(all_presence, 5.0))
+        expected = float(np.percentile(all_presence, 10.0))
 
         result = compute_pooled_oof_percentile(scores)
         assert result["n_presence"] == 30
-        assert result["percentile"] == pytest.approx(5.0)
+        assert result["percentile"] == pytest.approx(10.0)
         assert result["threshold"] == pytest.approx(expected)
         assert "few records" in result["flag"]
 
@@ -177,7 +177,7 @@ class TestPooledOofPercentile:
         )
 
     def test_synthetic_before_after_vs_fold_median_rule(self) -> None:
-        """Fixture-only before/after: pooled p5 vs former median-of-fold-p5."""
+        """Fixture-only before/after: pooled p10 vs former median-of-fold-p5."""
         fold_presence = {
             0: list(np.linspace(0.02, 0.20, 8)),
             1: list(np.linspace(0.30, 0.80, 8)),
@@ -187,7 +187,7 @@ class TestPooledOofPercentile:
         all_presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
         fold_p5 = [float(np.percentile(fold_presence[f], 5.0)) for f in (0, 1, 2)]
         old_rule = float(np.median(fold_p5))
-        new_rule = float(np.percentile(all_presence, 5.0))
+        new_rule = float(np.percentile(all_presence, 10.0))
 
         result = compute_pooled_oof_percentile(scores)
         assert result["threshold"] == pytest.approx(new_rule)

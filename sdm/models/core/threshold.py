@@ -6,7 +6,7 @@ rules fit and evaluate on the same scores (pooled).
 
 The published training-run rule ``pooled_oof_percentile`` follows
 ``docs/thresholds/METHOD.md``: pool every held-out presence score across folds,
-then take the 5th percentile of that pool (never the median of per-fold
+then take the 10th percentile of that pool (never the median of per-fold
 percentiles). The cut-off is fit only on held-out predictions.
 """
 
@@ -28,7 +28,7 @@ POOLED_OOF_PERCENTILE_RULE = "pooled_oof_percentile"
 P5_FOLD_MEDIAN_RULE = POOLED_OOF_PERCENTILE_RULE
 AUC_MODEL_LIMITED = 0.75
 FEW_RECORDS_MAX = 50
-DEFAULT_PERCENTILE = 5.0
+DEFAULT_PERCENTILE = 10.0
 RUN_THRESHOLDS_JSON = "thresholds.json"
 RUN_THRESHOLDS_CSV = "thresholds.csv"
 VALIDATION_SCORES_FILENAME = "validation_scores.parquet"
@@ -304,7 +304,7 @@ def compute_pooled_oof_percentile(
     """Publishable cut-off: percentile of pooled held-out presence scores.
 
     See ``docs/thresholds/METHOD.md``. All out-of-fold presence scores are pooled
-    first; the cut-off is the 5th percentile of that pool by default (never a
+    first; the cut-off is the 10th percentile of that pool by default (never a
     median of per-fold percentiles). When ``model_limited`` is true, no cut-off
     is published.
     """

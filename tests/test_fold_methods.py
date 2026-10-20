@@ -373,7 +373,7 @@ class TestKmeansDefaultUnchanged:
 
 class TestBufferedLooThresholdCompatibility:
     def test_pooled_oof_percentile_on_one_presence_per_fold(self) -> None:
-        """With one presence per fold, pooled p5 is the 5th percentile of those scores."""
+        """With one presence per fold, pooled p10 is the 10th percentile of those scores."""
         import pandas as pd
 
         from sdm.models.core.threshold import compute_pooled_oof_percentile
@@ -399,9 +399,10 @@ class TestBufferedLooThresholdCompatibility:
             )
         result = compute_pooled_oof_percentile(pd.DataFrame(rows))
         assert result["threshold"] == pytest.approx(
-            float(np.percentile(presence_scores, 5.0))
+            float(np.percentile(presence_scores, 10.0))
         )
         assert result["rule"] == "pooled_oof_percentile"
+        assert result["percentile"] == pytest.approx(10.0)
 
 
 class TestCrossValidateWarningsAndAssignments:

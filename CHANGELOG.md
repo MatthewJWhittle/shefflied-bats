@@ -14,5 +14,5 @@ All notable changes to this project are documented here. Format loosely follows 
 ### Changed
 
 - Default CV fold method is now 10 km spatial `blocks` (5 folds); `kmeans` and `buffered_loo` remain selectable ([#63](https://github.com/MatthewJWhittle/shefflied-bats/issues/63)).
-- Published suitability cut-off rule is pooled held-out presence 5th percentile (`pooled_oof_percentile`) for every model, replacing the per-fold 5th-percentile median from [#61](https://github.com/MatthewJWhittle/shefflied-bats/pull/61) ([#67](https://github.com/MatthewJWhittle/shefflied-bats/issues/67)).
+- Published suitability cut-off rule is pooled held-out presence 10th percentile (`pooled_oof_percentile`) for every model, replacing the per-fold 5th-percentile median from [#61](https://github.com/MatthewJWhittle/shefflied-bats/pull/61) ([#67](https://github.com/MatthewJWhittle/shefflied-bats/issues/67)).
 - README modernised around the `sdm` CLI; legacy `data_prep/` workflow removed from docs.
