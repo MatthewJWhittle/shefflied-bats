@@ -372,11 +372,11 @@ class TestKmeansDefaultUnchanged:
 
 
 class TestBufferedLooThresholdCompatibility:
-    def test_p5_fold_median_is_median_of_held_out_presence_scores(self) -> None:
-        """With one presence per fold, fold p5 equals that score; median is overall median."""
+    def test_pooled_oof_percentile_on_one_presence_per_fold(self) -> None:
+        """With one presence per fold, pooled p10 is the 10th percentile of those scores."""
         import pandas as pd
 
-        from sdm.models.core.threshold import compute_p5_fold_median
+        from sdm.models.core.threshold import compute_pooled_oof_percentile
 
         presence_scores = [0.10, 0.20, 0.30, 0.40, 0.50]
         rows = []
@@ -397,8 +397,12 @@ class TestBufferedLooThresholdCompatibility:
                     "held_out_score": 0.01,
                 }
             )
-        result = compute_p5_fold_median(pd.DataFrame(rows))
-        assert result["threshold"] == pytest.approx(float(np.median(presence_scores)))
+        result = compute_pooled_oof_percentile(pd.DataFrame(rows))
+        assert result["threshold"] == pytest.approx(
+            float(np.percentile(presence_scores, 10.0))
+        )
+        assert result["rule"] == "pooled_oof_percentile"
+        assert result["percentile"] == pytest.approx(10.0)
 
 
 class TestCrossValidateWarningsAndAssignments:

@@ -46,7 +46,7 @@ Each trained species × activity model is a **directory**:
 
 Training also writes `validation_scores.parquet` per model: one row per held-out training point with `point_index`, `class`, `fold`, and `held_out_score` (the suitability score from the fold model that did not train on that point; background points included). With `buffered_loo`, a background point may appear in more than one fold. `fold_assignments.parquet` stores a fold label for every training point. `package.json` may reference these under `artifacts`, record `metrics.n_cv_folds` / `fold_presence_counts` / `fold_method`, and include a `fold` object with the method parameters (see [cv-folds.md](cv-folds.md)).
 
-Suitability cut-offs follow [docs/thresholds/METHOD.md](thresholds/METHOD.md): 5th-percentile held-out presence per fold, then the median across folds, applied directly to the final model. `sdm train` writes the run-level and per-package threshold files; `sdm threshold --publish-run` writes them for a run that does not already have them (refuses overwrite). Cut-offs are model outputs only — no record locations, grid references, or site names.
+Suitability cut-offs follow [docs/thresholds/METHOD.md](thresholds/METHOD.md): pool held-out presence scores across folds, then take the 10th percentile (`pooled_oof_percentile`), applied directly to the final model. Models with `model_limited: true` in `package.json` publish no cut-off (`threshold: null`). `sdm train` writes the run-level and per-package threshold files; `sdm threshold --publish-run` writes them for a run that does not already have them (refuses overwrite). Cut-offs are model outputs only — no record locations, grid references, or site names.
 
 ### Model identifier (`model_id`)
 
@@ -92,6 +92,7 @@ Written by `sdm train`. Key columns:
 |-------|------|-------------|
 | `maxent_config` | object | Serialised MaxEnt / elapid hyperparameters |
 | `metrics` | object | e.g. `mean_cv_auc`, `std_cv_auc`, `n_presence`, `n_background`, `training_success` → hsm-app **`metadata.card`** via adapter |
+| `model_limited` | boolean | When `true`, publish no suitability cut-off (`thresholds.json` has `threshold: null` and `no_cutoff_reason`) |
 
 ### Example (abbreviated)
 

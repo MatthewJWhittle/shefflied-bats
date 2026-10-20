@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import pandas as pd
 
 from sdm.models.core.threshold import (
-    P5_FOLD_MEDIAN_RULE,
+    POOLED_OOF_PERCENTILE_RULE,
     THRESHOLD_RULES,
     plot_score_spreads,
     summarise_thresholds_for_scores,
@@ -184,11 +184,12 @@ def publish_run_thresholds(
     model_ids: Optional[Sequence[str]] = None,
     verbose: bool = False,
 ) -> Optional[List[Dict[str, Any]]]:
-    """Write METHOD.md ``p5_fold_median`` cut-offs into a training run folder.
+    """Write METHOD.md ``pooled_oof_percentile`` cut-offs into a training run folder.
 
     Requires ``validation_scores.parquet`` per package. Writes ``thresholds.json``
     / ``thresholds.csv`` next to the packages (and a per-package
-    ``thresholds.json``). Does not modify ``package.json``.
+    ``thresholds.json``). Does not modify ``package.json``. Model-limited packages
+    (``package.json`` ``model_limited: true``) publish no cut-off value.
 
     Raises ``FileExistsError`` if threshold artefacts already exist in the run
     folder (refuses overwrite; same spirit as the EV layer merge guard).
@@ -211,7 +212,7 @@ def publish_run_thresholds(
     )
     logger.info(
         "Published %s thresholds for %d model(s) under %s",
-        P5_FOLD_MEDIAN_RULE,
+        POOLED_OOF_PERCENTILE_RULE,
         len(rows),
         models_dir,
     )

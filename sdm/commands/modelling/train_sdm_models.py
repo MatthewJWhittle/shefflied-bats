@@ -1062,6 +1062,7 @@ def save_models(
             "model_id": get_model_id([model.latin_name, model.activity_type]),
             "latin_name": model.latin_name,
             "activity_type": model.activity_type,
+            "model_limited": bool(data.model_limited),
             "feature_names": list(data.model_features),
             "maxent_config": _maxent_config_to_dict(data.maxent_config),
             "metrics": {
@@ -1139,13 +1140,20 @@ def save_run_thresholds(
     training_data: List[TrainingData],
     output_dir: Path,
 ) -> List[Dict[str, Any]]:
-    """Write p5-fold-median thresholds into the run folder (see docs/thresholds/METHOD.md).
+    """Write pooled OOF-percentile thresholds into the run folder (METHOD.md).
 
-    ``models`` / ``training_data`` are accepted so the train call site stays
-    stable; cut-offs are computed from on-disk ``validation_scores.parquet``.
+    ``models`` / ``training_data`` supply per-model ``model_limited`` flags;
+    cut-offs are computed from on-disk ``validation_scores.parquet``.
     """
-    del models, training_data
-    rows = write_run_thresholds(output_dir)
+    del models
+    limited_by_id = {
+        get_model_id([data.latin_name, data.activity_type]): bool(data.model_limited)
+        for data in training_data
+    }
+    rows = write_run_thresholds(
+        output_dir,
+        model_limited_by_id=limited_by_id,
+    )
     if not rows:
         logger.warning("No models available to write run thresholds under %s", output_dir)
         return []
@@ -1788,9 +1796,10 @@ def train_sdm_models(
         identifier = get_model_id([latin_name, activity_type])
         maxent_model_config: DefaultMaxentConfig = default_model_config
         model_features_config: VariablesConfig
+        model_limited = False
 
         def _apply_base_variables_fallback(reason: str) -> None:
-            nonlocal maxent_model_config, model_features_config
+            nonlocal maxent_model_config, model_features_config, model_limited
             logger.warning(
                 "%s: %s; using base variables config from %s",
                 identifier,
@@ -1799,6 +1808,7 @@ def train_sdm_models(
             )
             maxent_model_config = default_model_config
             model_features_config = base_variables_cfg.validate_features(ev_columns)
+            model_limited = False
 
         if config_dir is None:
             model_features_config = base_variables_cfg.validate_features(ev_columns)
@@ -1822,6 +1832,7 @@ def train_sdm_models(
                 maxent_model_config = DefaultMaxentConfig.from_config(
                     config=model_config
                 )
+                model_limited = bool(model_config.model_limited)
                 variables_config = load_variables_config(per_model_variables_path)
                 model_features_config = variables_config.validate_features(
                     ev_columns
@@ -1844,6 +1855,11 @@ def train_sdm_models(
                 identifier,
                 len(model_features_config.variables),
             )
+            if model_limited:
+                logger.info(
+                    "%s: model_limited=true (no suitability cut-off will be published)",
+                    identifier,
+                )
 
         training_data.append(
             TrainingData(
@@ -1852,6 +1868,7 @@ def train_sdm_models(
                 occurrence=species_data,
                 maxent_config=maxent_model_config,
                 model_features=model_features_config.variables,
+                model_limited=model_limited,
             )
         )
     
