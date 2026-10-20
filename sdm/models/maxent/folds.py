@@ -36,6 +36,9 @@ class FoldMethod(StrEnum):
     BUFFERED_LOO = "buffered_loo"
 
 
+DEFAULT_BUFFERED_LOO_WARN_ABOVE = 25
+
+
 @dataclass(frozen=True)
 class FoldParams:
     """Resolved fold settings used for one training run."""
@@ -46,6 +49,7 @@ class FoldParams:
     block_size_m: float = 10_000.0
     block_n_tries: int = 500
     buffer_m: float = 10_000.0
+    buffered_loo_warn_above: int = DEFAULT_BUFFERED_LOO_WARN_ABOVE
 
     def to_metadata(self) -> dict:
         payload: dict = {
@@ -58,8 +62,31 @@ class FoldParams:
             payload["block_n_tries"] = self.block_n_tries
         if self.method is FoldMethod.BUFFERED_LOO:
             payload["buffer_m"] = self.buffer_m
+            payload["buffered_loo_warn_above"] = self.buffered_loo_warn_above
             # n_folds for LOO is presence count; recorded after split when known.
         return payload
+
+
+def buffered_loo_presence_warning(
+    n_presence: int,
+    warn_above: int,
+    *,
+    latin_name: str,
+    activity_type: str,
+) -> Optional[str]:
+    """Return a warning message when buffered LOO is used on a non-thin species.
+
+    Warning-only guidance: fires when ``n_presence > warn_above``. Does not
+    change fold construction or training behaviour.
+    """
+    if n_presence <= warn_above:
+        return None
+    return (
+        f"{latin_name} - {activity_type}: buffered_loo used with {n_presence} "
+        f"presence records (threshold {warn_above}). Buffered leave-one-out is "
+        f"intended for thin species; blocks or kmeans is the recommended method "
+        f"at this sample size."
+    )
 
 
 def resolve_fold_params(
@@ -71,6 +98,7 @@ def resolve_fold_params(
     block_size_m_override: Optional[float] = None,
     block_n_folds_override: Optional[int] = None,
     buffer_m_override: Optional[float] = None,
+    buffered_loo_warn_above_override: Optional[int] = None,
 ) -> FoldParams:
     """Merge config defaults with optional CLI overrides."""
     cfg = cv_config or CvConfig()
@@ -108,11 +136,17 @@ def resolve_fold_params(
         buffer_m = (
             buffer_m_override if buffer_m_override is not None else cfg.buffer_m
         )
+        warn_above = (
+            buffered_loo_warn_above_override
+            if buffered_loo_warn_above_override is not None
+            else cfg.buffered_loo_warn_above
+        )
         return FoldParams(
             method=method,
             n_folds=0,  # resolved to presence count when splitting
             random_state=fold_seed,
             buffer_m=float(buffer_m),
+            buffered_loo_warn_above=int(warn_above),
         )
 
     raise ValueError(f"unknown fold method: {method!r}")

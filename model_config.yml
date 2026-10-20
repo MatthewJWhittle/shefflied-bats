@@ -4,7 +4,8 @@ model:
 
   # Cross-validation fold method (default kmeans preserves previous behaviour).
   # CLI overrides: --cv-method, --cv-n-folds, --cv-block-size-m,
-  # --cv-block-n-folds, --cv-buffer-m. See docs/cv-folds.md.
+  # --cv-block-n-folds, --cv-buffer-m, --cv-buffered-loo-warn-above.
+  # See docs/cv-folds.md.
   cv:
     method: kmeans
     n_folds: 3
@@ -13,6 +14,7 @@ model:
     block_n_folds: 5
     block_n_tries: 500
     buffer_m: 10000
+    buffered_loo_warn_above: 25
 
   maxent:
     feature_types:

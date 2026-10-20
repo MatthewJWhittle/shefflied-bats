@@ -346,6 +346,13 @@ def train(
         None,
         help="Buffer metres around each held-out presence for buffered_loo (default 10000).",
     ),
+    cv_buffered_loo_warn_above: Optional[int] = typer.Option(
+        None,
+        help=(
+            "Warn when buffered_loo is used with more than this many presence "
+            "records (default 25). Warning only; does not change training."
+        ),
+    ),
     verbose: bool = False,
 ) -> None:
     """Train SDM models using the new modular approach.
@@ -382,6 +389,7 @@ def train(
         cv_block_size_m=cv_block_size_m,
         cv_block_n_folds=cv_block_n_folds,
         cv_buffer_m=cv_buffer_m,
+        cv_buffered_loo_warn_above=cv_buffered_loo_warn_above,
     )
     
     logging.info("Model training complete!")

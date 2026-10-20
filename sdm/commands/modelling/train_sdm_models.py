@@ -75,8 +75,10 @@ from sdm.types import (
 from sdm.commands.modelling.utils import get_model_id
 from sdm.models.core.threshold import write_run_thresholds
 from sdm.models.maxent.folds import (
+    DEFAULT_BUFFERED_LOO_WARN_ABOVE,
     FoldMethod,
     FoldParams,
+    buffered_loo_presence_warning,
     fold_assignments_frame,
     presence_counts_per_fold,
     resolve_fold_params,
@@ -672,6 +674,15 @@ def train_single_model(
         )
         logger.info(f"Model features: {model_features}")
         n_presence = len(data.occurrence[data.occurrence["class"] == 1])
+        if resolved_folds.method is FoldMethod.BUFFERED_LOO:
+            loo_warning = buffered_loo_presence_warning(
+                n_presence,
+                resolved_folds.buffered_loo_warn_above,
+                latin_name=latin_name,
+                activity_type=activity_type.value,
+            )
+            if loo_warning:
+                logger.warning(loo_warning)
         if resolved_folds.method is FoldMethod.KMEANS:
             # Prefer explicit fold_params; otherwise honour the n_cv_folds argument.
             effective_n_folds = (
@@ -700,6 +711,7 @@ def train_single_model(
             block_size_m=resolved_folds.block_size_m,
             block_n_tries=resolved_folds.block_n_tries,
             buffer_m=resolved_folds.buffer_m,
+            buffered_loo_warn_above=resolved_folds.buffered_loo_warn_above,
         )
         fold_presence = presence_counts_per_fold(data.occurrence, effective_params)
 
@@ -1088,6 +1100,12 @@ def save_models(
                         model.fold_params.get("block_n_tries", 500)
                     ),
                     buffer_m=float(model.fold_params.get("buffer_m", 10_000.0)),
+                    buffered_loo_warn_above=int(
+                        model.fold_params.get(
+                            "buffered_loo_warn_above",
+                            DEFAULT_BUFFERED_LOO_WARN_ABOVE,
+                        )
+                    ),
                 ),
             )
             fold_path = pkg_dir / "fold_assignments.parquet"
@@ -1552,6 +1570,7 @@ def train_sdm_models(
     cv_block_size_m: Optional[float] = None,
     cv_block_n_folds: Optional[int] = None,
     cv_buffer_m: Optional[float] = None,
+    cv_buffered_loo_warn_above: Optional[int] = None,
 ) -> pd.DataFrame:
     """Run the MaxEnt model training pipeline using the new modular approach.
     
@@ -1630,6 +1649,7 @@ def train_sdm_models(
         block_size_m_override=cv_block_size_m,
         block_n_folds_override=cv_block_n_folds,
         buffer_m_override=cv_buffer_m,
+        buffered_loo_warn_above_override=cv_buffered_loo_warn_above,
     )
     logger.info(f"Sampling config: grid_size_m={grid_size_m}")
     logger.info("Training seed (from model_config.yml): %s", training_seed)

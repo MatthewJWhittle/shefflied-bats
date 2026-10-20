@@ -17,6 +17,14 @@ Seeds: fold construction uses `model.cv.seed` when set, otherwise `model.seed`. 
 
 Skipped folds are never silent: the log warns with the fold number and the reason (for example only one class in train or test).
 
+### Buffered LOO presence warning
+
+`buffered_loo` is meant for thin species. When a model uses that method and its
+presence-record count **exceeds** `buffered_loo_warn_above` (default **25**),
+training logs a **warning per model** with the count, the threshold, and that
+`blocks` or `kmeans` is the recommended method at that sample size. This is
+guidance only: training still runs unchanged.
+
 ## Config (`model_config.yml`)
 
 ```yaml
@@ -30,6 +38,7 @@ model:
     block_n_folds: 5        # blocks
     block_n_tries: 500      # blocks
     buffer_m: 10000         # buffered_loo
+    buffered_loo_warn_above: 25  # warn (only) when presence count exceeds this
 ```
 
 ## CLI
@@ -45,6 +54,7 @@ sdm train --cv-method blocks --cv-block-size-m 10000 --cv-block-n-folds 5
 # Buffered leave-one-presence-out
 sdm train --cv-method buffered_loo
 sdm train --cv-method buffered_loo --cv-buffer-m 10000
+sdm train --cv-method buffered_loo --cv-buffered-loo-warn-above 25
 
 # KMeans with an explicit fold count
 sdm train --cv-method kmeans --cv-n-folds 3
