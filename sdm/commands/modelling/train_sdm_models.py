@@ -64,6 +64,7 @@ from sdm.utils.sdm_config import (
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
 from sdm.commands.modelling.utils import get_model_id
+from sdm.models.core.threshold import write_run_thresholds
 from sdm.utils.fs import join_uri_path, local_materialized_path, uri_exists
 from sdm.utils.model_runs import (
     artifact_parent_uri,
@@ -1027,6 +1028,29 @@ def save_results(results_df: pd.DataFrame, output_dir: Path) -> None:
     results_df.to_csv(output_dir / "model_results.csv", index=False)
 
 
+def save_run_thresholds(
+    models: List[TrainingResults],
+    training_data: List[TrainingData],
+    output_dir: Path,
+) -> List[Dict[str, Any]]:
+    """Write p5-fold-median thresholds into the run folder (see docs/thresholds/METHOD.md).
+
+    ``models`` / ``training_data`` are accepted so the train call site stays
+    stable; cut-offs are computed from on-disk ``validation_scores.parquet``.
+    """
+    del models, training_data
+    rows = write_run_thresholds(output_dir)
+    if not rows:
+        logger.warning("No models available to write run thresholds under %s", output_dir)
+        return []
+    logger.info(
+        "Wrote suitability thresholds for %d model(s) under %s",
+        len(rows),
+        output_dir,
+    )
+    return rows
+
+
 def save_run_metadata(
     output_dir: Path,
     *,
@@ -1740,6 +1764,7 @@ def train_sdm_models(
 
         save_results(results_df, models_output_dir)
         save_training_data(training_data, models_output_dir)
+        save_run_thresholds(models, training_data, models_output_dir)
         save_run_metadata(
             models_output_dir,
             seed=training_seed,
