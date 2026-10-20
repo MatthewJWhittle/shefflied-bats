@@ -130,6 +130,8 @@ class CvConfig(BaseModel):
     block_n_folds: int = 5
     block_n_tries: int = 500
     buffer_m: float = 10_000.0
+    # Warn (never block) when buffered_loo presence count exceeds this (thin-species guidance).
+    buffered_loo_warn_above: int = 25
 
 
 class ModelConfig(BaseModel):

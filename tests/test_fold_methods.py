@@ -11,8 +11,10 @@ from shapely.geometry import Point
 from sklearn.dummy import DummyClassifier
 
 from sdm.models.maxent.folds import (
+    DEFAULT_BUFFERED_LOO_WARN_ABOVE,
     FoldMethod,
     assign_spatial_block_folds,
+    buffered_loo_presence_warning,
     fold_assignments_frame,
     iter_fold_splits,
     resolve_fold_params,
@@ -171,6 +173,126 @@ class TestSpatialBlockFolds:
         )
         assert np.array_equal(a, b)
         assert not np.array_equal(a, c)
+
+
+class TestBufferedLooPresenceWarning:
+    def test_warns_above_threshold_not_at_or_below(self) -> None:
+        threshold = DEFAULT_BUFFERED_LOO_WARN_ABOVE
+        below = buffered_loo_presence_warning(
+            threshold - 1,
+            threshold,
+            latin_name="Syntheticus testus",
+            activity_type="In flight",
+        )
+        at = buffered_loo_presence_warning(
+            threshold,
+            threshold,
+            latin_name="Syntheticus testus",
+            activity_type="In flight",
+        )
+        above = buffered_loo_presence_warning(
+            threshold + 1,
+            threshold,
+            latin_name="Syntheticus testus",
+            activity_type="In flight",
+        )
+        assert below is None
+        assert at is None
+        assert above is not None
+        assert str(threshold + 1) in above
+        assert str(threshold) in above
+        assert "blocks" in above
+        assert "kmeans" in above
+
+    def test_resolve_fold_params_carries_warn_threshold(self) -> None:
+        params = resolve_fold_params(
+            CvConfig(method="buffered_loo", buffered_loo_warn_above=40),
+            model_seed=1,
+        )
+        assert params.buffered_loo_warn_above == 40
+        assert params.to_metadata()["buffered_loo_warn_above"] == 40
+
+        overridden = resolve_fold_params(
+            CvConfig(method="buffered_loo", buffered_loo_warn_above=40),
+            model_seed=1,
+            buffered_loo_warn_above_override=10,
+        )
+        assert overridden.buffered_loo_warn_above == 10
+
+    def test_train_single_model_logs_warning_above_threshold(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Warning fires per model above threshold; not at/below. Training continues."""
+        from sdm.commands.modelling.train_sdm_models import train_single_model
+        from sdm.types import TrainingData
+
+        class _StubMaxent:
+            feature_types = ["linear"]
+
+        def _fake_evaluate_and_train(**_kwargs):
+            return object(), [], np.array([0.5]), None
+
+        monkeypatch.setattr(
+            "sdm.commands.modelling.train_sdm_models.create_maxent_pipeline",
+            lambda **_kwargs: object(),
+        )
+        monkeypatch.setattr(
+            "sdm.commands.modelling.train_sdm_models.evaluate_and_train_maxent_model",
+            _fake_evaluate_and_train,
+        )
+
+        threshold = 5
+        params = resolve_fold_params(
+            CvConfig(method="buffered_loo", buffered_loo_warn_above=threshold),
+            model_seed=0,
+        )
+
+        def _occurrence(n_presence: int) -> gpd.GeoDataFrame:
+            n_bg = max(n_presence, 4)
+            rng = np.random.default_rng(0)
+            n_total = n_presence + n_bg
+            return gpd.GeoDataFrame(
+                {
+                    "feature_a": rng.normal(size=n_total),
+                    "feature_b": rng.normal(size=n_total),
+                    "class": [1] * n_presence + [0] * n_bg,
+                    "sample_weight": np.ones(n_total),
+                    "geometry": [
+                        Point(float(i * 1000), 0.0) for i in range(n_total)
+                    ],
+                },
+                crs="EPSG:27700",
+            )
+
+        for n_presence, expect_warn in ((threshold, False), (threshold + 1, True)):
+            data = TrainingData(
+                latin_name="Syntheticus testus",
+                activity_type="In flight",
+                occurrence=_occurrence(n_presence),
+                maxent_config=_StubMaxent(),
+                model_features=["feature_a", "feature_b"],
+            )
+            caplog.clear()
+            with caplog.at_level(logging.WARNING):
+                result = train_single_model(
+                    data,
+                    max_threads_per_model=1,
+                    seed=0,
+                    fold_params=params,
+                )
+            assert result.success
+            messages = [
+                r.message
+                for r in caplog.records
+                if "buffered_loo used with" in r.message
+            ]
+            if expect_warn:
+                assert messages, f"expected warning for n_presence={n_presence}"
+                assert str(n_presence) in messages[0]
+                assert str(threshold) in messages[0]
+                assert "blocks" in messages[0] and "kmeans" in messages[0]
+            else:
+                assert not messages, f"unexpected warning for n_presence={n_presence}"
 
 
 class TestBufferedLoo:
