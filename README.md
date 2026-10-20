@@ -25,7 +25,8 @@ sdm setup          # study boundary (separate from pipeline)
 sdm data -o data/evs-rebuild   # rebuild every EV layer into a caller-chosen folder
 sdm background     # optional — training can create these on the fly
 sdm train          # one model package per species × activity
-                   # fold method: --cv-method kmeans|blocks|buffered_loo (see docs/cv-folds.md)
+                   # default folds: 10 km blocks / 5; override with --cv-method
+                   # kmeans|blocks|buffered_loo (see docs/cv-folds.md)
 sdm predict        # suitability surfaces (Cloud Optimised GeoTIFF / COG, project coordinate reference system / CRS)
 sdm export-rasters data/sdm_predictions/prediction_*.tif \
   -o exports/share --output-crs EPSG:3857 --cog   # Web Mercator COGs when sharing with map tools

@@ -92,8 +92,18 @@ def _default_kmeans_occurrence(seed: int = 0) -> gpd.GeoDataFrame:
 
 
 class TestResolveFoldParams:
-    def test_default_is_kmeans_with_three_folds(self) -> None:
+    def test_default_is_blocks_with_five_folds(self) -> None:
         params = resolve_fold_params(CvConfig(), model_seed=42)
+        assert params.method == FoldMethod.BLOCKS
+        assert params.n_folds == 5
+        assert params.block_size_m == 10_000.0
+        assert params.random_state == 42
+
+    def test_kmeans_defaults_when_selected(self) -> None:
+        params = resolve_fold_params(
+            CvConfig(method="kmeans"),
+            model_seed=42,
+        )
         assert params.method == FoldMethod.KMEANS
         assert params.n_folds == 3
         assert params.random_state == 42
@@ -352,7 +362,7 @@ class TestKmeansDefaultUnchanged:
         apply_training_seed(42)
         legacy = list(ela.GeographicKFold(n_splits=3).split(gdf))
 
-        params = resolve_fold_params(CvConfig(), model_seed=42)
+        params = resolve_fold_params(CvConfig(method="kmeans"), model_seed=42)
         modern = list(iter_fold_splits(gdf, params))
 
         assert len(modern) == 3
@@ -362,11 +372,11 @@ class TestKmeansDefaultUnchanged:
 
 
 class TestBufferedLooThresholdCompatibility:
-    def test_p5_fold_median_is_median_of_held_out_presence_scores(self) -> None:
-        """With one presence per fold, fold p5 equals that score; median is overall median."""
+    def test_pooled_percentile_uses_all_held_out_presence_scores(self) -> None:
+        """With one presence per fold, cut-off is the pool percentile (few-records → 10th)."""
         import pandas as pd
 
-        from sdm.models.core.threshold import compute_p5_fold_median
+        from sdm.models.core.threshold import compute_pooled_oof_percentile
 
         presence_scores = [0.10, 0.20, 0.30, 0.40, 0.50]
         rows = []
@@ -387,8 +397,10 @@ class TestBufferedLooThresholdCompatibility:
                     "held_out_score": 0.01,
                 }
             )
-        result = compute_p5_fold_median(pd.DataFrame(rows))
-        assert result["threshold"] == pytest.approx(float(np.median(presence_scores)))
+        result = compute_pooled_oof_percentile(pd.DataFrame(rows))
+        expected = float(np.percentile(presence_scores, 10.0))
+        assert result["threshold"] == pytest.approx(expected)
+        assert result["percentile"] == pytest.approx(10.0)
 
 
 class TestCrossValidateWarningsAndAssignments:

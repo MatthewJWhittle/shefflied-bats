@@ -326,8 +326,8 @@ def train(
     cv_method: Optional[str] = typer.Option(
         None,
         help=(
-            "CV fold method: kmeans (default), blocks, or buffered_loo. "
-            "Overrides model_config.yml cv.method when set."
+            "CV fold method: blocks (default, 10 km / 5 folds), kmeans, or "
+            "buffered_loo. Overrides model_config.yml cv.method when set."
         ),
     ),
     cv_n_folds: Optional[int] = typer.Option(
@@ -440,7 +440,7 @@ def threshold(
         False,
         "--publish-run/--no-publish-run",
         help=(
-            "Write p5_fold_median cut-offs into models_dir (run folder) as "
+            "Write pooled_oof_percentile cut-offs into models_dir (run folder) as "
             "thresholds.json/csv next to each package. Requires "
             "validation_scores.parquet. Refuses to overwrite existing threshold "
             "files. See docs/thresholds/METHOD.md."
@@ -450,11 +450,11 @@ def threshold(
 ) -> None:
     """Compute suitability thresholds from held-out CV validation scores.
 
-    Cut-offs are fit on training folds and evaluated on held-out folds. The same
-    rule parameters apply to every model (no per-species settings). Comparison
-    results are written as a tidy CSV/JSON table. With ``--publish-run``, also
-    write the METHOD.md rule into the training run folder (``sdm train`` does
-    this automatically).
+    Comparison rules fit cut-offs on training folds and evaluate on held-out
+    folds. The published METHOD.md rule pools held-out presence scores first.
+    Comparison results are written as a tidy CSV/JSON table. With
+    ``--publish-run``, also write the METHOD.md rule into the training run
+    folder (``sdm train`` does this automatically).
     """
     from sdm.commands.modelling.compute_sdm_thresholds import (
         compute_sdm_thresholds,

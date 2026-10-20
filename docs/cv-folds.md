@@ -2,15 +2,15 @@
 
 Training scores each model with geographic cross-validation. The fold method is
 selectable so methods can be compared on accuracy, overfitting (train versus
-held-out gap), cut-offs and maps. The default stays **`kmeans`** until a method
-is chosen for production.
+held-out gap), cut-offs and maps. The default is **`blocks`**: 10 km squares
+dealt into 5 folds. `kmeans` and `buffered_loo` stay selectable.
 
 ## Methods
 
 | Method | What it does | Typical use |
 |--------|----------------|-------------|
-| `kmeans` | Clusters point coordinates with KMeans into `n_folds` areas (elapid `GeographicKFold`). Same behaviour as before. | Baseline / current runs |
-| `blocks` | Squares of `block_size_m` (default 10 km) are assigned to `block_n_folds` (default 5) folds. Among many seeded random assignments, the run keeps the one that best balances presence counts while giving every fold both presence and background. Background inherits its block's fold. | Spatial block CV |
+| `blocks` | Squares of `block_size_m` (default 10 km) are assigned to `block_n_folds` (default 5) folds. Among many seeded random assignments, the run keeps the one that best balances presence counts while giving every fold both presence and background. Background inherits its block's fold. | **Default** spatial block CV |
+| `kmeans` | Clusters point coordinates with KMeans into `n_folds` areas (elapid `GeographicKFold`). | Baseline / comparison runs |
 | `buffered_loo` | Hold out each presence in turn. Drop training points within `buffer_m` (default 10 km) of it. Score that presence against background points inside the same buffer (also held out). Other nearby presences are excluded from train and test for that fold. | Thin species |
 
 Seeds: fold construction uses `model.cv.seed` when set, otherwise `model.seed`. The same seed must give the same folds twice.
@@ -31,7 +31,7 @@ guidance only: training still runs unchanged.
 model:
   seed: 42
   cv:
-    method: kmeans          # kmeans | blocks | buffered_loo
+    method: blocks          # blocks | kmeans | buffered_loo
     n_folds: 3              # kmeans
     # seed: 42              # optional; defaults to model.seed
     block_size_m: 10000     # blocks
@@ -44,10 +44,10 @@ model:
 ## CLI
 
 ```bash
-# Baseline (default)
+# Default (10 km blocks, 5 folds)
 sdm train
 
-# Spatial blocks
+# Explicit spatial blocks
 sdm train --cv-method blocks
 sdm train --cv-method blocks --cv-block-size-m 10000 --cv-block-n-folds 5
 
@@ -71,6 +71,7 @@ CLI flags override the matching keys under `model.cv`.
 
 ## Suitability cut-offs
 
-Cut-offs still follow [thresholds/METHOD.md](thresholds/METHOD.md): per-fold 5th-percentile of held-out presence scores, then the median across folds.
-
-For **`buffered_loo`**, each fold holds out one presence, so that fold's 5th percentile is that presence's held-out score. The published cut-off is therefore the **median of the held-out presence scores**.
+Cut-offs follow [thresholds/METHOD.md](thresholds/METHOD.md): pool every held-out
+presence score across folds, then take a low percentile of that pool (10th when
+there are fewer than 50 presences, otherwise 5th). Models with
+`model_limited: true` in their per-model config publish no cut-off.

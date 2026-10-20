@@ -1,4 +1,6 @@
 model:
+  # Publish no suitability cut-off for this model (continuous map only).
+  model_limited: true
   maxent:
     feature_types:
     - linear
