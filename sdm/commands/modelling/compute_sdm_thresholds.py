@@ -10,14 +10,12 @@ from typing import Any, Dict, List, Optional, Sequence
 import pandas as pd
 
 from sdm.models.core.threshold import (
-    POOLED_OOF_PERCENTILE_RULE,
+    P5_FOLD_MEDIAN_RULE,
     THRESHOLD_RULES,
     plot_score_spreads,
     summarise_thresholds_for_scores,
     write_run_thresholds,
 )
-from sdm.types import ThresholdConfig
-from sdm.utils.io import MODEL_CONFIG_PATH, load_model_config
 from sdm.utils.logging_utils import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -185,16 +183,12 @@ def publish_run_thresholds(
     *,
     model_ids: Optional[Sequence[str]] = None,
     verbose: bool = False,
-    few_records_max: Optional[int] = None,
-    few_records_percentile: Optional[float] = None,
-    percentile: Optional[float] = None,
 ) -> Optional[List[Dict[str, Any]]]:
-    """Write METHOD.md ``pooled_oof_percentile`` cut-offs into a training run folder.
+    """Write METHOD.md ``p5_fold_median`` cut-offs into a training run folder.
 
     Requires ``validation_scores.parquet`` per package. Writes ``thresholds.json``
     / ``thresholds.csv`` next to the packages (and a per-package
-    ``thresholds.json``). Does not modify ``package.json``. Model-limited packages
-    (``package.json`` ``model_limited: true``) publish no cut-off value.
+    ``thresholds.json``). Does not modify ``package.json``.
 
     Raises ``FileExistsError`` if threshold artefacts already exist in the run
     folder (refuses overwrite; same spirit as the EV layer merge guard).
@@ -211,34 +205,13 @@ def publish_run_thresholds(
         logger.warning("No validation_scores.parquet files found under %s", models_dir)
         return None
 
-    threshold_cfg = ThresholdConfig()
-    try:
-        loaded = load_model_config(MODEL_CONFIG_PATH).threshold
-        if loaded is not None:
-            threshold_cfg = loaded
-    except (FileNotFoundError, KeyError, ValueError):
-        pass
-
     rows = write_run_thresholds(
         models_dir,
         model_ids=[d.name for d in package_dirs],
-        few_records_max=(
-            few_records_max
-            if few_records_max is not None
-            else threshold_cfg.few_records_max
-        ),
-        few_records_percentile=(
-            few_records_percentile
-            if few_records_percentile is not None
-            else threshold_cfg.few_records_percentile
-        ),
-        percentile=(
-            percentile if percentile is not None else threshold_cfg.percentile
-        ),
     )
     logger.info(
         "Published %s thresholds for %d model(s) under %s",
-        POOLED_OOF_PERCENTILE_RULE,
+        P5_FOLD_MEDIAN_RULE,
         len(rows),
         models_dir,
     )

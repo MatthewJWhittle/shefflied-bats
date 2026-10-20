@@ -71,7 +71,9 @@ CLI flags override the matching keys under `model.cv`.
 
 ## Suitability cut-offs
 
-Cut-offs follow [thresholds/METHOD.md](thresholds/METHOD.md): pool every held-out
-presence score across folds, then take a low percentile of that pool (10th when
-there are fewer than 50 presences, otherwise 5th). Models with
-`model_limited: true` in their per-model config publish no cut-off.
+Cut-offs still follow [thresholds/METHOD.md](thresholds/METHOD.md): per-fold
+5th-percentile of held-out presence scores, then the median across folds.
+
+For **`buffered_loo`**, each fold holds out one presence, so that fold's 5th
+percentile is that presence's held-out score. The published cut-off is therefore
+the **median of the held-out presence scores**.

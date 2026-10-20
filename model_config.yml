@@ -16,14 +16,6 @@ model:
     buffer_m: 10000
     buffered_loo_warn_above: 25
 
-  # Published suitability cut-off (docs/thresholds/METHOD.md).
-  # Pool held-out presence scores, then take a low percentile of that pool.
-  # Models with fewer than few_records_max presences use few_records_percentile.
-  threshold:
-    few_records_max: 50
-    few_records_percentile: 10.0
-    percentile: 5.0
-
   maxent:
     feature_types:
       - "linear"

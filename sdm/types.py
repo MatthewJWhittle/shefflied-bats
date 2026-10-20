@@ -134,24 +134,12 @@ class CvConfig(BaseModel):
     buffered_loo_warn_above: int = 25
 
 
-class ThresholdConfig(BaseModel):
-    """Published suitability cut-off parameters (see ``docs/thresholds/METHOD.md``)."""
-
-    # Presence count below this uses ``few_records_percentile`` instead of ``percentile``.
-    few_records_max: int = 50
-    few_records_percentile: float = 10.0
-    percentile: float = 5.0
-
-
 class ModelConfig(BaseModel):
     seed: int
     maxent: MaxentConfigModel
     sampling: Optional[SamplingConfig] = None
     background: Optional[BackgroundConfig] = None
     cv: Optional[CvConfig] = None
-    threshold: Optional[ThresholdConfig] = None
-    # When true, publish no cut-off (no threshold value / thresholded map).
-    model_limited: bool = False
 
 
 class SDMModel(BaseModel):
@@ -168,7 +156,6 @@ class TrainingData(SDMModel):
     occurrence: gpd.GeoDataFrame
     maxent_config: Any  # DefaultMaxentConfig - using Any to avoid circular imports, required for training
     model_features: List[str]  # Required for training - list of feature column names to use
-    model_limited: bool = False
 
 
 class TrainingResults(SDMModel):
