@@ -2,6 +2,18 @@ model:
   seed: 42
   record_age_years: 20
 
+  # Cross-validation fold method (default kmeans preserves previous behaviour).
+  # CLI overrides: --cv-method, --cv-n-folds, --cv-block-size-m,
+  # --cv-block-n-folds, --cv-buffer-m. See docs/cv-folds.md.
+  cv:
+    method: kmeans
+    n_folds: 3
+    # seed: null  # defaults to model.seed
+    block_size_m: 10000
+    block_n_folds: 5
+    block_n_tries: 500
+    buffer_m: 10000
+
   maxent:
     feature_types:
       - "linear"

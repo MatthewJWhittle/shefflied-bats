@@ -163,3 +163,24 @@ def test_run_metadata_records_seed(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["seed"] == 42
     assert payload["model_config_path"] == "model_config.yml"
+
+
+def test_run_metadata_records_fold_method(tmp_path: Path) -> None:
+    from sdm.models.maxent.folds import FoldParams, FoldMethod
+
+    path = save_run_metadata(
+        tmp_path,
+        seed=42,
+        model_config_path="model_config.yml",
+        fold_params=FoldParams(
+            method=FoldMethod.BLOCKS,
+            n_folds=5,
+            random_state=42,
+            block_size_m=10_000.0,
+            block_n_tries=500,
+        ),
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["cv"]["method"] == "blocks"
+    assert payload["cv"]["n_folds"] == 5
+    assert payload["cv"]["block_size_m"] == 10_000.0
