@@ -12,4 +12,5 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Changed
 
+- Default CV fold method is now 10 km spatial `blocks` (5 folds); `kmeans` and `buffered_loo` remain selectable ([#63](https://github.com/MatthewJWhittle/shefflied-bats/issues/63)).
 - README modernised around the `sdm` CLI; legacy `data_prep/` workflow removed from docs.

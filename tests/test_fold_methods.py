@@ -92,8 +92,18 @@ def _default_kmeans_occurrence(seed: int = 0) -> gpd.GeoDataFrame:
 
 
 class TestResolveFoldParams:
-    def test_default_is_kmeans_with_three_folds(self) -> None:
+    def test_default_is_blocks_with_five_folds(self) -> None:
         params = resolve_fold_params(CvConfig(), model_seed=42)
+        assert params.method == FoldMethod.BLOCKS
+        assert params.n_folds == 5
+        assert params.block_size_m == 10_000.0
+        assert params.random_state == 42
+
+    def test_kmeans_defaults_when_selected(self) -> None:
+        params = resolve_fold_params(
+            CvConfig(method="kmeans"),
+            model_seed=42,
+        )
         assert params.method == FoldMethod.KMEANS
         assert params.n_folds == 3
         assert params.random_state == 42
@@ -352,7 +362,7 @@ class TestKmeansDefaultUnchanged:
         apply_training_seed(42)
         legacy = list(ela.GeographicKFold(n_splits=3).split(gdf))
 
-        params = resolve_fold_params(CvConfig(), model_seed=42)
+        params = resolve_fold_params(CvConfig(method="kmeans"), model_seed=42)
         modern = list(iter_fold_splits(gdf, params))
 
         assert len(modern) == 3

@@ -216,7 +216,9 @@ def cross_validate_maxent_model(
         feature_columns: List of feature column names. If None, inferred.
         collect_validation_scores: When True, return per-point held-out scores as a DataFrame.
         random_state: Seed for fold construction.
-        fold_method: ``kmeans`` (default), ``blocks``, or ``buffered_loo``.
+        fold_method: ``kmeans``, ``blocks``, or ``buffered_loo`` (training config
+            defaults to ``blocks`` via ``model.cv``; this helper still defaults to
+            ``kmeans`` for call-site compatibility).
         block_size_m: Square block edge length in metres (blocks method).
         block_n_tries: Random block-to-fold assignment attempts (blocks method).
         buffer_m: Exclusion buffer in metres around each held-out presence (buffered_loo).
@@ -406,7 +408,8 @@ def evaluate_and_train_maxent_model(
         feature_columns: List of feature column names. If None, inferred.
         collect_validation_scores: When True, include per-point held-out scores.
         random_state: Seed for geographic cross-validation folds.
-        fold_method: CV fold construction method (default ``kmeans``).
+        fold_method: CV fold construction method. Training config defaults to
+            ``blocks``; this helper still defaults to ``kmeans`` for callers.
         block_size_m: Block edge length in metres when ``fold_method='blocks'``.
         block_n_tries: Assignment attempts when ``fold_method='blocks'``.
         buffer_m: Buffer metres when ``fold_method='buffered_loo'``.

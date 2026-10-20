@@ -2,12 +2,12 @@ model:
   seed: 42
   record_age_years: 20
 
-  # Cross-validation fold method (default kmeans preserves previous behaviour).
+  # Cross-validation fold method (default: 10 km spatial blocks into 5 folds).
   # CLI overrides: --cv-method, --cv-n-folds, --cv-block-size-m,
   # --cv-block-n-folds, --cv-buffer-m, --cv-buffered-loo-warn-above.
   # See docs/cv-folds.md.
   cv:
-    method: kmeans
+    method: blocks
     n_folds: 3
     # seed: null  # defaults to model.seed
     block_size_m: 10000

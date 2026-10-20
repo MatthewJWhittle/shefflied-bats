@@ -123,7 +123,7 @@ class SamplingConfig(BaseModel):
 class CvConfig(BaseModel):
     """Cross-validation fold method and parameters (see ``sdm.models.maxent.folds``)."""
 
-    method: str = "kmeans"
+    method: str = "blocks"
     n_folds: int = 3
     seed: Optional[int] = None
     block_size_m: float = 10_000.0

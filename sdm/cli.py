@@ -326,8 +326,8 @@ def train(
     cv_method: Optional[str] = typer.Option(
         None,
         help=(
-            "CV fold method: kmeans (default), blocks, or buffered_loo. "
-            "Overrides model_config.yml cv.method when set."
+            "CV fold method: blocks (default, 10 km / 5 folds), kmeans, or "
+            "buffered_loo. Overrides model_config.yml cv.method when set."
         ),
     ),
     cv_n_folds: Optional[int] = typer.Option(
