@@ -1,4 +1,4 @@
-"""TDD: p5 median-transfer cut-offs written into the training run folder (#59)."""
+"""TDD: p5 fold-median cut-offs written into the training run folder (#59)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from sdm.commands.modelling.train_sdm_models import (
     train_single_model,
 )
 from sdm.models.core.threshold import (
-    compute_p5_median_transfer,
+    compute_p5_fold_median,
     write_run_thresholds,
 )
 from sdm.models.maxent.maxent_model import DefaultMaxentConfig
@@ -62,81 +62,31 @@ def _fold_scores(
     return pd.DataFrame(rows)
 
 
-class TestP5MedianTransfer:
-    def test_fold_cutoffs_are_5th_percentile_of_held_out_presence(self) -> None:
-        # Equal-spaced presence per fold → 5th percentile is deterministic.
+class TestP5FoldMedian:
+    def test_threshold_is_median_of_per_fold_p5_cutoffs(self) -> None:
         fold_presence = {
             0: list(np.linspace(0.10, 0.50, 20)),
             1: list(np.linspace(0.20, 0.60, 20)),
             2: list(np.linspace(0.30, 0.70, 20)),
         }
         scores = _fold_scores(fold_presence)
-        fold_medians = [
+        fold_cutoffs = [
             float(np.percentile(fold_presence[f], 5.0)) for f in (0, 1, 2)
         ]
-        expected_median = float(np.median(fold_medians))
-
-        # Final scores mirror held-out scale → transfer should succeed.
+        expected = float(np.median(fold_cutoffs))
         all_presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
-        result = compute_p5_median_transfer(
-            scores,
-            final_presence_scores=all_presence,
-            map_scores=None,
-        )
-        assert result["fold_median_cutoff"] == pytest.approx(expected_median)
-        assert result["rule"] == "p5_median_transfer"
-        assert result["fallback_used"] is False
-        assert result["method"] == "transfer"
 
-    def test_transfer_matches_held_out_capture_on_final_scores(self) -> None:
-        fold_presence = {
-            0: list(np.linspace(0.0, 1.0, 40)),
-            1: list(np.linspace(0.0, 1.0, 40)),
-            2: list(np.linspace(0.0, 1.0, 40)),
-        }
-        scores = _fold_scores(fold_presence)
-        all_presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
-        fold_medians = [
-            float(np.percentile(fold_presence[f], 5.0)) for f in (0, 1, 2)
-        ]
-        fold_median = float(np.median(fold_medians))
-        heldout_caught = float(np.mean(all_presence >= fold_median))
-        expected_transfer = float(
-            np.percentile(all_presence, 100.0 * (1.0 - heldout_caught))
+        result = compute_p5_fold_median(scores)
+        assert result["threshold"] == pytest.approx(expected)
+        assert result["fold_median_cutoff"] == pytest.approx(expected)
+        assert result["rule"] == "p5_fold_median"
+        assert result["heldout_caught"] == pytest.approx(
+            float(np.mean(all_presence >= expected))
         )
-
-        result = compute_p5_median_transfer(
-            scores,
-            final_presence_scores=all_presence,
-        )
-        assert result["heldout_caught"] == pytest.approx(heldout_caught)
-        assert result["threshold"] == pytest.approx(expected_transfer)
-        assert result["fallback_used"] is False
-
-    def test_fallback_when_transferred_cutoff_at_least_0_95(self) -> None:
-        fold_presence = {
-            0: list(np.linspace(0.2, 0.8, 20)),
-            1: list(np.linspace(0.2, 0.8, 20)),
-            2: list(np.linspace(0.2, 0.8, 20)),
-        }
-        scores = _fold_scores(fold_presence)
-        # Overfit final model: almost all training presence near 1.0.
-        final = np.full(60, 0.99)
-        fold_medians = [
-            float(np.percentile(fold_presence[f], 5.0)) for f in (0, 1, 2)
-        ]
-        expected_median = float(np.median(fold_medians))
-
-        result = compute_p5_median_transfer(
-            scores,
-            final_presence_scores=final,
-        )
-        assert result["threshold"] == pytest.approx(expected_median)
-        assert result["fallback_used"] is True
-        assert "fold_median" in result["method"]
+        assert "fallback_used" not in result
+        assert "method" not in result
 
     def test_flags_for_low_auc_and_few_records(self) -> None:
-        # Few presence records + overlapping classes → low OOF AUC.
         fold_presence = {
             0: [0.4, 0.5, 0.6],
             1: [0.45, 0.55, 0.65],
@@ -148,14 +98,9 @@ class TestP5MedianTransfer:
             2: [0.3, 0.6, 0.8],
         }
         scores = _fold_scores(fold_presence, fold_background)
-        presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
-        result = compute_p5_median_transfer(
-            scores,
-            final_presence_scores=presence,
-        )
+        result = compute_p5_fold_median(scores)
         assert result["n_presence"] < 50
         assert "few records" in result["flag"]
-        # AUC from overlapping scores should be below 0.75.
         assert result["oof_auc"] < 0.75
         assert "model-limited" in result["flag"]
 
@@ -166,13 +111,8 @@ class TestP5MedianTransfer:
             2: list(np.linspace(0.2, 0.9, 10)),
         }
         scores = _fold_scores(fold_presence)
-        presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
         map_scores = np.array([0.1, 0.2, 0.3, 0.8, 0.9])
-        result = compute_p5_median_transfer(
-            scores,
-            final_presence_scores=presence,
-            map_scores=map_scores,
-        )
+        result = compute_p5_fold_median(scores, map_scores=map_scores)
         assert result["map_share"] == pytest.approx(
             float(np.mean(map_scores >= result["threshold"]))
         )
@@ -184,11 +124,7 @@ class TestP5MedianTransfer:
             2: list(np.linspace(0.2, 0.9, 10)),
         }
         scores = _fold_scores(fold_presence)
-        presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
-        result = compute_p5_median_transfer(
-            scores,
-            final_presence_scores=presence,
-        )
+        result = compute_p5_fold_median(scores)
         assert result["map_share"] is None or (
             isinstance(result["map_share"], float) and np.isnan(result["map_share"])
         )
@@ -223,45 +159,28 @@ class TestWriteRunThresholds:
             ),
             encoding="utf-8",
         )
-        presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
-        # Simulate final-model scores stored beside validation scores.
-        final_path = pkg / "final_presence_scores.npy"
-        np.save(final_path, presence)
 
-        rows = write_run_thresholds(
-            run_dir,
-            final_presence_by_model={"demo_species_roost": presence},
-        )
+        rows = write_run_thresholds(run_dir)
 
         assert (run_dir / "thresholds.json").is_file()
         assert (run_dir / "thresholds.csv").is_file()
-        # Per-package copy sits next to the model package contents.
         assert (pkg / "thresholds.json").is_file()
 
         payload = json.loads((run_dir / "thresholds.json").read_text(encoding="utf-8"))
-        assert payload["rule"] == "p5_median_transfer"
+        assert payload["rule"] == "p5_fold_median"
         assert "thresholds" in payload
         assert "demo_species_roost" in payload["thresholds"]
         assert len(rows) == 1
         assert rows[0]["model_id"] == "demo_species_roost"
-        for key in (
-            "threshold",
-            "rule",
-            "heldout_caught",
-            "map_share",
-            "flag",
-            "fallback_used",
-            "method",
-        ):
+        for key in ("threshold", "rule", "heldout_caught", "map_share", "flag"):
             assert key in rows[0]
+        assert "fallback_used" not in rows[0]
 
-        # Must not put cut-offs into package.json.
         package = json.loads((pkg / "package.json").read_text(encoding="utf-8"))
         assert "threshold" not in package
         assert "thresholds" not in package
 
     def test_refuses_overwrite_when_run_thresholds_exist(self, tmp_path: Path) -> None:
-        """Same spirit as merge: error before writing when outputs already exist."""
         run_dir = tmp_path / "runs" / "existing"
         pkg = run_dir / "demo_species_roost"
         pkg.mkdir(parents=True)
@@ -272,15 +191,11 @@ class TestWriteRunThresholds:
         }
         scores = _fold_scores(fold_presence)
         scores.to_parquet(pkg / "validation_scores.parquet", index=False)
-        presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
         prior = '{"rule":"prior","thresholds":{}}'
         (run_dir / "thresholds.json").write_text(prior, encoding="utf-8")
 
         with pytest.raises(FileExistsError, match="refusing to overwrite"):
-            write_run_thresholds(
-                run_dir,
-                final_presence_by_model={"demo_species_roost": presence},
-            )
+            write_run_thresholds(run_dir)
 
         assert (run_dir / "thresholds.json").read_text(encoding="utf-8") == prior
         assert not (run_dir / "thresholds.csv").exists()
@@ -299,15 +214,11 @@ class TestWriteRunThresholds:
         }
         scores = _fold_scores(fold_presence)
         scores.to_parquet(pkg / "validation_scores.parquet", index=False)
-        presence = np.concatenate([np.asarray(v) for v in fold_presence.values()])
         prior_pkg = '{"model_id":"demo_species_roost","threshold":0.5}'
         (pkg / "thresholds.json").write_text(prior_pkg, encoding="utf-8")
 
         with pytest.raises(FileExistsError, match="refusing to overwrite"):
-            write_run_thresholds(
-                run_dir,
-                final_presence_by_model={"demo_species_roost": presence},
-            )
+            write_run_thresholds(run_dir)
 
         assert (pkg / "thresholds.json").read_text(encoding="utf-8") == prior_pkg
         assert not (run_dir / "thresholds.json").exists()
@@ -346,7 +257,7 @@ class TestSaveRunThresholdsFromTraining:
         model_id = "species_gamma_roost"
         assert (run_dir / model_id / "thresholds.json").is_file()
         assert len(rows_out) == 1
-        assert rows_out[0]["rule"] == "p5_median_transfer"
+        assert rows_out[0]["rule"] == "p5_fold_median"
         payload = json.loads((run_dir / "thresholds.json").read_text(encoding="utf-8"))
         assert model_id in payload["thresholds"]
 
@@ -374,7 +285,6 @@ class TestSaveRunThresholdsFromTraining:
 
         run_dir = tmp_path / "run"
         save_models([result], [training_data], run_dir)
-        save_training_data([training_data], run_dir)
 
         published = publish_run_thresholds(run_dir)
         assert published is not None

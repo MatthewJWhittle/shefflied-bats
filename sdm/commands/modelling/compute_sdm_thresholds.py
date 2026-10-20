@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-import numpy as np
 import pandas as pd
 
 from sdm.models.core.threshold import (
-    P5_MEDIAN_TRANSFER_RULE,
+    P5_FOLD_MEDIAN_RULE,
     THRESHOLD_RULES,
     plot_score_spreads,
     summarise_thresholds_for_scores,
@@ -25,8 +23,6 @@ logger = logging.getLogger(__name__)
 VALIDATION_SCORES_FILENAME = "validation_scores.parquet"
 SUMMARY_CSV = "threshold_summary.csv"
 SUMMARY_JSON = "threshold_summary.json"
-TRAINING_DATA_FILENAME = "training_data.parquet"
-MODEL_PICKLE_FILENAME = "model.pkl"
 
 
 def _load_package(package_path: Path) -> dict:
@@ -182,77 +178,23 @@ def compute_sdm_thresholds(
     return result
 
 
-def _load_feature_names(package_dir: Path) -> List[str]:
-    package_path = package_dir / "package.json"
-    if not package_path.exists():
-        raise FileNotFoundError(f"Missing package.json in {package_dir}")
-    package = _load_package(package_path)
-    features = package.get("feature_names")
-    if not features:
-        raise ValueError(f"package.json in {package_dir} has no feature_names")
-    return list(features)
-
-
-def _score_final_presence_from_package(
-    package_dir: Path,
-    training_frame: pd.DataFrame,
-) -> np.ndarray:
-    """Score presence rows for one package using ``model.pkl`` and run training data."""
-    package = _load_package(package_dir / "package.json")
-    identifier = package.get("identifier")
-    if not identifier:
-        raise ValueError(f"package.json in {package_dir} has no identifier")
-    model_path = package_dir / MODEL_PICKLE_FILENAME
-    if not model_path.exists():
-        raise FileNotFoundError(f"Missing {MODEL_PICKLE_FILENAME} in {package_dir}")
-
-    subset = training_frame[training_frame["identifier"] == identifier]
-    presence = subset[subset["class"] == 1]
-    if len(presence) == 0:
-        raise ValueError(f"No presence rows in training data for {identifier}")
-
-    features = _load_feature_names(package_dir)
-    missing = [name for name in features if name not in presence.columns]
-    if missing:
-        raise ValueError(
-            f"Training data for {identifier} missing feature columns: {missing}"
-        )
-
-    with open(model_path, "rb") as handle:
-        model = pickle.load(handle)
-    return np.asarray(model.predict_proba(presence[features])[:, 1], dtype=float)
-
-
 def publish_run_thresholds(
     models_dir: Path,
     *,
     model_ids: Optional[Sequence[str]] = None,
     verbose: bool = False,
 ) -> Optional[List[Dict[str, Any]]]:
-    """Write METHOD.md ``p5_median_transfer`` cut-offs into a training run folder.
+    """Write METHOD.md ``p5_fold_median`` cut-offs into a training run folder.
 
-    Requires ``validation_scores.parquet`` and ``model.pkl`` per package, plus a
-    run-level ``training_data.parquet`` so final-model presence scores can be
-    transferred. Writes ``thresholds.json`` / ``thresholds.csv`` next to the
-    packages (and a per-package ``thresholds.json``). Does not modify
-    ``package.json``.
+    Requires ``validation_scores.parquet`` per package. Writes ``thresholds.json``
+    / ``thresholds.csv`` next to the packages (and a per-package
+    ``thresholds.json``). Does not modify ``package.json``.
 
     Raises ``FileExistsError`` if threshold artefacts already exist in the run
     folder (refuses overwrite; same spirit as the EV layer merge guard).
     """
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
     models_dir = Path(models_dir)
-    training_path = models_dir / TRAINING_DATA_FILENAME
-    if not training_path.exists():
-        raise FileNotFoundError(
-            f"Publish into-run thresholds requires {TRAINING_DATA_FILENAME} under "
-            f"{models_dir}"
-        )
-    training_frame = pd.read_parquet(training_path)
-    if "identifier" not in training_frame.columns or "class" not in training_frame.columns:
-        raise ValueError(
-            f"{TRAINING_DATA_FILENAME} must include identifier and class columns"
-        )
 
     package_dirs = discover_package_dirs(models_dir)
     if model_ids is not None:
@@ -263,30 +205,13 @@ def publish_run_thresholds(
         logger.warning("No validation_scores.parquet files found under %s", models_dir)
         return None
 
-    final_by_model: Dict[str, np.ndarray] = {}
-    for package_dir in package_dirs:
-        model_path = package_dir / MODEL_PICKLE_FILENAME
-        if not model_path.exists():
-            logger.warning("Skipping %s (no %s)", package_dir.name, MODEL_PICKLE_FILENAME)
-            continue
-        logger.info("Scoring final presence for %s", package_dir.name)
-        final_by_model[package_dir.name] = _score_final_presence_from_package(
-            package_dir,
-            training_frame,
-        )
-
-    if not final_by_model:
-        logger.warning("No packages had model.pkl + training presence to score")
-        return None
-
     rows = write_run_thresholds(
         models_dir,
-        final_presence_by_model=final_by_model,
-        model_ids=list(final_by_model),
+        model_ids=[d.name for d in package_dirs],
     )
     logger.info(
         "Published %s thresholds for %d model(s) under %s",
-        P5_MEDIAN_TRANSFER_RULE,
+        P5_FOLD_MEDIAN_RULE,
         len(rows),
         models_dir,
     )

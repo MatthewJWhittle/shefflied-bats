@@ -4,11 +4,9 @@ Rules fit cut-offs on training folds and are scored on held-out folds so the
 evaluation fold never informs the cut-off. When no ``fold`` column is present,
 rules fit and evaluate on the same scores (pooled).
 
-The published training-run rule ``p5_median_transfer`` follows
+The published training-run rule ``p5_fold_median`` follows
 ``docs/thresholds/METHOD.md``: 5th-percentile held-out presence cut-offs per
-fold, median across folds, transferred onto the final model's training-presence
-scores at the same held-out capture rate, with a fold-median fallback when the
-transferred cut-off is 0.95 or higher.
+fold, then the median across folds, applied directly to the final model.
 """
 
 from __future__ import annotations
@@ -24,8 +22,7 @@ from sklearn.metrics import roc_auc_score, roc_curve
 
 RuleFn = Callable[[np.ndarray, np.ndarray, Mapping[str, Any]], float]
 
-P5_MEDIAN_TRANSFER_RULE = "p5_median_transfer"
-TRANSFER_FALLBACK_MIN = 0.95
+P5_FOLD_MEDIAN_RULE = "p5_fold_median"
 AUC_MODEL_LIMITED = 0.75
 FEW_RECORDS_MAX = 50
 RUN_THRESHOLDS_JSON = "thresholds.json"
@@ -292,18 +289,15 @@ def _threshold_flags(*, n_presence: int, oof_auc: float) -> str:
     return "; ".join(parts)
 
 
-def compute_p5_median_transfer(
+def compute_p5_fold_median(
     validation_scores: pd.DataFrame,
     *,
-    final_presence_scores: np.ndarray,
     map_scores: Optional[np.ndarray] = None,
-    transfer_fallback_min: float = TRANSFER_FALLBACK_MIN,
 ) -> Dict[str, Any]:
-    """Publishable cut-off: fold 5th-percentile median, transferred to the final model.
+    """Publishable cut-off: median of per-fold 5th-percentile held-out presence.
 
-    See ``docs/thresholds/METHOD.md``. When the transferred cut-off is
-    ``transfer_fallback_min`` or higher (overfit final model), the fold median
-    is used instead.
+    See ``docs/thresholds/METHOD.md``. The median fold cut-off is applied
+    directly to the final model's suitability scores.
     """
     required = {"class", "held_out_score", "fold"}
     missing = required - set(validation_scores.columns)
@@ -313,10 +307,6 @@ def compute_p5_median_transfer(
     presence_all, _background_all = _split_classes(validation_scores)
     if presence_all.size == 0:
         raise ValueError("Cannot compute threshold: no presence scores")
-
-    final_presence = np.asarray(final_presence_scores, dtype=float)
-    if final_presence.size == 0:
-        raise ValueError("Cannot compute threshold: no final presence scores")
 
     fold_ids = sorted(int(f) for f in validation_scores["fold"].dropna().unique())
     if not fold_ids:
@@ -336,21 +326,9 @@ def compute_p5_median_transfer(
     if not fold_cutoffs:
         raise ValueError("Cannot compute threshold: no folds with presence scores")
 
-    fold_median_cutoff = float(np.median(fold_cutoffs))
-    heldout_caught = float(np.mean(presence_all >= fold_median_cutoff))
+    threshold = float(np.median(fold_cutoffs))
+    heldout_caught = float(np.mean(presence_all >= threshold))
     worst_fold_caught = float(min(fold_caught)) if fold_caught else float("nan")
-
-    # Same capture rate on the final model: cut at the matching presence percentile.
-    omit_percentile = 100.0 * (1.0 - heldout_caught)
-    transferred = presence_percentile_cutoff(final_presence, omit_percentile)
-    if transferred >= transfer_fallback_min:
-        threshold = fold_median_cutoff
-        fallback_used = True
-        method = "fold_median (transfer broken by overfit model)"
-    else:
-        threshold = float(transferred)
-        fallback_used = False
-        method = "transfer"
 
     map_share: Optional[float]
     if map_scores is None:
@@ -364,17 +342,15 @@ def compute_p5_median_transfer(
     flag = _threshold_flags(n_presence=n_presence, oof_auc=oof_auc)
 
     return {
-        "rule": P5_MEDIAN_TRANSFER_RULE,
-        "threshold": float(threshold),
+        "rule": P5_FOLD_MEDIAN_RULE,
+        "threshold": threshold,
         "heldout_caught": heldout_caught,
         "worst_fold_caught": worst_fold_caught,
         "map_share": map_share,
-        "fold_median_cutoff": fold_median_cutoff,
+        "fold_median_cutoff": threshold,
         "n_presence": n_presence,
         "oof_auc": oof_auc,
         "flag": flag,
-        "fallback_used": fallback_used,
-        "method": method,
     }
 
 
@@ -403,7 +379,6 @@ def existing_run_threshold_paths(
 def write_run_thresholds(
     run_dir: Path,
     *,
-    final_presence_by_model: Mapping[str, np.ndarray],
     map_scores_by_model: Optional[Mapping[str, np.ndarray]] = None,
     model_ids: Optional[Sequence[str]] = None,
 ) -> list[dict[str, Any]]:
@@ -435,18 +410,12 @@ def write_run_thresholds(
     thresholds_map: dict[str, float] = {}
     for package_dir in package_dirs:
         model_id = package_dir.name
-        if model_id not in final_presence_by_model:
-            raise KeyError(
-                f"missing final presence scores for model {model_id!r}; "
-                f"have: {sorted(final_presence_by_model)}"
-            )
         validation_scores = pd.read_parquet(package_dir / VALIDATION_SCORES_FILENAME)
         map_scores = None
         if map_scores_by_model is not None:
             map_scores = map_scores_by_model.get(model_id)
-        result = compute_p5_median_transfer(
+        result = compute_p5_fold_median(
             validation_scores,
-            final_presence_scores=final_presence_by_model[model_id],
             map_scores=map_scores,
         )
         row = {"model_id": model_id, **result}
@@ -455,14 +424,12 @@ def write_run_thresholds(
 
         package_payload = _json_safe(
             {
-                "rule": P5_MEDIAN_TRANSFER_RULE,
+                "rule": P5_FOLD_MEDIAN_RULE,
                 "model_id": model_id,
                 "threshold": float(result["threshold"]),
                 "heldout_caught": result["heldout_caught"],
                 "map_share": result["map_share"],
                 "flag": result["flag"],
-                "fallback_used": result["fallback_used"],
-                "method": result["method"],
                 "fold_median_cutoff": result["fold_median_cutoff"],
                 "n_presence": result["n_presence"],
                 "oof_auc": result["oof_auc"],
@@ -478,7 +445,7 @@ def write_run_thresholds(
 
     run_payload = _json_safe(
         {
-            "rule": P5_MEDIAN_TRANSFER_RULE,
+            "rule": P5_FOLD_MEDIAN_RULE,
             "method_doc": "docs/thresholds/METHOD.md",
             "thresholds": thresholds_map,
             "models": rows,

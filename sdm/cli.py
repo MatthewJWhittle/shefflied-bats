@@ -404,10 +404,10 @@ def threshold(
         False,
         "--publish-run/--no-publish-run",
         help=(
-            "Write p5_median_transfer cut-offs into models_dir (run folder) as "
-            "thresholds.json/csv next to each package. Requires training_data.parquet "
-            "and model.pkl. Refuses to overwrite existing threshold files. "
-            "See docs/thresholds/METHOD.md."
+            "Write p5_fold_median cut-offs into models_dir (run folder) as "
+            "thresholds.json/csv next to each package. Requires "
+            "validation_scores.parquet. Refuses to overwrite existing threshold "
+            "files. See docs/thresholds/METHOD.md."
         ),
     ),
     verbose: bool = False,
