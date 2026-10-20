@@ -323,6 +323,29 @@ def train(
             "variables_config.yml roster (default: fail with a clear error)."
         ),
     ),
+    cv_method: Optional[str] = typer.Option(
+        None,
+        help=(
+            "CV fold method: kmeans (default), blocks, or buffered_loo. "
+            "Overrides model_config.yml cv.method when set."
+        ),
+    ),
+    cv_n_folds: Optional[int] = typer.Option(
+        None,
+        help="Number of folds for kmeans (default 3). Overrides config when set.",
+    ),
+    cv_block_size_m: Optional[float] = typer.Option(
+        None,
+        help="Square block edge length in metres for blocks method (default 10000).",
+    ),
+    cv_block_n_folds: Optional[int] = typer.Option(
+        None,
+        help="Number of folds for blocks method (default 5).",
+    ),
+    cv_buffer_m: Optional[float] = typer.Option(
+        None,
+        help="Buffer metres around each held-out presence for buffered_loo (default 10000).",
+    ),
     verbose: bool = False,
 ) -> None:
     """Train SDM models using the new modular approach.
@@ -354,6 +377,11 @@ def train(
         d_max=d_max_value,
         sample_weight_n_neighbors=sample_weight_n_neighbors,
         allow_config_fallback=allow_config_fallback,
+        cv_method=cv_method,
+        cv_n_folds=cv_n_folds,
+        cv_block_size_m=cv_block_size_m,
+        cv_block_n_folds=cv_block_n_folds,
+        cv_buffer_m=cv_buffer_m,
     )
     
     logging.info("Model training complete!")

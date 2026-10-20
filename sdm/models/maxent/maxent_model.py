@@ -18,7 +18,6 @@ from sklearn.compose import ColumnTransformer
 
 
 
-import elapid as ela
 from sdm.utils.rng import apply_training_seed
 from elapid.models import MaxentModel as BaseMaxentModel
 from elapid.models import MaxentModel as ElapidMaxentModel
@@ -34,6 +33,7 @@ from elapid.utils import (
 )
 from elapid.geo import apply_model_to_array # Core raster prediction function from elapid
 from elapid.models import MaxentConfig
+from sdm.models.maxent.folds import FoldMethod, FoldParams, iter_fold_splits
 from sdm.types import VariablesConfig, ModelConfig
 
 
@@ -200,8 +200,11 @@ def cross_validate_maxent_model(
     collect_validation_scores: bool = False,
     *,
     random_state: int,
+    fold_method: FoldMethod | str = FoldMethod.KMEANS,
+    block_size_m: float = 10_000.0,
+    block_n_tries: int = 500,
+    buffer_m: float = 10_000.0,
 ) -> Tuple[List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
-    # Note: Returns only valid models (None values filtered out)
     """
     Performs geographic cross-validation for a MaxEnt-like (scikit-learn compatible) model.
 
@@ -209,44 +212,72 @@ def cross_validate_maxent_model(
         model: The scikit-learn compatible model instance (e.g., elapid.MaxentModel).
         occurrence_gdf: GeoDataFrame with occurrence data (features, class, sample_weight, geometry).
         metric_fn: Callable function to calculate a performance metric (e.g., roc_auc_score).
-        n_folds: Number of folds for geographic cross-validation.
+        n_folds: Number of folds (kmeans / blocks). Ignored for ``buffered_loo``.
         feature_columns: List of feature column names. If None, inferred.
         collect_validation_scores: When True, return per-point held-out scores as a DataFrame.
-        random_state: Seed for geographic CV (KMeans inside elapid ``GeographicKFold``).
+        random_state: Seed for fold construction.
+        fold_method: ``kmeans`` (default), ``blocks``, or ``buffered_loo``.
+        block_size_m: Square block edge length in metres (blocks method).
+        block_n_tries: Random block-to-fold assignment attempts (blocks method).
+        buffer_m: Exclusion buffer in metres around each held-out presence (buffered_loo).
 
     Returns:
         Tuple of (trained_models_per_fold, metric_scores_per_fold, validation_scores).
         ``validation_scores`` is ``None`` unless ``collect_validation_scores`` is True.
-        Note: trained_models_per_fold may contain None values for failed folds.
+        Failed folds are retained as ``None`` / ``NaN`` so fold indices stay aligned.
     """
+    method = FoldMethod(str(fold_method).lower())
+    params = FoldParams(
+        method=method,
+        n_folds=n_folds,
+        random_state=random_state,
+        block_size_m=block_size_m,
+        block_n_tries=block_n_tries,
+        buffer_m=buffer_m,
+    )
     apply_training_seed(random_state)
-    gfolds = ela.GeographicKFold(n_splits=n_folds)
-        
-    fold_metrics = []
-    trained_models = []
+
+    fold_metrics: List[float] = []
+    trained_models: List[Optional[BaseEstimator]] = []
     validation_rows: List[Dict[str, Any]] = []
 
-    logger.debug(f"Starting {n_folds}-fold geographic cross-validation...")
-    for i, (train_idx, test_idx) in enumerate(gfolds.split(occurrence_gdf)):
-        logger.debug(f"Processing fold {i+1}/{n_folds}")
-        current_model = clone(model) # Use a fresh clone for each fold
+    splits = list(iter_fold_splits(occurrence_gdf, params))
+    n_splits = len(splits)
+    logger.debug(
+        "Starting %s cross-validation (%d fold(s))...",
+        method.value,
+        n_splits,
+    )
+    for fold_id, train_idx, test_idx in splits:
+        fold_label = fold_id + 1
+        logger.debug("Processing fold %d/%d", fold_label, n_splits)
+        current_model = clone(model)
 
-        X_train, y_train, w_train = extract_split_data(occurrence_gdf, train_idx, feature_columns=feature_columns)
-        X_test, y_test, _ = extract_split_data(occurrence_gdf, test_idx, feature_columns=feature_columns) # Weights not used for test metric here
+        X_train, y_train, w_train = extract_split_data(
+            occurrence_gdf, train_idx, feature_columns=feature_columns
+        )
+        X_test, y_test, _ = extract_split_data(
+            occurrence_gdf, test_idx, feature_columns=feature_columns
+        )
 
-        # Check both training and test sets have both classes
         if len(y_train.unique()) < 2:
-            logger.debug(f"Skipping fold {i+1} due to only one class in the training set.")
+            logger.warning(
+                "Skipping fold %d: only one class in the training set",
+                fold_label,
+            )
             fold_metrics.append(np.nan)
             trained_models.append(None)
             continue
-            
+
         if len(y_test.unique()) < 2:
-            logger.debug(f"Skipping fold {i+1} due to only one class in the test set.")
+            logger.warning(
+                "Skipping fold %d: only one class in the test set",
+                fold_label,
+            )
             fold_metrics.append(np.nan)
             trained_models.append(None)
             continue
-        
+
         try:
             fit_params = {}
             if w_train is not None:
@@ -258,12 +289,14 @@ def cross_validate_maxent_model(
                     fit_params['sample_weight'] = w_train
 
             current_model.fit(X_train, y_train, **fit_params)
-            
-            y_pred_proba = current_model.predict_proba(X_test)[:, 1] # Probability of class 1
-            
-            # Check for NaN values in predictions
+
+            y_pred_proba = current_model.predict_proba(X_test)[:, 1]
+
             if np.any(np.isnan(y_pred_proba)) or np.any(np.isinf(y_pred_proba)):
-                logger.warning(f"Fold {i+1}: Predictions contain NaN/Inf values, skipping fold")
+                logger.warning(
+                    "Skipping fold %d: predictions contain NaN/Inf values",
+                    fold_label,
+                )
                 fold_metrics.append(np.nan)
                 trained_models.append(None)
                 continue
@@ -276,42 +309,48 @@ def cross_validate_maxent_model(
                         {
                             "point_index": int(point_idx),
                             "class": int(class_val),
-                            "fold": int(i),
+                            "fold": int(fold_id),
                             "held_out_score": float(score),
                         }
                     )
-            
+
             metric_value = metric_fn(y_test, y_pred_proba)
-            
-            # Check if metric is valid
+
             if np.isnan(metric_value) or np.isinf(metric_value):
-                logger.warning(f"Fold {i+1}: Metric value is NaN/Inf, skipping fold")
+                logger.warning(
+                    "Skipping fold %d: metric value is NaN/Inf",
+                    fold_label,
+                )
                 fold_metrics.append(np.nan)
                 trained_models.append(None)
                 continue
-                
+
             fold_metrics.append(metric_value)
             trained_models.append(current_model)
-            logger.debug(f"Fold {i+1} metric ({metric_fn.__name__}): {metric_value:.4f}")
+            logger.debug(
+                "Fold %d metric (%s): %.4f",
+                fold_label,
+                metric_fn.__name__,
+                metric_value,
+            )
         except Exception as e:
-            logger.debug(f"Error during training/evaluation of fold {i+1}: {e}")
+            logger.warning(
+                "Skipping fold %d: error during training/evaluation (%s)",
+                fold_label,
+                e,
+            )
             fold_metrics.append(np.nan)
             trained_models.append(None)
 
-    # Filter out None models and corresponding NaN metrics
-    valid_models = [m for m in trained_models if m is not None]
-    valid_metrics = np.array([m for m, mod in zip(fold_metrics, trained_models) if mod is not None])
-    
     validation_scores: Optional[pd.DataFrame] = None
     if collect_validation_scores and validation_rows:
         validation_scores = pd.DataFrame(validation_rows)
 
-    # If we have valid models, return them; otherwise return empty lists
-    if len(valid_models) > 0:
-        return valid_models, valid_metrics, validation_scores
-    else:
+    metrics_array = np.asarray(fold_metrics, dtype=float)
+    if not any(m is not None for m in trained_models):
         logger.warning("No valid models were trained in cross-validation")
-        return [], np.array([]), validation_scores
+
+    return trained_models, metrics_array, validation_scores
 
 
 def train_final_maxent_model(
@@ -348,6 +387,10 @@ def evaluate_and_train_maxent_model(
     collect_validation_scores: bool = False,
     *,
     random_state: int,
+    fold_method: FoldMethod | str = FoldMethod.KMEANS,
+    block_size_m: float = 10_000.0,
+    block_n_tries: int = 500,
+    buffer_m: float = 10_000.0,
 ) -> Tuple[BaseEstimator, List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     """
     Performs cross-validation and then trains a final model on all data.
@@ -363,6 +406,10 @@ def evaluate_and_train_maxent_model(
         feature_columns: List of feature column names. If None, inferred.
         collect_validation_scores: When True, include per-point held-out scores.
         random_state: Seed for geographic cross-validation folds.
+        fold_method: CV fold construction method (default ``kmeans``).
+        block_size_m: Block edge length in metres when ``fold_method='blocks'``.
+        block_n_tries: Assignment attempts when ``fold_method='blocks'``.
+        buffer_m: Buffer metres when ``fold_method='buffered_loo'``.
 
     Returns:
         Tuple of (final_trained_model, cv_models, cv_scores, validation_scores).
@@ -376,6 +423,10 @@ def evaluate_and_train_maxent_model(
         feature_columns=feature_columns,
         collect_validation_scores=collect_validation_scores,
         random_state=random_state,
+        fold_method=fold_method,
+        block_size_m=block_size_m,
+        block_n_tries=block_n_tries,
+        buffer_m=buffer_m,
     )
     
     # Log CV results only if we have valid scores (keep as debug, summary will be logged at higher level)

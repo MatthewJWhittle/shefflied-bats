@@ -62,9 +62,25 @@ from sdm.utils.sdm_config import (
     resolve_sdm_config_root,
 )
 from sdm.utils.logging_utils import setup_logging
-from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
+from sdm.types import (
+    TrainingData,
+    TrainingResults,
+    ProjectConfig,
+    VariablesConfig,
+    ModelConfig,
+    BackgroundConfig,
+    SamplingConfig,
+    CvConfig,
+)
 from sdm.commands.modelling.utils import get_model_id
 from sdm.models.core.threshold import write_run_thresholds
+from sdm.models.maxent.folds import (
+    FoldMethod,
+    FoldParams,
+    fold_assignments_frame,
+    presence_counts_per_fold,
+    resolve_fold_params,
+)
 from sdm.utils.fs import join_uri_path, local_materialized_path, uri_exists
 from sdm.utils.model_runs import (
     artifact_parent_uri,
@@ -620,6 +636,7 @@ def train_single_model(
     min_presence: int = 15,
     *,
     seed: int,
+    fold_params: Optional[FoldParams] = None,
 ) -> TrainingResults:
     """Train a single MaxEnt model for a given set of training data."""
     try:
@@ -627,7 +644,8 @@ def train_single_model(
         activity_type = ActivityType(data.activity_type)
         latin_name = data.latin_name
         logger.debug(f"Training model for {latin_name} ({activity_type.value})...")
-        
+
+        resolved_folds = fold_params or resolve_fold_params(CvConfig(), model_seed=seed)
         model_config = data.maxent_config
         model_features = data.model_features
         
@@ -653,19 +671,50 @@ def train_single_model(
             model_config=model_config,
         )
         logger.info(f"Model features: {model_features}")
-        # do 2 folds if n_presence < 15, 3 folds otherwise
         n_presence = len(data.occurrence[data.occurrence["class"] == 1])
-        if (n_presence // n_cv_folds) < min_presence:
-            n_cv_folds = 2
-            logger.info(f"Using 2 folds for {latin_name} - {activity_type.value} because n_presence < {min_presence}")
+        if resolved_folds.method is FoldMethod.KMEANS:
+            # Prefer explicit fold_params; otherwise honour the n_cv_folds argument.
+            effective_n_folds = (
+                resolved_folds.n_folds if fold_params is not None else n_cv_folds
+            )
+            # do 2 folds if average presence per fold would fall below min_presence
+            if effective_n_folds > 0 and (n_presence // effective_n_folds) < min_presence:
+                effective_n_folds = 2
+                logger.info(
+                    "Using 2 folds for %s - %s because n_presence < %s",
+                    latin_name,
+                    activity_type.value,
+                    min_presence,
+                )
+        elif resolved_folds.method is FoldMethod.BLOCKS:
+            effective_n_folds = resolved_folds.n_folds
+        elif resolved_folds.method is FoldMethod.BUFFERED_LOO:
+            effective_n_folds = int(n_presence)
+        else:
+            raise ValueError(f"unknown fold method: {resolved_folds.method!r}")
+
+        effective_params = FoldParams(
+            method=resolved_folds.method,
+            n_folds=effective_n_folds,
+            random_state=resolved_folds.random_state,
+            block_size_m=resolved_folds.block_size_m,
+            block_n_tries=resolved_folds.block_n_tries,
+            buffer_m=resolved_folds.buffer_m,
+        )
+        fold_presence = presence_counts_per_fold(data.occurrence, effective_params)
+
         final_model, cv_models, cv_scores, validation_scores = evaluate_and_train_maxent_model(
             model=model,
             occurrence_gdf=data.occurrence,
-            n_cv_folds=n_cv_folds,
+            n_cv_folds=effective_n_folds,
             metric_fn=roc_auc_score,
             feature_columns=model_features,  # Explicitly pass feature columns to avoid using extra columns as features
             collect_validation_scores=True,
-            random_state=seed,
+            random_state=effective_params.random_state,
+            fold_method=effective_params.method,
+            block_size_m=effective_params.block_size_m,
+            block_n_tries=effective_params.block_n_tries,
+            buffer_m=effective_params.buffer_m,
         )
         
         if final_model is None:
@@ -686,6 +735,15 @@ def train_single_model(
             logger.debug(
                 "✗ %s - %s: No valid CV scores", latin_name, activity_type.value
             )
+        logger.info(
+            "%s - %s: fold_method=%s scored %d/%d folds; presence per fold=%s",
+            latin_name,
+            activity_type.value,
+            effective_params.method.value,
+            n_valid,
+            n_total,
+            fold_presence,
+        )
         
         return TrainingResults(
             latin_name=latin_name,
@@ -694,7 +752,10 @@ def train_single_model(
             cv_models=cv_models if cv_models is not None else None,
             cv_scores=cv_scores,
             validation_scores=validation_scores,
-            cv_n_folds=n_cv_folds,
+            cv_n_folds=effective_n_folds if effective_n_folds else n_total,
+            fold_method=effective_params.method.value,
+            fold_params=effective_params.to_metadata(),
+            fold_presence_counts=fold_presence,
             success=True,
             error=None,
         )
@@ -719,6 +780,7 @@ def train_models_parallel(
     n_jobs: Optional[int] = None,
     *,
     seed: int,
+    fold_params: Optional[FoldParams] = None,
 ) -> List[TrainingResults]:
     """Train MaxEnt models in parallel for each set of training data.
     
@@ -757,6 +819,7 @@ def train_models_parallel(
                     data,
                     max_threads_per_model,
                     seed=seed,
+                    fold_params=fold_params,
                 )
             )
         
@@ -998,13 +1061,38 @@ def save_models(
                 "n_presence": n_presence,
                 "n_background": n_background,
                 "training_success": model.success,
+                "fold_method": model.fold_method,
+                "fold_presence_counts": model.fold_presence_counts,
             },
+            "fold": model.fold_params,
             "artifacts": {"model_pickle": "model.pkl"},
         }
         if model.validation_scores is not None and len(model.validation_scores) > 0:
             validation_path = pkg_dir / "validation_scores.parquet"
             model.validation_scores.to_parquet(validation_path, index=False)
             package["artifacts"]["validation_scores"] = "validation_scores.parquet"
+
+        if model.fold_method and model.fold_params:
+            assignments = fold_assignments_frame(
+                data.occurrence,
+                FoldParams(
+                    method=FoldMethod(model.fold_method),
+                    n_folds=int(
+                        model.cv_n_folds or model.fold_params.get("n_folds") or 3
+                    ),
+                    random_state=int(model.fold_params.get("seed", 0) or 0),
+                    block_size_m=float(
+                        model.fold_params.get("block_size_m", 10_000.0)
+                    ),
+                    block_n_tries=int(
+                        model.fold_params.get("block_n_tries", 500)
+                    ),
+                    buffer_m=float(model.fold_params.get("buffer_m", 10_000.0)),
+                ),
+            )
+            fold_path = pkg_dir / "fold_assignments.parquet"
+            assignments.to_parquet(fold_path, index=False)
+            package["artifacts"]["fold_assignments"] = "fold_assignments.parquet"
         with open(pkg_dir / "package.json", "w", encoding="utf-8") as jf:
             json.dump(package, jf, indent=2, allow_nan=False)
 
@@ -1056,13 +1144,16 @@ def save_run_metadata(
     *,
     seed: int,
     model_config_path: str,
+    fold_params: Optional[FoldParams] = None,
 ) -> Path:
     """Write run-level metadata (including the training seed) into the run folder."""
-    metadata = {
+    metadata: Dict[str, Any] = {
         "schema_version": 1,
         "seed": seed,
         "model_config_path": model_config_path,
     }
+    if fold_params is not None:
+        metadata["cv"] = fold_params.to_metadata()
     path = output_dir / "run_metadata.json"
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
@@ -1366,6 +1457,7 @@ def train_models_with_setup(
     verbose: bool = False,
     *,
     seed: int,
+    fold_params: Optional[FoldParams] = None,
 ) -> tuple[List[TrainingResults], List[TrainingData]]:
     """Train models using pre-setup shared data.
     
@@ -1430,6 +1522,7 @@ def train_models_with_setup(
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
         seed=seed,
+        fold_params=fold_params,
     )
     
     return models, training_data
@@ -1454,6 +1547,11 @@ def train_sdm_models(
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,
     allow_config_fallback: bool = False,
+    cv_method: Optional[str] = None,
+    cv_n_folds: Optional[int] = None,
+    cv_block_size_m: Optional[float] = None,
+    cv_block_n_folds: Optional[int] = None,
+    cv_buffer_m: Optional[float] = None,
 ) -> pd.DataFrame:
     """Run the MaxEnt model training pipeline using the new modular approach.
     
@@ -1524,8 +1622,22 @@ def train_sdm_models(
     sampling_config = base_model_cfg.sampling or SamplingConfig()
     grid_size_m = sampling_config.grid_size_m
     training_seed = base_model_cfg.seed
+    fold_params = resolve_fold_params(
+        base_model_cfg.cv,
+        model_seed=training_seed,
+        method_override=cv_method,
+        n_folds_override=cv_n_folds,
+        block_size_m_override=cv_block_size_m,
+        block_n_folds_override=cv_block_n_folds,
+        buffer_m_override=cv_buffer_m,
+    )
     logger.info(f"Sampling config: grid_size_m={grid_size_m}")
     logger.info("Training seed (from model_config.yml): %s", training_seed)
+    logger.info(
+        "CV folds: method=%s params=%s",
+        fold_params.method.value,
+        fold_params.to_metadata(),
+    )
     
     # Configure MLflow
     _configure_mlflow_from_config(project_config)
@@ -1735,6 +1847,7 @@ def train_sdm_models(
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
         seed=training_seed,
+        fold_params=fold_params,
     )
     
     # Prepare and save results
@@ -1769,6 +1882,7 @@ def train_sdm_models(
             models_output_dir,
             seed=training_seed,
             model_config_path=repo_relative_config_path(model_config_path),
+            fold_params=fold_params,
         )
 
     logger.info("Model run outputs: %s", written_uri)

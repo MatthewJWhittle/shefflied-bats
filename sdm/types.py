@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 import geopandas as gpd
 import numpy as np
@@ -120,11 +120,24 @@ class SamplingConfig(BaseModel):
     grid_size_m: float = 2000
 
 
+class CvConfig(BaseModel):
+    """Cross-validation fold method and parameters (see ``sdm.models.maxent.folds``)."""
+
+    method: str = "kmeans"
+    n_folds: int = 3
+    seed: Optional[int] = None
+    block_size_m: float = 10_000.0
+    block_n_folds: int = 5
+    block_n_tries: int = 500
+    buffer_m: float = 10_000.0
+
+
 class ModelConfig(BaseModel):
     seed: int
     maxent: MaxentConfigModel
     sampling: Optional[SamplingConfig] = None
     background: Optional[BackgroundConfig] = None
+    cv: Optional[CvConfig] = None
 
 
 class SDMModel(BaseModel):
@@ -151,6 +164,9 @@ class TrainingResults(SDMModel):
     cv_scores: Optional[np.ndarray] = None
     validation_scores: Optional[Any] = None
     cv_n_folds: Optional[int] = None
+    fold_method: Optional[str] = None
+    fold_params: Optional[Dict[str, Any]] = None
+    fold_presence_counts: Optional[List[int]] = None
     success: bool = False
     error: Optional[str] = None
 
