@@ -14,6 +14,7 @@ uv sync   # or: pip install -e .
 | `sdm data -o DIR` | Rebuild, merge (`all-evs.tif`), and build model stack (`evs-to-model.tif`); optional `--cache-dir` / `--fresh` / `--ceh-path` / `--plan` (refuses `data/evs`, `inputs/`, `gs://`) |
 | `sdm background` | Generate background points for modelling |
 | `sdm train` | Train MaxEnt models and write model packages |
+| `sdm threshold` | Compare suitability cut-off rules on held-out CV scores |
 | `sdm predict` | Apply trained models to the EV stack |
 | `sdm export-rasters` | Reproject and/or COG-wrap rasters for sharing |
 | `sdm visualize` | Partial dependence and related plots |
@@ -46,6 +47,11 @@ sdm background \
 sdm train \
   --bats-file data/processed/bats-tidy.geojson \
   --ev-file data/evs/evs-to-model.tif
+
+# Suitability thresholds (fit on training folds, score on held-out folds)
+sdm threshold \
+  --models-dir data/sdm_models \
+  --output-dir data/sdm_predictions/thresholds
 
 # Predict (COG, project CRS from config.yml)
 sdm predict \

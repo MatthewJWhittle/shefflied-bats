@@ -360,6 +360,77 @@ def train(
 
 
 @app.command()
+def threshold(
+    models_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.models),
+        help="Directory containing trained model packages with validation_scores.parquet.",
+    ),
+    output_dir: Path = typer.Option(
+        Path(PROJECT_CONFIG.paths.predictions) / "thresholds",
+        help="Directory for threshold_summary.csv/json (does not modify package.json).",
+    ),
+    rules: Optional[List[str]] = typer.Option(
+        None,
+        "--rule",
+        "-r",
+        help=(
+            "Threshold rule(s) to apply (repeatable). "
+            "Defaults to all of: presence_percentile, max_sens_spec, presence_capture."
+        ),
+    ),
+    presence_percentile: float = typer.Option(
+        10.0,
+        "--presence-percentile",
+        help="Presence-score percentile for the presence_percentile rule (0 = lowest presence).",
+    ),
+    presence_capture: float = typer.Option(
+        0.95,
+        "--presence-capture",
+        help="Share of presences to retain for the presence_capture rule (e.g. 0.95).",
+    ),
+    model_id: Optional[List[str]] = typer.Option(
+        None,
+        "--model-id",
+        help="Limit to one or more model package directory names (repeatable).",
+    ),
+    species: Optional[List[str]] = None,
+    activity_types: Optional[List[str]] = None,
+    plot: bool = typer.Option(
+        False,
+        "--plot/--no-plot",
+        help="Optionally write presence vs background score spread plots.",
+    ),
+    verbose: bool = False,
+) -> None:
+    """Compute suitability thresholds from held-out CV validation scores.
+
+    Cut-offs are fit on training folds and evaluated on held-out folds. The same
+    rule parameters apply to every model (no per-species settings). Results are
+    written as a tidy CSV/JSON table; published package thresholds are untouched.
+    """
+    from sdm.commands.modelling.compute_sdm_thresholds import compute_sdm_thresholds
+
+    setup_logging(verbose=verbose)
+    try:
+        compute_sdm_thresholds(
+            models_dir=models_dir,
+            output_dir=output_dir,
+            rules=rules,
+            presence_percentile=presence_percentile,
+            presence_capture=presence_capture,
+            model_ids=model_id,
+            species=species,
+            activity_types=activity_types,
+            plot=plot,
+            verbose=verbose,
+        )
+    except KeyError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    logging.info("Threshold computation complete!")
+
+
+@app.command()
 def predict(
     ev_path: str = typer.Option(
         PROJECT_CONFIG.paths.ev_tiff,
