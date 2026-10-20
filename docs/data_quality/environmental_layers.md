@@ -2,112 +2,109 @@
 
 Study-area aggregate checks on the **rebuild-5** environmental stack (the current layer set after the EV rebuild). Use this when refining models and feature data quality. It is separate from the ecology reference.
 
-**Scope.** Figures below are study-area aggregates only: no record points, no presence-vs-background tables, no site names. Licensed rasters and training parquet stay out of git.
+**Scope.** Study-area aggregates only: no record points, no presence-vs-background tables by location, no site or roost names, no grid references. Licensed rasters and training parquet stay out of git. Do not commit histogram or map image outputs from the QA script.
 
-**Sources.** Aggregates were computed from the rebuild-5 `evs-to-model.tif` (77 float32 bands, EPSG:27700, 100 m cells, nodata = NaN). Committed tables:
+---
+
+## Key finding
+
+**The study-area boundary is buffered into the sea and Humber estuary.** About **6%** of cells sit on the coastline or in the sea (`bgs_coast_distance_to_coast` = 0). That single fact explains most of the odd headline numbers:
+
+| Symptom | How the sea / estuary buffer explains it |
+|---------|------------------------------------------|
+| Inflated water cover (`os_cover_water` mean **9.7%**) | **77%** of cells at 100% water are sea/estuary inside the buffer. Excluding coast cells, mean water drops to **4.3%**; beyond 1 km of the coast, **2.9%** (closer to the ~1–3% inland expectation). |
+| Negative elevations (`terrain_dtm` min **−9.0 m**; 43 915 cells &lt; 0) | **90%** of negative cells are within 2 km of the coast (foreshore, estuary, sea). ~4 500 cells remain negative further inland (low drained land and/or DTM artefacts). |
+| Distance-to-coast saturates | **85%** of cells sit at the **7 000 m** cap; the layer only varies along the coastal strip. |
+
+**Suggested fix (root cause).** Clip the study boundary to land (mean high water) before building layers, and/or mask sea cells from modelling and background sampling. That also shrinks the climate and vegetation missing rings that follow the sea buffer.
+
+---
+
+## Sources and regeneration
+
+Aggregates from rebuild-5 `evs-to-model.tif` (77 float32 bands, EPSG:27700, 100 m cells, nodata = NaN).
 
 | File | Contents |
 |------|----------|
-| [`study_area_stats.csv`](study_area_stats.csv) | Per-band valid count, missing share, min / percentiles / max, mean, sd |
-| [`landcover_shares.csv`](landcover_shares.csv) | CEH land-cover mean/median cover and non-zero cell shares by scale |
-
-Regenerate (when you have a local stack path; do not commit the raster):
+| [`layer_stats.csv`](layer_stats.csv) | Per-band min / percentiles / max / mean, % missing, cells at max, verdict + reason |
+| [`study_area_stats.csv`](study_area_stats.csv) | Earlier percentile table (includes p25/p75/sd) |
+| [`landcover_shares.csv`](landcover_shares.csv) | CEH land-cover mean/median and non-zero shares by scale |
 
 ```bash
-uv run python scripts/summarise_ev_study_area_stats.py \
+uv run python scripts/make_layer_qa.py \
   --stack /path/to/evs-to-model.tif \
-  --output-dir docs/data_quality
+  --output-dir /tmp/layer_qa \
+  --print-coast-followup
+# Optional local histograms (do not commit):
+#   ... --write-histograms
 ```
 
----
-
-## Per-layer study-area summary
-
-Full range and missing shares are in [`study_area_stats.csv`](study_area_stats.csv). Selected bands:
-
-| Variable | Missing % | Min | Median | Max | Mean | Notes |
-|----------|----------:|----:|-------:|----:|-----:|-------|
-| `terrain_dtm` | 6.81 | −9.01 | 88.5 | 730.3 | 141.1 | Min unexpected inland (see issues) |
-| `terrain_stats_slope` | 6.99 | 0 | 0.035 | 0.737 | 0.057 | Radians; plausible vs old set |
-| `terrain_stats_twi` | 6.99 | 4.97 | 9.05 | 31.0 | 9.73 | Usual TWI range; old set was off scale |
-| `terrain_stats_roughness` | 6.75 | 0 | 0.0105 | 0.269 | 0.0169 | Smaller than old set |
-| `terrain_stats_tpi` | 6.81 | −41.9 | 0.0015 | 29.9 | ~0 | Smaller range than old set |
-| `vom_vegetation_height_max` | 9.97 | 0 | 3.75 | 61.5 | 5.94 | Max above likely tree height |
-| `os_cover_water` | 0.001 | 0 | 0 | 100 | 9.66 | Mean ~9.7%; p95 = 100 |
-| `os_distance_distance_to_water` | 0 | 0 | 113 | 4376 | 221 | Denser water than old set |
-| `bgs_coast_distance_to_coast` | 0.008 | 0 | 7000 | 7000 | 6228 | Cap at 7000 m; most cells at cap |
-| `os_distance_distance_to_buildings` | 0 | 0 | 284 | 7000 | 594 | Cap at 7000 m |
-| `os_distance_distance_to_major_roads` | 0 | 1.5 | 3270 | 7000 | 3673 | Cap at 7000 m |
-| Climate bands (e.g. `climate_stats_temp_ann_avg`) | 7.97 | — | — | — | — | Missing ~8%; values essentially unchanged vs old set |
-
-Land-cover bands are cover fractions on a 0–10 000 scale (percent × 100). Cell-scale class means sum to about 91% of the area; see [`landcover_shares.csv`](landcover_shares.csv).
+Also available: `scripts/summarise_ev_study_area_stats.py` for the simpler study-area / land-cover CSVs.
 
 ---
 
-## Quality issues to investigate
+## Per-layer summary
 
-Each item has evidence from the study-area aggregates and a suggested check. None of these are presence/background contrasts.
+Full table: [`layer_stats.csv`](layer_stats.csv) (verdict `ok` / `check` / `flag`). Selected bands:
 
-### 1. Elevation minimum about −9 m
+| Variable | Missing % | Min | Median | Max | Mean | Verdict |
+|----------|----------:|----:|-------:|----:|-----:|---------|
+| `terrain_dtm` | 6.81 | −9.01 | 88.5 | 730.3 | 141.1 | flag — negatives mostly coastal buffer |
+| `terrain_stats_slope` | 6.99 | 0 | 0.035 | 0.737 | 0.057 | ok — radians (see below) |
+| `terrain_stats_twi` | 6.99 | 4.97 | 9.05 | 31.0 | 9.73 | check — typical TWI range |
+| `vom_vegetation_height_max` | 9.97 | 0 | 3.75 | 61.5 | 5.94 | flag — 37 cells &gt; 40 m |
+| `os_cover_water` | 0.001 | 0 | 0 | 100 | 9.66 | flag — inflated by sea buffer |
+| `os_cover_water_500m` / `_1000m` / `_1500m` | 1.9–6.1 | 0 | ~2 | 100 | 8.5–9.3 | flag — same pattern |
+| `bgs_coast_distance_to_coast` | 0.008 | 0 | 7000 | 7000 | 6228 | flag — 85% at 7000 m cap |
+| `os_distance_distance_to_major_roads` | 0 | 1.5 | 3270 | 7000 | 3673 | flag — 25% at cap |
+| `os_distance_distance_to_buildings` | 0 | 0 | 284 | 7000 | 594 | flag — 0.24% at cap (low impact) |
+| Climate bands | 7.97 | — | — | — | — | check — missing ring at coast / edge |
+| Vegetation height (focal scales) | 10–18 | — | — | — | — | check — coverage gap + sea; rises with radius |
 
-**Evidence.** `terrain_dtm` min = −9.01 m (`study_area_stats.csv`). The study area is inland South Yorkshire plus buffer; a negative cell mean is unexpected for DTM over that extent. Max ~730 m is plausible for western upland cells (e.g. Dales peaks near the buffer).
+Land-cover bands use 0–10 000 units (percent × 100) and are in range; see [`landcover_shares.csv`](landcover_shares.csv).
 
-**Suggested check.** Map cells with elevation &lt; 0 m against published LiDAR / OS terrain; confirm whether they are coastal fringe, quarries, or edge/nodata artefacts after merge.
+---
 
-### 2. Vegetation height reaching about 61 m
+## Flagged issues (cause and suggested fix)
 
-**Evidence.** `vom_vegetation_height_max` max = 61.5 m; p95 = 19.5 m. Heights above ~40–45 m are unlikely for trees in this region, so a few cells are probably structures or VOM artefacts.
+| Layer | Key number | Likely cause | Suggested fix |
+|-------|------------|--------------|---------------|
+| Water cover (`os_cover_water` + 500/1000/1500 m) | Mean 9.7%; 7.3% of cells at 100% | Sea and Humber estuary buffer (~6% of cells at coast distance 0); 77% of 100% water cells are that buffer | Clip boundary to land (MHW) before building layers, or mask sea cells from model and background sampling |
+| Elevation (`terrain_dtm`) | Min −9.0 m; 43 915 cells &lt; 0 | 90% within 2 km of the coast; ~4 500 further inland (drained land / quarry / DTM artefacts) | Mask sea as above; spot-check inland negatives; optionally floor-clip (e.g. −3 m) if artefacts |
+| Vegetation max height | Max 61.5 m; **37 cells &gt; 40 m** | Sparse single cells: pylons, chimneys, masts, or tall buildings in the vegetation model | Cap at ~40 m or mask with a buildings/structures layer; 37 cells is low impact |
+| Distance to coast | **85%** of cells at 7 000 m cap | Cap at 7 km while most of the area is further inland; layer only varies on the coastal strip | Drop from inland species models (including the Nathusius' pipistrelle config) or remove the cap |
+| Distance to major roads | 25.4% at 7 000 m cap | Uplands far from major roads; cap flattens them | Raise/remove the cap or log-transform |
+| Distance to buildings | 0.24% at 7 000 m cap | Same cap, low impact | Fine as is; note only |
+| Climate (all) | 8.0% missing | Climate grid ends at the coast and boundary edge — a missing ring, mostly the sea buffer | Fixed by clipping boundary to land; otherwise fill edge cells from nearest |
+| Vegetation height (all) | 10–18% missing (more at larger radii) | Vegetation coverage gap plus sea; a **north-east block also lacks elevation** (DTM gap) | Check source tiles for the north-east elevation gap |
 
-**Suggested check.** Locate cells above a threshold (e.g. 40 m) on the VOM source; decide whether to clip, mask, or leave as-is for MaxEnt.
+Checked and OK (or expected): slope (see units), TWI 5.0–31.0, TPI, aspect, roughness, land-cover classes.
 
-### 3. Much denser water layer than the old set
+### Slope units (confirmed in code)
 
-**Evidence.** `os_distance_distance_to_water` median 113 m (was ~209 m on the previous stack), p95 750 m (was ~2 600 m), max 4 376 m (was ~13 km). Rebuild-5 likely includes smaller watercourses.
+`terrain_stats_slope` range 0–0.74 reads as **radians** (max ≈ 42°), which is plausible at 100 m. The rebuild path calls `generate_terrain_stats` without overriding units; the default is radians:
 
-**Suggested check.** Compare water-feature selection / dissolve rules in the OS step against the previous stack; confirm intentional inclusion of drains and minor channels.
+- `sdm/commands/data_preparation/environmental/generate_terrain_stats.py` — `output_slope_units: str = "radians"`
+- `sdm/raster/terrain.py` — `process_dem_to_terrain_attributes(..., output_slope_units: str = "radians")`; slope is computed in radians and only converted if degrees/percent are requested
 
-### 4. Slope and wetness now on plausible scales (fixed)
+Treat rebuild-5 slope/TWI as the trusted scales (the previous stack’s slope/TWI were off scale).
 
-**Evidence.** Rebuild-5 `terrain_stats_slope` median 0.035 rad (~2°), max 0.74 rad (~42°). `terrain_stats_twi` runs ~5–31 with median ~9. The previous stack had slope medians near 1.3 rad (~73°) and TWI roughly −0.4–14 with median ~1 — not usable as terrain.
+### Distance caps at 7 000 m
 
-**Suggested check.** Treat rebuild-5 slope/TWI as the trusted scales for ecological interpretation; do not reuse old-set slope/TWI separations.
+Coast, buildings, and major-road distances are clipped to 0–7 000 m in the model stack (`build_model_ev_stack` layer clipping; see `docs/rebuild-ev-layers.md`). Beyond 7 km the layers are flat.
 
-### 5. Water-cover layer looks inflated
+---
 
-**Evidence.** `os_cover_water` mean ≈ 9.7%, p95 = 100%, max = 100%. A study-area mean near 10% open water is high for South Yorkshire plus buffer if the layer is meant to be open-water fraction.
+## Nathusius' pipistrelle (training gap, not a layer bug)
 
-**Suggested check.** Compare against a published water mask (e.g. OS OpenMap / CEH water bodies / Ordnance Survey water area statistics) on the same grid; inspect whether the cover metric counts linear water as full-cell cover.
+Records exist in the tidy records file (47 after the accuracy filter: 32 roost, 15 in flight). They fail the **15-presence minimum after one-per-cell thinning**: the 32 roost records fall in **3** distinct cells and the 15 in-flight records in **11**. Both are below 15, so no model and no presence-vs-background stats for this species on the rebuild-5 run. That is a data-volume limit, not an environmental-layer defect.
 
-### 6. Distance-to-coast as a likely proxy for Nathusius' pipistrelle
-
-**Evidence.** `bgs_coast_distance_to_coast` is in the Nathusius' pipistrelle roost feature list (`data/sdm_config/Pipistrellus_nathusii_Roost/variables_config.yml`). On this inland study area, median and p5–p95 are all at the 7 000 m cap (mean ~6 228 m), so the layer has little within-area gradient except near the eastern/northern fringe.
-
-**Suggested check.** Feature-selection review: coastal distance has limited ecological meaning this far inland and may act as a spatial proxy; consider dropping or replacing it for inland models.
-
-### 7. Nathusius' pipistrelle gap in attached per-species material
-
-**Evidence.** The working notes that accompanied these aggregates summarised per-species presence-vs-background contrasts for other models; **Nathusius' pipistrelle was not included in that attached material**. No presence or background counts for that species are published here.
-
-**Suggested check.** When regenerating any per-species diagnostics offline, confirm whether `Pipistrellus_nathusii_Roost` was trained on this stack and include it deliberately. Do not invent counts.
-
-### 8. Distance layers capped at 7 000 m
-
-**Evidence.** Coast, buildings, and major-road distances are clipped to 0–7 000 m in the model stack (`build_model_ev_stack` layer clipping; see also `docs/rebuild-ev-layers.md`). In the aggregates, coast and major roads sit at 7 000 m for a large share of cells; buildings max = 7 000 m.
-
-**Effect.** Beyond 7 km the layers are flat, so models cannot distinguish “far” from “very far”. That is intentional clipping for the study buffer, but it compresses gradients for species that respond at longer ranges.
-
-**Suggested check.** Keep the cap documented in model cards; revisit only if a species hypothesis needs longer-range distance.
-
-### 9. Old-set slope / wetness scale bug is fixed in rebuild-5
-
-**Evidence.** Same as issue 4: rebuild-5 slope and TWI match expected physical ranges; the previous stack did not.
-
-**Suggested check.** Prefer rebuild-5 for any re-tuning that uses terrain; treat old-set terrain coefficients as non-comparable.
+The training log wrongly reports **0** presence rather than 3 / 11. Likely cause: small-sample sample-weighting producing NaNs that `dropna()` removes. Worth a small logging fix so the real thinned counts appear. The existing `Pipistrellus_nathusii_Roost` config is from an earlier run; distance-to-coast in that feature list should be reviewed for inland models (see table above).
 
 ---
 
 ## Implementation notes
 
-- Aggregates only; regenerator script does not read training parquet.
-- Figures taken from the rebuild-5 study-area run that produced the committed CSVs (20 Oct 2026 method notes, sanitized).
+- Aggregates only; QA script does not read training parquet and does not write presence tables.
+- Histogram/map image outputs from the QA script must not be committed (licensed layers / local inspection only).
 - For ecology and species natural history, use the separate ecology reference — not this file.
