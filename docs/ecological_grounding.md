@@ -41,7 +41,7 @@ The repo's boundary (`sdm/data/boundaries.py`) is the four South Yorkshire distr
 
 ## 2. What the study area actually looks like (from the model inputs)
 
-Figures from the analysis stats in `ev_stats/` (77 layers at 100 m). Land cover is the share of each cell in a class. The mean share of each class across the study area:
+Figures from the rebuild-5 layer stats in `ev_stats_rebuild5/` (77 layers at 100 m, the same layers the 17 current models are trained on). Land cover, climate and distance to coast are essentially the same as in the earlier layer set; the terrain and water layers changed (see the data checks below). Land cover is the share of each cell in a class. The mean share of each class across the study area:
 
 | Class | Mean share | Note |
 |---|---|---|
@@ -55,27 +55,32 @@ Figures from the analysis stats in `ev_stats/` (77 layers at 100 m). Land cover 
 | Urban | about 2.5% | |
 | Coniferous woodland | about 2% | |
 
-Elevation: median about 89 m, upper 5% above about 440 m. Most of the area is lowland. The high ground is a western wedge.
+Elevation: median about 89 m, upper 5% above about 440 m, highest about 730 m. Most of the area is lowland. The high ground is a western wedge.
+
+Terrain: slope has a median of about 2° and a maximum of about 42°, which fits a mostly lowland area with steep clough sides and gritstone edges. The wetness index (TWI) runs from about 5 to 31, median 9, the usual range for that index. Roughness and topographic position (TPI, -42 to +30 m) are small, as expected at 100 m.
+
+Water: distance to water has a median of about 113 m, 95% of cells within 750 m and a maximum of about 4.4 km. The water layer now includes small watercourses, so almost everywhere is near *some* water. Distance to water therefore says more about streams and drains than about the large calm waters that Daubenton's and Nathusius' depend on.
 
 What this means: a model that marks most of the lowland as suitable for a woodland specialist is wrong, because broadleaf woodland is only about 5% of land. Common pipistrelle is the only species where "much of the lowland" is a plausible answer.
 
 **Data checks to raise with the implementation side** (they are not ecology, but they affect it):
-- `terrain_dtm` reaches about 724 m. The highest ground in the Dark Peak is Kinder Scout at 636 m and is outside the buffer. Worth a check for spikes or a projection error.
+- `terrain_dtm` reaches about 730 m. That is plausible: the layer extent reaches the western Yorkshire Dales (Whernside 736 m, Ingleborough 723 m). Its minimum of about -9 m is still odd for an inland area and is worth a check (low-lying drained land in the Humberhead Levels should sit near 0 m, not well below).
+- `vom_vegetation_height_max` reaches about 61 m in a few cells. No UK tree is that tall, so these are most likely structures or artefacts. The 95th percentile (about 19.5 m) is sensible, so it affects few cells, but tree height is a top layer for the roost models, so the outliers are worth masking or capping.
 - `bgs_coast_distance_to_coast` is capped at 7000 m, but the study area is 60 km or more from the sea. Most cells sit at the cap, and a few read 0. Inland, this layer can only carry noise or artefacts. It should come out of the feature set (the Nathusius' roost model uses it).
-- `os_cover_water` has its 95th percentile at 100%, with a mean of about 9.5%. That seems too high for South Yorkshire, where reservoirs and rivers cover far less. Check whether no-data or the edge of the buffer is being counted as water.
+- `os_cover_water` still has its 95th percentile at 100%, with a mean of about 9.7%. That seems too high for South Yorkshire, where reservoirs and rivers cover far less. Check whether no-data or the edge of the buffer is being counted as water. (This is the cover layer only. The distance-to-water layer now looks sensible; see above.)
 - The distance layers (buildings, roads) are capped at 7000 m, so "far from everything" is a flat plateau.
 
 ---
 
 ## 3. Species: natural history in brief
 
-UK status and distribution draw on the BCT species pages, the Mammal Society review (Mathews et al. 2018), the Mammal Society atlas (Crawley et al. 2020) and NBN Atlas maps. Record counts are those in the repo's training data (`presence_vs_background.csv`).
+UK status and distribution draw on the BCT species pages, the Mammal Society review (Mathews et al. 2018), the Mammal Society atlas (Crawley et al. 2020) and NBN Atlas maps. Record counts are those in the rebuild-5 training data (`ev_stats_rebuild5/presence_vs_background.csv`).
 
-**Common pipistrelle (*Pipistrellus pipistrellus*).** The commonest and most widespread UK bat, found across Yorkshire. Roosts almost entirely in buildings (houses, including modern ones). Forages along edges, gardens, parks, woodland and hedgerows. It tolerates the urban edge more than any other UK bat, and will feed around some street lights. Avoids high exposed ground. Detection is easy and records are plentiful (630 in flight, 1215 roost). *Expect: widespread; the broadest map of all.*
+**Common pipistrelle (*Pipistrellus pipistrellus*).** The commonest and most widespread UK bat, found across Yorkshire. Roosts almost entirely in buildings (houses, including modern ones). Forages along edges, gardens, parks, woodland and hedgerows. It tolerates the urban edge more than any other UK bat, and will feed around some street lights. Avoids high exposed ground. Detection is easy and records are plentiful (629 in flight, 1216 roost). *Expect: widespread; the broadest map of all.*
 
 **Soprano pipistrelle (*P. pygmaeus*).** Also widespread and common. Split from common pipistrelle only in the 1990s (Jones & van Parijs 1993), so older records are mixed. Roosts in buildings, often in larger colonies, usually near water. More tied to rivers, lakes and riparian woodland than common pipistrelle (Davidson-Watts & Jones 2006), and a little less urban-tolerant. *Expect: widespread but more patchy, following valleys and water.*
 
-**Nathusius' pipistrelle (*P. nathusii*).** Rare, and a migrant. Many UK records are in autumn and winter, from animals coming over from the continent, but there are a few breeding sites. Strongly linked to large waterbodies, reservoirs and wetland. Roosts in buildings and trees near water. Records are few and often come from targeted surveys at lakes, so they cluster. *Expect: very restricted; the larger lowland waters only. Model only roost (no stats in `ev_stats`).*
+**Nathusius' pipistrelle (*P. nathusii*).** Rare, and a migrant. Many UK records are in autumn and winter, from animals coming over from the continent, but there are a few breeding sites. Strongly linked to large waterbodies, reservoirs and wetland. Roosts in buildings and trees near water. Records are few and often come from targeted surveys at lakes, so they cluster. *Expect: very restricted; the larger lowland waters only. Model only roost (no stats in `ev_stats_rebuild5`).*
 
 **Noctule (*Nyctalus noctula*).** Widespread in England, though thinly. One of the largest UK bats. Roosts in trees: woodpecker holes and rot holes in mature trees, and rarely in buildings. Flies high and fast over open ground, water, woodland canopy and parkland, and travels several kilometres from roosts. Loud and easily detected, so in-flight records are spread widely. Roost records are scarcer. *Expect: in flight broad; roost restricted to mature trees and parkland.*
 
@@ -87,7 +92,7 @@ UK status and distribution draw on the BCT species pages, the Mammal Society rev
 
 **Natterer's bat (*M. nattereri*).** Widespread but local. Roosts in old buildings (barns, churches), trees and bat boxes. Gleans insects in cluttered woodland and along tree-lined features. Strongly light-averse. Hibernates in caves and mines (possibly in the limestone gorges). *Expect: woodland and parkland; restricted.*
 
-**Brown long-eared bat (*Plecotus auritus*).** Widespread and common in the UK, but often under-recorded by detectors because its calls are very quiet. Roosts in roof voids of old buildings (barns, churches, older houses) and in trees. Forages close to the roost, within 1–2 km, gleaning in woodland. Light-averse and a slow flier. Roost records (604) come largely from building surveys. *Expect: widespread in wooded farmland and valleys, absent from the urban core and moorland.*
+**Brown long-eared bat (*Plecotus auritus*).** Widespread and common in the UK, but often under-recorded by detectors because its calls are very quiet. Roosts in roof voids of old buildings (barns, churches, older houses) and in trees. Forages close to the roost, within 1–2 km, gleaning in woodland. Light-averse and a slow flier. Roost records (605) come largely from building surveys. *Expect: widespread in wooded farmland and valleys, absent from the urban core and moorland.*
 
 ---
 
@@ -126,45 +131,59 @@ common pipistrelle (in flight ≥ roost) > noctule in flight > soprano pipistrel
 
 ## 5. How the training data compare (presence vs background)
 
-From `ev_stats/presence_vs_background.csv`. The figure is the standardised mean difference (SMD) between each model's records and its background points: positive means records sit at *higher* values than background. **Caveat:** the background points come from the bat records themselves, so a difference shows how this species' records differ from *where people record bats*, not from the landscape. Training weights are ignored here. About ±0.2 is small, ±0.5 moderate, and ±0.8 or more large.
+From `ev_stats_rebuild5/presence_vs_background.csv` (rebuild-5 layers and training data, 17 models). The figure is the standardised mean difference (SMD) between each model's records and its background points: positive means records sit at *higher* values than background. **Caveat:** the background points come from the bat records themselves, so a difference shows how this species' records differ from *where people record bats*, not from the landscape. Training weights are ignored here. About ±0.2 is small, ±0.5 moderate, and ±0.8 or more large.
 
-| Model | n | Altitude | Distance to buildings | Water (500 m) | Broadleaf (500 m) | Suburban (500 m) | Urban (500 m) | Heath (500 m) | Max tree height (500 m) |
-|---|---|---|---|---|---|---|---|---|---|
-| Brandt's roost | 27 | -0.14 | -0.82 | +0.32 | +0.56 | -0.03 | -0.31 | -0.33 | +1.23 |
-| Daubenton's in flight | 116 | -0.23 | -0.52 | +0.64 | +1.04 | +0.47 | +0.35 | -0.25 | +1.05 |
-| Daubenton's roost | 124 | -0.42 | -0.62 | +0.46 | +0.79 | +0.19 | +0.23 | -0.38 | +1.16 |
-| Whiskered in flight | 32 | -0.11 | -0.52 | +0.41 | +0.85 | +0.25 | -0.12 | -0.16 | +0.87 |
-| Whiskered roost | 124 | -0.25 | -0.83 | +0.05 | +0.52 | -0.01 | -0.08 | -0.25 | +0.81 |
-| Natterer's in flight | 43 | -0.03 | -0.57 | +0.15 | +0.68 | +0.02 | -0.16 | -0.22 | +0.69 |
-| Natterer's roost | 191 | -0.36 | -0.77 | +0.07 | +0.53 | -0.10 | -0.20 | -0.35 | +0.85 |
-| Leisler's in flight | 82 | -0.05 | -0.59 | +0.23 | +0.65 | +0.69 | +0.47 | -0.10 | +0.75 |
-| Leisler's roost | 32 | -0.27 | -0.83 | -0.02 | +0.68 | +1.28 | +0.55 | -0.48 | +0.95 |
-| Noctule in flight | 312 | -0.26 | -0.75 | +0.22 | +0.47 | +0.65 | +0.33 | -0.33 | +0.75 |
-| Noctule roost | 74 | -0.54 | -0.65 | +0.24 | +0.82 | +0.53 | +0.32 | -0.47 | +1.20 |
-| Common pipistrelle in flight | 630 | -0.17 | -0.74 | +0.07 | +0.27 | +0.70 | +0.41 | -0.29 | +0.58 |
-| Common pipistrelle roost | 1215 | -0.43 | -0.91 | -0.02 | +0.15 | +0.52 | +0.19 | -0.38 | +0.65 |
-| Soprano in flight | 265 | -0.26 | -0.70 | +0.27 | +0.54 | +0.52 | +0.29 | -0.34 | +0.87 |
-| Soprano roost | 325 | -0.52 | -0.84 | +0.19 | +0.48 | +0.22 | -0.14 | -0.43 | +1.00 |
-| Brown long-eared in flight | 141 | -0.30 | -0.76 | +0.13 | +0.52 | +0.46 | +0.13 | -0.40 | +0.78 |
-| Brown long-eared roost | 604 | -0.35 | -0.82 | +0.05 | +0.37 | +0.04 | -0.16 | -0.32 | +0.79 |
+| Model | n | Altitude | Distance to buildings | Water (500 m) | Distance to water | Broadleaf (500 m) | Suburban (500 m) | Urban (500 m) | Heath (500 m) | Max tree height (500 m) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Brandt's roost | 27 | -0.05 | -0.97 | +0.37 | -0.29 | +0.66 | -0.13 | -0.34 | -0.24 | +1.26 |
+| Daubenton's in flight | 116 | -0.21 | -0.60 | +0.66 | -0.66 | +1.01 | +0.43 | +0.35 | -0.27 | +0.97 |
+| Daubenton's roost | 124 | -0.39 | -0.74 | +0.51 | -0.45 | +0.82 | +0.16 | +0.21 | -0.38 | +1.14 |
+| Whiskered in flight | 32 | -0.16 | -0.60 | +0.53 | -0.13 | +0.84 | +0.21 | -0.05 | -0.18 | +0.90 |
+| Whiskered roost | 125 | -0.23 | -1.05 | +0.02 | -0.17 | +0.47 | +0.01 | -0.05 | -0.26 | +0.80 |
+| Natterer's in flight | 43 | -0.02 | -0.63 | +0.22 | -0.39 | +0.73 | -0.06 | -0.12 | -0.18 | +0.66 |
+| Natterer's roost | 191 | -0.33 | -0.94 | +0.06 | -0.15 | +0.51 | -0.11 | -0.20 | -0.35 | +0.81 |
+| Leisler's in flight | 82 | -0.03 | -0.74 | +0.24 | -0.20 | +0.62 | +0.69 | +0.37 | -0.12 | +0.75 |
+| Leisler's roost | 32 | -0.26 | -1.12 | +0.13 | -0.08 | +0.70 | +1.14 | +0.54 | -0.53 | +0.94 |
+| Noctule in flight | 312 | -0.23 | -0.91 | +0.22 | -0.23 | +0.46 | +0.64 | +0.32 | -0.33 | +0.74 |
+| Noctule roost | 74 | -0.53 | -0.80 | +0.13 | -0.21 | +0.79 | +0.60 | +0.33 | -0.47 | +1.17 |
+| Common pipistrelle in flight | 629 | -0.15 | -0.88 | +0.06 | -0.18 | +0.26 | +0.70 | +0.41 | -0.28 | +0.57 |
+| Common pipistrelle roost | 1216 | -0.42 | -1.17 | -0.03 | -0.06 | +0.14 | +0.52 | +0.19 | -0.38 | +0.63 |
+| Soprano in flight | 265 | -0.24 | -0.83 | +0.27 | -0.32 | +0.53 | +0.51 | +0.29 | -0.34 | +0.86 |
+| Soprano roost | 325 | -0.50 | -1.03 | +0.18 | -0.37 | +0.47 | +0.21 | -0.14 | -0.43 | +0.99 |
+| Brown long-eared in flight | 141 | -0.26 | -0.91 | +0.12 | -0.30 | +0.51 | +0.44 | +0.11 | -0.39 | +0.74 |
+| Brown long-eared roost | 605 | -0.33 | -1.01 | +0.03 | -0.12 | +0.36 | +0.04 | -0.16 | -0.32 | +0.78 |
 
-(Nathusius' roost isn't in the stats file.)
+(Nathusius' roost isn't in the stats file. A negative "distance to water" means records sit closer to water than background.)
+
+The largest separations in the whole file are tree height at the cell itself for roosts (Brandt's roost +1.76, soprano roost +1.31, Daubenton's roost +1.28), driest-quarter mean temperature (bioclim 9) for Leisler's (roost +1.75, in flight +1.32) and suburban cover for Leisler's roost.
 
 ### Where the data agree with the literature
-- **Altitude and moorland** fall for every model, as expected.
+- **Altitude and moorland** fall for every model, as expected. Brandt's roost has almost no altitude effect (-0.05), which is fine for 27 records in wooded valleys.
 - **Tree height and broadleaf** rise for every model, and most strongly for the woodland species (Brandt's, Daubenton's, noctule roost, whiskered). Common pipistrelle has the weakest broadleaf signal, as expected for a generalist.
-- **Water** is strongest for Daubenton's in flight (+0.64) and stronger for soprano than for common pipistrelle (+0.27 against +0.07). Both are as expected.
+- **Water** is strongest for Daubenton's in flight on both measures (+0.66 water cover, -0.66 distance to water), and stronger for soprano than for common pipistrelle (water cover +0.27 against +0.06 in flight; distance to water -0.37 against -0.06 for roosts). Both are as expected. With the denser water layer, the Daubenton's water signal is now clearer than before.
 - **Suburban** rises most for common pipistrelle in flight and is near zero for Natterer's, whiskered, Brandt's and brown long-eared roosts. As expected.
+- **Terrain** now has real scales and reads sensibly. Daubenton's in flight sits on wetter ground (TWI +0.62), as expected for valley-bottom water. Natterer's and whiskered in flight lean to steeper ground (slope +0.44 and +0.38), which fits wooded cloughs. No model has a large slope effect. (The slope and TWI separations from the earlier layer set should not be read; those layers were on the wrong scale.)
 
 ### Where they disagree (flags)
-1. **Noctule roost, closer to buildings (-0.65).** Noctule roosts in trees. The literature expects no effect or the opposite. Most likely survey bias (records near where people look), or building-based records mislabelled. Same finding as in the earlier evidence comment.
-2. **Leisler's roost, strongly suburban (+1.28) and urban (+0.55).** Leisler's mainly roosts in trees. With 32 records, a few clustered sites could cause this. Check whether the records come from one or two survey sites (for example a park or a cemetery with mature trees). Treat the model as unreliable until checked.
-3. **Leisler's and noctule in flight, suburban and urban up (+0.5 to +0.7).** Partly plausible: both feed high over parks and around some lights. But it is as strong as common pipistrelle's, which is not expected. Likely observer effort in towns.
-4. **Daubenton's in flight, suburban (+0.47) and urban (+0.35) up.** Unexpected for a light-averse species. A likely explanation: the Don, Sheaf and Porter run through Sheffield and Rotherham, so river records are also urban. Check that the model's urban response is not positive once water is accounted for.
-5. **Brown long-eared in flight, suburban up (+0.46).** Not expected. Probably emergence records from house roosts and garden detectors.
-6. **"Closer to buildings" in every model, -0.5 to -0.9.** Plausible for pipistrelles and for building-roosting colonies of long-eared, whiskered and Brandt's, but not for noctule, Leisler's, Daubenton's in flight or Natterer's in flight. Because the background is itself drawn from bat records, a near-universal effect points to a shared bias in where records come from.
+The five species-level mismatches all still hold on the rebuild-5 data.
+1. **Noctule roost, closer to buildings (-0.80, stronger than before).** Noctule roosts in trees. The literature expects no effect or the opposite. Most likely survey bias (records near where people look), or building-based records mislabelled.
+2. **Leisler's roost, strongly suburban (+1.14) and urban (+0.54).** Leisler's mainly roosts in trees. With 32 records, a few clustered sites could cause this. Its large driest-quarter temperature effect (+1.75) points the same way: warmer lowland ground where the records cluster. Check whether the records come from one or two survey sites (for example a park or a cemetery with mature trees). Treat the model as unreliable until checked.
+3. **Leisler's and noctule in flight, suburban and urban up (suburban +0.69 and +0.64; urban +0.37 and +0.32).** Partly plausible: both feed high over parks and around some lights. But it is as strong as common pipistrelle's (+0.70), which is not expected. Likely observer effort in towns.
+4. **Daubenton's in flight, suburban (+0.43) and urban (+0.35) up.** Unexpected for a light-averse species. A likely explanation: the Don, Sheaf and Porter run through Sheffield and Rotherham, so river records are also urban. Its water signal is now clearly the stronger one, but check that the model's urban response is not positive once water is accounted for.
+5. **Brown long-eared in flight, suburban up (+0.44).** Not expected. Probably emergence records from house roosts and garden detectors.
 
----
+And a shared pattern:
+
+6. **"Closer to buildings" in every model, now -0.6 to -1.2.** Plausible for pipistrelles and for building-roosting colonies of long-eared, whiskered and Brandt's, but not for noctule, Leisler's, Daubenton's in flight or Natterer's in flight. Because the background is itself drawn from bat records, a near-universal effect points to a shared bias in where records come from. It is stronger on rebuild-5 than on the earlier layers, which makes the test without buildings and roads (section 7) more worth doing.
+
+### Suitable share after the cut-off
+On rebuild-5 there are 17 models. 16 of them have a cut-off, and these reproduce the trial: Brandt's roost 16%, Leisler's roost 17%, common pipistrelle roost 20% and soprano pipistrelle roost 23% of the study area. Whiskered in flight has no cut-off.
+
+Against the expected order in section 4:
+- Brandt's and Leisler's roost at the bottom (16–17%) fit the order (Brandt's ≈ Leisler's, near the smallest).
+- Soprano roost (23%) above common pipistrelle roost (20%) is the wrong way round. Common pipistrelle should have the broadest roost map. The gap is small, but worth a look: soprano's records sit nearer water and taller trees, so its map may be picking up the wooded valleys more widely than the evidence supports, or the common pipistrelle cut-off may be strict.
+- Brandt's at 16% is a sixth of the study area for a species with 27 records whose habitat (broadleaf) covers about 5% of the land. That is broad for a woodland specialist; judge it on stability across folds.
+- Whiskered in flight can't be placed in the order until it has a cut-off.
 
 ## 6. Recording bias in UK bat records, and what it means for the models
 
