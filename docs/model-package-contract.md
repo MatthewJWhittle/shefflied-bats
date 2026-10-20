@@ -36,12 +36,17 @@ Each trained species × activity model is a **directory**:
 ```
 {models_dir}/
 ├── model_results.csv              # index (recommended)
+├── thresholds.csv                 # run-level suitability cut-offs (METHOD.md)
+├── thresholds.json                # same cut-offs + method metadata
 └── {model_id}/
     ├── model.pkl                  # required — fitted sklearn/elapid pipeline
-    └── package.json               # required — metadata and feature manifest
+    ├── package.json               # required — metadata and feature manifest
+    └── thresholds.json            # per-model cut-off copy (optional but usual)
 ```
 
 Training also writes `validation_scores.parquet` per model: one row per training point with `point_index`, `class`, `fold`, and `held_out_score` (the suitability score from the fold model that did not train on that point; background points included). `package.json` may reference it as `artifacts.validation_scores` and record `metrics.n_cv_folds` for the fold count actually used.
+
+Suitability cut-offs follow [docs/thresholds/METHOD.md](thresholds/METHOD.md): 5th-percentile held-out presence per fold, median across folds, transferred onto the final model's training-presence scores (with a fold-median fallback when transfer hits ≥ 0.95). `sdm train` writes the run-level and per-package threshold files; `sdm threshold --publish-run` can rewrite them for an existing run. Cut-offs are model outputs only — no record locations, grid references, or site names.
 
 ### Model identifier (`model_id`)
 

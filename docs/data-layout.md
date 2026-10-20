@@ -34,6 +34,7 @@ Each run: `runs/<UTC>-<hex>/` under the output root.
 | Model package | `{model_id}/model.pkl` | Pickled sklearn pipeline |
 | Package metadata | `{model_id}/package.json` | JSON (metrics, feature list) |
 | Optional CV scores | `{model_id}/validation_scores.parquet` | Parquet |
+| Suitability cut-offs | `thresholds.csv` / `thresholds.json` (also `{model_id}/thresholds.json`) | Cut-off per model (METHOD.md rule); no locations |
 | Run summary | `model_results.csv` | CSV (`model_path`, `model_package_dir` as final `gs://…` URIs) |
 | Training snapshot | `training_data.parquet` | Parquet |
 

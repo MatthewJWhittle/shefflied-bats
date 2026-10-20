@@ -64,6 +64,7 @@ from sdm.utils.sdm_config import (
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import TrainingData, TrainingResults, ProjectConfig, VariablesConfig, ModelConfig, BackgroundConfig, SamplingConfig
 from sdm.commands.modelling.utils import get_model_id
+from sdm.models.core.threshold import write_run_thresholds
 from sdm.utils.fs import join_uri_path, local_materialized_path, uri_exists
 from sdm.utils.model_runs import (
     artifact_parent_uri,
@@ -1027,6 +1028,59 @@ def save_results(results_df: pd.DataFrame, output_dir: Path) -> None:
     results_df.to_csv(output_dir / "model_results.csv", index=False)
 
 
+def _final_presence_scores(model: TrainingResults, data: TrainingData) -> np.ndarray:
+    """Score training presence points with the fitted final model."""
+    if model.final_model is None:
+        raise ValueError(f"No final_model for {model.identifier()}")
+    presence = data.occurrence[data.occurrence["class"] == 1]
+    if len(presence) == 0:
+        raise ValueError(f"No presence rows for {model.identifier()}")
+    features = presence[list(data.model_features)]
+    return np.asarray(model.final_model.predict_proba(features)[:, 1], dtype=float)
+
+
+def save_run_thresholds(
+    models: List[TrainingResults],
+    training_data: List[TrainingData],
+    output_dir: Path,
+) -> List[Dict[str, Any]]:
+    """Write p5-median-transfer thresholds into the run folder (see docs/thresholds/METHOD.md)."""
+    data_by_id = {d.identifier(): d for d in training_data}
+    final_by_model_id: Dict[str, np.ndarray] = {}
+    for model in models:
+        if model.final_model is None or model.validation_scores is None:
+            continue
+        if model.validation_scores is not None and len(model.validation_scores) == 0:
+            continue
+        data = data_by_id.get(model.identifier())
+        if data is None:
+            logger.warning(
+                "Skipping thresholds for %s (no matching TrainingData)",
+                model.identifier(),
+            )
+            continue
+        model_id = get_model_id([model.latin_name, model.activity_type])
+        try:
+            final_by_model_id[model_id] = _final_presence_scores(model, data)
+        except Exception as exc:  # pragma: no cover - defensive around predict
+            logger.warning("Skipping thresholds for %s: %s", model_id, exc)
+
+    if not final_by_model_id:
+        logger.warning("No models available to write run thresholds under %s", output_dir)
+        return []
+
+    rows = write_run_thresholds(
+        output_dir,
+        final_presence_by_model=final_by_model_id,
+    )
+    logger.info(
+        "Wrote suitability thresholds for %d model(s) under %s",
+        len(rows),
+        output_dir,
+    )
+    return rows
+
+
 def save_run_metadata(
     output_dir: Path,
     *,
@@ -1740,6 +1794,7 @@ def train_sdm_models(
 
         save_results(results_df, models_output_dir)
         save_training_data(training_data, models_output_dir)
+        save_run_thresholds(models, training_data, models_output_dir)
         save_run_metadata(
             models_output_dir,
             seed=training_seed,

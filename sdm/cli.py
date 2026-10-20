@@ -400,18 +400,42 @@ def threshold(
         "--plot/--no-plot",
         help="Optionally write presence vs background score spread plots.",
     ),
+    publish_run: bool = typer.Option(
+        False,
+        "--publish-run/--no-publish-run",
+        help=(
+            "Write p5_median_transfer cut-offs into models_dir (run folder) as "
+            "thresholds.json/csv next to each package. Requires training_data.parquet "
+            "and model.pkl. See docs/thresholds/METHOD.md."
+        ),
+    ),
     verbose: bool = False,
 ) -> None:
     """Compute suitability thresholds from held-out CV validation scores.
 
     Cut-offs are fit on training folds and evaluated on held-out folds. The same
-    rule parameters apply to every model (no per-species settings). Results are
-    written as a tidy CSV/JSON table; published package thresholds are untouched.
+    rule parameters apply to every model (no per-species settings). Comparison
+    results are written as a tidy CSV/JSON table. With ``--publish-run``, also
+    write the METHOD.md rule into the training run folder (``sdm train`` does
+    this automatically).
     """
-    from sdm.commands.modelling.compute_sdm_thresholds import compute_sdm_thresholds
+    from sdm.commands.modelling.compute_sdm_thresholds import (
+        compute_sdm_thresholds,
+        publish_run_thresholds,
+    )
 
     setup_logging(verbose=verbose)
     try:
+        if publish_run:
+            publish_run_thresholds(
+                models_dir=models_dir,
+                model_ids=model_id,
+                verbose=verbose,
+            )
+            # Comparison table only when --rule is also given with --publish-run.
+            if rules is None:
+                logging.info("Published run thresholds under %s", models_dir)
+                return
         compute_sdm_thresholds(
             models_dir=models_dir,
             output_dir=output_dir,
@@ -425,6 +449,9 @@ def threshold(
             verbose=verbose,
         )
     except KeyError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    except FileNotFoundError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
     logging.info("Threshold computation complete!")
