@@ -417,6 +417,9 @@ def apply_sample_weights(
         gdf.geometry,
         n_neighbors=n_neighbors,
     )
+    # elapid returns NaN when n_points < n_neighbors (or all distances equal);
+    # fill so a later dropna does not erase real post-thinning presence cells.
+    gdf["sample_weight"] = gdf["sample_weight"].fillna(1.0)
     return gdf
 
 
@@ -517,7 +520,9 @@ def prepare_species_training_data(
     columns = ["class", "sample_weight", "geometry"] + ev_columns
     species_data = species_data[columns]
 
-    species_data = species_data.dropna()
+    # Drop only incomplete environmental variables — never drop rows solely
+    # because sample_weight was NaN (that hid real post-thinning cell counts).
+    species_data = species_data.dropna(subset=ev_columns)
     
     return species_data
 
