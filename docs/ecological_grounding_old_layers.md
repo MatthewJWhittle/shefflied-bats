@@ -1,4 +1,4 @@
-Reference only: based on the pre-rebuild-5 layer set; superseded by ecological_grounding.md.
+Reference only: based on an earlier version of the environmental variables; superseded by ecological_grounding.md.
 # Ecological grounding for the South Yorkshire bat habitat models
 
 ## Ecology review
