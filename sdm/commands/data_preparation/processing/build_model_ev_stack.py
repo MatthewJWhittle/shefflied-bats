@@ -30,6 +30,7 @@ DEFAULT_LAYER_CLIPPING: dict[str, dict[str, float]] = {
     "bgs_coast_distance_to_coast": {"min": 0.0, "max": 7000.0},
     "os_distance_distance_to_buildings": {"min": 0.0, "max": 7000.0},
     "os_distance_distance_to_major_roads": {"min": 0.0, "max": 7000.0},
+    "os_distance_distance_to_woodland": {"min": 0.0, "max": 7000.0},
     "terrain_stats_curvature": {"quantile_min": 0.05, "quantile_max": 0.95},
 }
 

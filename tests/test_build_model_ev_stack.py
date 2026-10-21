@@ -56,6 +56,7 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     ds = xr.Dataset(
         {
             "bgs_coast_distance_to_coast": (("y", "x"), np.full((4, 4), 9000.0)),
+            "os_distance_distance_to_woodland": (("y", "x"), np.full((4, 4), 8500.0)),
             "terrain_stats_curvature": (
                 ("y", "x"),
                 np.linspace(-10, 10, 16).reshape(4, 4),
@@ -69,6 +70,7 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     expected_hi = float(ds["terrain_stats_curvature"].quantile(0.95).item())
     clipped, applied = apply_layer_clipping(ds)
     assert float(clipped["bgs_coast_distance_to_coast"].max()) == 7000.0
+    assert float(clipped["os_distance_distance_to_woodland"].max()) == 7000.0
     assert float(clipped["terrain_stats_curvature"].min()) > original_min
     assert float(clipped["terrain_stats_curvature"].max()) < original_max
     assert applied["terrain_stats_curvature"]["min"] == expected_lo
@@ -76,6 +78,22 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     assert applied["terrain_stats_curvature"]["quantile_min"] == 0.05
     assert applied["terrain_stats_curvature"]["quantile_max"] == 0.95
     assert applied["bgs_coast_distance_to_coast"] == {"min": 0.0, "max": 7000.0}
+    assert applied["os_distance_distance_to_woodland"] == {"min": 0.0, "max": 7000.0}
+
+
+def test_woodland_distance_included_in_selected_stack() -> None:
+    """#39: OS distance to woodland is kept in the model EV stack."""
+    keep = load_selected_variable_names("data/ev_clusters_selected.csv")
+    assert "os_distance_distance_to_woodland" in keep
+
+
+def test_plecotus_roost_swaps_broadleaved_for_woodland_distance() -> None:
+    """#39 experiment: BLE roost uses woodland edge distance instead of cover."""
+    path = Path("data/sdm_config/Plecotus_auritus_Roost/variables_config.yml")
+    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    variables = payload.get("variables") or []
+    assert "os_distance_distance_to_woodland" in variables
+    assert "ceh_landcover_broadleaved_woodland_500m" not in variables
 
 
 def _write_synthetic_all_evs(path: Path, band_names: list[str]) -> None:
@@ -89,6 +107,7 @@ def _write_synthetic_all_evs(path: Path, band_names: list[str]) -> None:
         "bgs_coast_distance_to_coast",
         "os_distance_distance_to_buildings",
         "os_distance_distance_to_major_roads",
+        "os_distance_distance_to_woodland",
     ):
         if name in data:
             data[name] = (("y", "x"), np.full((height, width), 8500.0, dtype=np.float32))
@@ -175,6 +194,7 @@ def test_build_settings_recorded_shape() -> None:
         "bgs_coast_distance_to_coast",
         "os_distance_distance_to_buildings",
         "os_distance_distance_to_major_roads",
+        "os_distance_distance_to_woodland",
         "terrain_stats_curvature",
     ):
         assert layer in settings["layer_clipping"]["layers"]

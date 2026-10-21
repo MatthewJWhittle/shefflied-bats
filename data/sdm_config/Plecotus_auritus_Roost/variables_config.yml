@@ -15,8 +15,11 @@
 #   urban cover within 1.5 km covers the landscape-scale urban effect.
 #
 # Layers added:
-# - ceh_landcover_broadleaved_woodland_500m: roosts sit close to broadleaved
-#   woodland (Boughey et al. 2011; Bellamy & Altringham 2015).
+# - os_distance_distance_to_woodland (#39): distance to nearest woodland edge
+#   from OS Vector Map District. Swapped in for broadleaved woodland cover
+#   within 500 m for the one-change roost experiment (closer UK studies point
+#   to edge distance; see issue #39). If the response curve or hotspot checks
+#   fail, roll back to ceh_landcover_broadleaved_woodland_500m.
 # - ceh_landcover_urban_1500m: avoidance of built-up land around roosts,
 #   at the 1.5 km scale used by Bellamy & Altringham 2015.
 # - vom_vegetation_height_std (put back): variability of vegetation height,
@@ -35,6 +38,6 @@ variables:
 - ceh_landcover_grassland_1000m
 - climate_bioclim_bio_2
 - climate_stats_temp_ann_avg
-- ceh_landcover_broadleaved_woodland_500m
+- os_distance_distance_to_woodland
 - ceh_landcover_urban_1500m
 - vom_vegetation_height_std  # canopy structural variability: edges, tree-shrub mix
