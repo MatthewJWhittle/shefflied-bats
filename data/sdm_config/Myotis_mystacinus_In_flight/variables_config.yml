@@ -1,9 +1,6 @@
 variables:
-- climate_stats_temp_ann_var
 - terrain_dtm
-- climate_stats_temp_mat_avg
 - os_distance_distance_to_buildings
-- climate_bioclim_bio_8
 - terrain_stats_slope
 - vom_vegetation_height_std
 - terrain_stats_tpi

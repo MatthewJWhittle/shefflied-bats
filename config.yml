@@ -38,7 +38,8 @@ ev_stack:
       - ceh_landcover
       - os_cover_water
       - vom_vegetation_height
-    windows_cells: [10, 20, 30]
+    # 500 m only (#72): 1000/1500 m copies were highly collinear with 500 m.
+    windows_cells: [10]
     resolution_m: 100
   layer_clipping:
     enabled: true

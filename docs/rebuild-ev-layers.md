@@ -81,8 +81,8 @@ Execution order (registry / `--skip` names for steps 1–8; model stack always f
 
 Configured under `ev_stack` in `config.yml` and copied into `rebuild_metrics.json` as `build_settings`:
 
-- Selected variables: `data/ev_clusters_selected.csv` (`include == 1`)
-- Multiscale groups: `ceh_landcover`, `os_cover_water`, `vom_vegetation_height` at windows 10/20/30 cells (500/1000/1500 m at 100 m resolution). CEH 500/1000/1500 m neighbourhood averages use the 1%-of-range rule following the architecture review.
+- Selected variables: `data/ev_clusters_selected.csv` (`include == 1`). Overlap thinning (#72): climate kept to mean temperature, seasonality (bio_4), annual precip and wind; distance to minor roads and building cover excluded (one building variable kept); VOM mean excluded; see [variable-overlap-thinning.md](modelling/variable-overlap-thinning.md).
+- Multiscale groups: `ceh_landcover`, `os_cover_water`, `vom_vegetation_height` at window **10 cells (500 m)** only (`ev_stack.multiscale.windows_cells`). The former 1000/1500 m copies were dropped as redundant (#72). CEH neighbourhood averages still use the 1%-of-range rule following the architecture review.
 - Layer clipping **ON** by default following the architecture review: coast / building / major-road distances 0–7000 m; curvature 5–95% quantiles. Disabling clipping is out of scope for #38. Concrete clip bounds (including resolved curvature 5%/95% values) are stored under `build_settings.layer_clipping.applied`.
 - Per-model feature lists: **18** `data/sdm_config/*/variables_config.yml` files (not 33).
 

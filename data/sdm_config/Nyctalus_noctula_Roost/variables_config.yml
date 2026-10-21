@@ -1,6 +1,5 @@
 variables:
 - terrain_dtm
-- os_distance_distance_to_minor_roads
 - vom_vegetation_height_max
 - ceh_landcover_coniferous_woodland
 - os_distance_distance_to_buildings
