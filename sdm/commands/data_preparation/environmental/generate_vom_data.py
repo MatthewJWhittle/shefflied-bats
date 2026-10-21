@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from typing import Optional
 
 import xarray as xr
 
@@ -18,12 +19,22 @@ async def fetch_and_process_vom_data(
     wcs_temp_storage: bool,
     wcs_download_resolution_m: int,
     max_concurrent_downloads: int,
-    summary_target_resolution_m: int
+    summary_target_resolution_m: int,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
+    live_download: bool = True,
 ) -> Path:
     """Core async logic for fetching and processing Vegetation Object Model (VOM) data."""
     
     boundary_gdf, model_transform, grid_bounds, spatial_config = load_boundary_and_transform(
-        boundary_path, buffer_distance=buffer_distance
+        boundary_path,
+        buffer_distance=buffer_distance,
+        clip_to_land=clip_to_land,
+        coastline_path=coastline_path,
+        coastline_cache_dir=coastline_cache_dir,
+        live_download=live_download,
     )
     model_crs = boundary_gdf.crs
     # model_resolution is the project's reference EV resolution, from spatial_config["resolution"]
@@ -96,7 +107,12 @@ def generate_vom_data(
     wcs_download_resolution_m: int = 10,
     max_concurrent_downloads: int = 5,
     summary_target_resolution_m: int = 100,
-    verbose: bool = False
+    verbose: bool = False,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
+    live_download: bool = True,
 ) -> Path:
     """
     Downloads Vegetation Object Model (VOM) data, summarises it to various metrics
@@ -113,6 +129,10 @@ def generate_vom_data(
         max_concurrent_downloads: Maximum concurrent WCS download requests.
         summary_target_resolution_m: Target resolution (meters) for VOM summary metrics.
         verbose: Enable verbose logging.
+        clip_to_land: Clip buffered extent to land (mean high water); see #78.
+        coastline_path: Optional explicit MHW / coastline path.
+        coastline_cache_dir: Optional Boundary-Line cache directory.
+        live_download: Allow live coastline download when clipping to land.
 
     Returns:
         Path to the generated VOM data file.
@@ -128,7 +148,11 @@ def generate_vom_data(
         wcs_temp_storage=wcs_temp_storage,
         wcs_download_resolution_m=wcs_download_resolution_m,
         max_concurrent_downloads=max_concurrent_downloads,
-        summary_target_resolution_m=summary_target_resolution_m
+        summary_target_resolution_m=summary_target_resolution_m,
+        clip_to_land=clip_to_land,
+        coastline_path=coastline_path,
+        coastline_cache_dir=coastline_cache_dir,
+        live_download=live_download,
     ))
     logging.info("VOM data generation workflow finished.")
     return result 

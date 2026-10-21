@@ -94,7 +94,8 @@ def test_generate_ceh_lc_data_integration(
             ceh_data_path=ceh_data_path,
             buffer_distance_m=100,  # Small buffer for testing
             output_resolution_m=100,
-            verbose=False
+            verbose=False,
+            clip_to_land=False,
         )
     
     # Verify output file was created
@@ -134,7 +135,8 @@ def test_generate_ceh_lc_data_with_missing_boundary(tmp_path, sample_ceh_raster)
         generate_ceh_lc_data(
             output_dir=output_dir,
             boundary_path=boundary_path,
-            ceh_data_path=ceh_data_path
+            ceh_data_path=ceh_data_path,
+            clip_to_land=False,
         )
 
 
@@ -150,7 +152,8 @@ def test_generate_ceh_lc_data_with_missing_ceh_data(tmp_path, sample_boundary):
         generate_ceh_lc_data(
             output_dir=output_dir,
             boundary_path=boundary_path,
-            ceh_data_path=ceh_data_path
+            ceh_data_path=ceh_data_path,
+            clip_to_land=False,
         )
 
 
@@ -182,7 +185,8 @@ def test_generate_ceh_lc_data_different_resolutions(
             boundary_path=boundary_path,
             ceh_data_path=ceh_data_path,
             output_resolution_m=resolution,
-            verbose=False
+            verbose=False,
+            clip_to_land=False,
         )
         
         # Verify output file naming
@@ -215,7 +219,8 @@ def test_generate_ceh_lc_data_output_structure(
             boundary_path=boundary_path,
             ceh_data_path=ceh_data_path,
             output_resolution_m=100,
-            verbose=False
+            verbose=False,
+            clip_to_land=False,
         )
     
     # Load and examine the output
@@ -371,6 +376,7 @@ def test_e2e_landcover_step_matches_single_pass_with_neighbourhood(
             output_resolution_m=100,
             coarsen_method="full",
             verbose=False,
+            clip_to_land=False,
         )
         dask_path = generate_ceh_lc_data(
             output_dir=tmp_path / "dask",
@@ -381,6 +387,7 @@ def test_e2e_landcover_step_matches_single_pass_with_neighbourhood(
             chunks=odd_chunks,
             coarsen_method="dask",
             verbose=False,
+            clip_to_land=False,
         )
 
     baseline = _landcover_step_with_neighbourhood(baseline_path)
@@ -503,6 +510,7 @@ def test_generate_ceh_lc_data_selects_class_band_from_two_band_lcm(
             output_resolution_m=100,
             coarsen_method="full",
             verbose=False,
+            clip_to_land=False,
         )
 
     assert result_path.exists()

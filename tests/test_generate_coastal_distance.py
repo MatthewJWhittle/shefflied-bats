@@ -227,11 +227,22 @@ class TestGenerateCoastalDistance:
         mock_squeeze.assert_called_once()
         # Note: to_raster call is verified by the function completing successfully
     
+    @patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.load_boundary_and_transform')
     @patch('sdm.commands.data_preparation.spatial.generate_coastal_distance.resolve_coastline_source')
     def test_generate_coastal_distance_file_not_found(
-        self, mock_resolve, temp_boundary_file, tmp_path
+        self, mock_resolve, mock_load_boundary, temp_boundary_file, tmp_path
     ):
         """Test error handling when coast file doesn't exist."""
+        mock_boundary = gpd.GeoDataFrame(
+            {"geometry": [Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])]},
+            crs="EPSG:27700",
+        )
+        mock_load_boundary.return_value = (
+            mock_boundary,
+            Mock(),
+            (0, 0, 100, 100),
+            {"resolution": 10.0},
+        )
         mock_resolve.side_effect = FileNotFoundError("No coastline source found")
         with pytest.raises(FileNotFoundError):
             generate_coastal_distance(

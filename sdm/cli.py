@@ -40,6 +40,7 @@ def setup(
         target_crs=PROJECT_CONFIG.crs,
         simplify_tolerance=100.0,
         live_download=live_download,
+        clip_to_land=True,
     )
     
     boundary_path.parent.mkdir(parents=True, exist_ok=True)

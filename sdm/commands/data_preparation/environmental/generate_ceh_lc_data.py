@@ -182,6 +182,11 @@ def generate_ceh_lc_data(
     chunks: Optional[Mapping[str, int]] = None,
     coarsen_method: str = "dask",
     window_pixels: Optional[int] = None,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
+    live_download: bool = True,
 ) -> Path:
     """
     Process CEH land cover data based on a given boundary.
@@ -196,6 +201,10 @@ def generate_ceh_lc_data(
         chunks: Dask chunk sizes when ``coarsen_method="dask"``
         coarsen_method: ``"dask"`` (default) or ``"full"`` (legacy)
         window_pixels: Deprecated alias for square chunk size
+        clip_to_land: After buffering, clip seaward of mean high water (#78)
+        coastline_path: Optional explicit MHW / coastline path for land clip
+        coastline_cache_dir: Optional Boundary-Line cache directory
+        live_download: Allow live coastline download when clipping to land
 
     Returns:
         Path to the output file
@@ -222,10 +231,23 @@ def generate_ceh_lc_data(
         land_cover = rxr.open_rasterio(ceh_data_path, chunks=open_chunks)
 
     logging.info("Loading boundary from %s", boundary_path)
-    boundary = load_boundary(
-        boundary_path, buffer_distance=0, target_crs=land_cover.rio.crs
-    )
-    boundary["geometry"] = boundary.geometry.buffer(buffer_distance_m)
+    target_crs = land_cover.rio.crs
+    if clip_to_land:
+        from sdm.data.land_clip import load_boundary_land_clipped
+
+        boundary = load_boundary_land_clipped(
+            boundary_path,
+            coastline_path=coastline_path,
+            buffer_distance=buffer_distance_m,
+            target_crs=target_crs,
+            cache_dir=coastline_cache_dir,
+            live_download=live_download,
+        )
+    else:
+        boundary = load_boundary(
+            boundary_path, buffer_distance=0, target_crs=target_crs
+        )
+        boundary["geometry"] = boundary.geometry.buffer(buffer_distance_m)
 
     logging.info("Clipping land cover to boundary")
     land_cover = land_cover.rio.clip_box(*boundary.total_bounds, crs=land_cover.rio.crs)

@@ -25,6 +25,9 @@ def process_os_data(
     raw_dir: Optional[Path] = None,
     overwrite_cache: bool = False,
     live_download: bool = True,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
 ) -> Tuple[Path, Path]:
     """Process Ordnance Survey data to generate environmental variables.
 
@@ -42,6 +45,9 @@ def process_os_data(
         raw_dir: Directory for OS Vector Map shapefile tiles.
         overwrite_cache: Rebuild parquets even when cached files exist.
         live_download: Download missing OS tiles when needed.
+        clip_to_land: After buffering, clip seaward of mean high water (#78).
+        coastline_path: Optional explicit MHW / coastline path for land clip.
+        coastline_cache_dir: Optional Boundary-Line cache directory.
 
     Returns:
         Tuple containing:
@@ -60,9 +66,21 @@ def process_os_data(
     logging.info("Output directory: %s", output_dir)
 
     logging.info("Loading boundary from %s with %dm buffer", boundary_path, buffer_distance)
-    boundary = load_boundary(
-        boundary_path, buffer_distance=buffer_distance, target_crs="EPSG:27700"
-    )
+    if clip_to_land:
+        from sdm.data.land_clip import load_boundary_land_clipped
+
+        boundary = load_boundary_land_clipped(
+            boundary_path,
+            coastline_path=coastline_path,
+            buffer_distance=buffer_distance,
+            target_crs="EPSG:27700",
+            cache_dir=coastline_cache_dir,
+            live_download=live_download,
+        )
+    else:
+        boundary = load_boundary(
+            boundary_path, buffer_distance=buffer_distance, target_crs="EPSG:27700"
+        )
     
     logging.info("Loading spatial configuration")
     spatial_config = load_spatial_config()

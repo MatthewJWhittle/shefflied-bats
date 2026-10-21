@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 
 from sdm.utils.logging_utils import setup_logging
@@ -19,7 +19,12 @@ def generate_climate_data(
     boundary_path: Path,
     worldclim_cache_dir: Path,
     run_stats: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
+    live_download: bool = True,
 ) -> Dict[str, Path]:
     """
     Downloads, processes, and saves WorldClim climate data layers.
@@ -38,6 +43,10 @@ def generate_climate_data(
         worldclim_cache_dir: Directory to cache downloaded WorldClim files.
         run_stats: Calculate and log basic statistics for downloaded variables.
         verbose: Enable verbose logging.
+        clip_to_land: Clip buffered extent to land (mean high water); see #78.
+        coastline_path: Optional explicit MHW / coastline path.
+        coastline_cache_dir: Optional Boundary-Line cache directory.
+        live_download: Allow live coastline download when clipping to land.
 
     Returns:
         Dictionary mapping variable names to their output file paths.
@@ -52,7 +61,13 @@ def generate_climate_data(
     # Load boundary and spatial parameters (CRS, transform, resolution)
     try:
         boundary_gdf, model_transform, grid_bounds, spatial_config = (
-            load_boundary_and_transform(boundary_path)
+            load_boundary_and_transform(
+                boundary_path,
+                clip_to_land=clip_to_land,
+                coastline_path=coastline_path,
+                coastline_cache_dir=coastline_cache_dir,
+                live_download=live_download,
+            )
         )
     except FileNotFoundError:
         logging.error("Boundary file not found at: %s. Cannot proceed.", boundary_path)

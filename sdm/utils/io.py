@@ -301,16 +301,41 @@ def load_tuning_configs(
 def load_boundary_and_transform(
         boundary_path: Union[str, Path],
         buffer_distance: Union[float, int] = 7000,
+        *,
+        clip_to_land: bool = True,
+        coastline_path: Optional[Path] = None,
+        coastline_cache_dir: Optional[Path] = None,
+        live_download: bool = True,
 ) -> Tuple[gpd.GeoDataFrame, Affine, tuple, Dict]:
     """
     Load the boundary and construct the model transform.
+
+    When ``clip_to_land`` is True (default), the boundary is buffered then
+    clipped to the landward side of mean high water so seaward expansion into
+    the sea / Humber is not part of the modelling grid (#78).
+
     Returns: Tuple[gpd.GeoDataFrame, Affine, tuple, Dict]
     """
     spatial_config = load_spatial_config()
-    boundary = load_boundary(
-        boundary_path, buffer_distance=buffer_distance, target_crs=spatial_config["crs"]
-    )
-    
+    target_crs = spatial_config["crs"]
+    if clip_to_land:
+        from sdm.data.land_clip import load_boundary_land_clipped
+
+        boundary = load_boundary_land_clipped(
+            boundary_path,
+            coastline_path=Path(coastline_path) if coastline_path is not None else None,
+            buffer_distance=float(buffer_distance),
+            target_crs=target_crs,
+            cache_dir=(
+                Path(coastline_cache_dir) if coastline_cache_dir is not None else None
+            ),
+            live_download=live_download,
+        )
+    else:
+        boundary = load_boundary(
+            boundary_path, buffer_distance=buffer_distance, target_crs=target_crs
+        )
+
     model_transform, bounds = construct_transform_shift_bounds(
         tuple(boundary.total_bounds), spatial_config["resolution"]
     )

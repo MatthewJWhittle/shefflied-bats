@@ -172,15 +172,23 @@ def load_mean_high_water_polylines(
     clip_bbox: Optional[Tuple[float, float, float, float]] = None,
     simplify_tolerance_m: Optional[float] = None,
 ) -> gpd.GeoDataFrame:
-    """Load and optionally clip/simplify Boundary-Line MHW polylines."""
-    gdf = gpd.read_file(shapefile_path)
+    """Load and optionally clip/simplify Boundary-Line MHW polylines.
+
+    When ``clip_bbox`` is set it is passed to ``geopandas.read_file`` so the
+    GB-wide Boundary-Line extract is not loaded in full.
+    """
+    read_kwargs = {}
+    if clip_bbox is not None:
+        read_kwargs["bbox"] = tuple(clip_bbox)
+    gdf = gpd.read_file(shapefile_path, **read_kwargs)
     gdf = filter_mean_high_water(gdf)
 
     if target_crs is not None:
         gdf = gdf.to_crs(target_crs)
 
-    if clip_bbox is not None:
+    if clip_bbox is not None and not gdf.empty:
         minx, miny, maxx, maxy = clip_bbox
+        # Re-apply after reprojection when the on-disk CRS differed from target.
         gdf = gdf.cx[minx:maxx, miny:maxy]
 
     if simplify_tolerance_m is not None and simplify_tolerance_m > 0:

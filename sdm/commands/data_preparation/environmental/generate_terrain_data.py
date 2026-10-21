@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from typing import Optional
 
 import xarray as xr
 
@@ -16,7 +17,12 @@ async def fetch_and_process_terrain_data(
     wcs_tile_pixels: tuple[int,int],
     wcs_temp_storage: bool,
     target_resolution_m: int, # Target resolution for WCS GetCoverage call
-    max_concurrent_downloads: int
+    max_concurrent_downloads: int,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
+    live_download: bool = True,
 ) -> Path:
     """Core async logic for fetching and processing terrain data."""
     
@@ -24,7 +30,12 @@ async def fetch_and_process_terrain_data(
     # load_boundary_and_transform gives boundary_gdf, model_transform, grid_bounds, spatial_config
     # spatial_config contains the model's reference resolution and CRS
     boundary_gdf, model_transform, grid_bounds, spatial_config = load_boundary_and_transform(
-        boundary_path, buffer_distance=buffer_distance
+        boundary_path,
+        buffer_distance=buffer_distance,
+        clip_to_land=clip_to_land,
+        coastline_path=coastline_path,
+        coastline_cache_dir=coastline_cache_dir,
+        live_download=live_download,
     )
     model_crs = boundary_gdf.crs
     model_resolution = spatial_config["resolution"] # This is the project's target resolution for EVs
@@ -102,7 +113,12 @@ def generate_terrain_data(
     wcs_temp_storage: bool = True,
     wcs_download_resolution_m: int = 10,
     max_concurrent_downloads: int = 10,
-    verbose: bool = False
+    verbose: bool = False,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
+    live_download: bool = True,
 ) -> Path:
     """
     Downloads and processes DTM and DSM terrain data from EA WCS services.
@@ -125,6 +141,10 @@ def generate_terrain_data(
         wcs_download_resolution_m: Target resolution in meters for initial WCS GetCoverage download.
         max_concurrent_downloads: Maximum concurrent WCS download requests.
         verbose: Enable verbose logging.
+        clip_to_land: Clip buffered extent to land (mean high water); see #78.
+        coastline_path: Optional explicit MHW / coastline path.
+        coastline_cache_dir: Optional Boundary-Line cache directory.
+        live_download: Allow live coastline download when clipping to land.
 
     Returns:
         Path to the generated terrain data file.
@@ -139,7 +159,11 @@ def generate_terrain_data(
         wcs_tile_pixels=(wcs_tile_width_px, wcs_tile_height_px),
         wcs_temp_storage=wcs_temp_storage,
         target_resolution_m=wcs_download_resolution_m,
-        max_concurrent_downloads=max_concurrent_downloads
+        max_concurrent_downloads=max_concurrent_downloads,
+        clip_to_land=clip_to_land,
+        coastline_path=coastline_path,
+        coastline_cache_dir=coastline_cache_dir,
+        live_download=live_download,
     ))
     logging.info("Terrain data generation workflow finished.")
     return result 

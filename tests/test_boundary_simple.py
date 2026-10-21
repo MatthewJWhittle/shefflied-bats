@@ -25,6 +25,7 @@ class TestCreateBoundary:
                     counties_file=non_existent_file,
                     county_names=["Test County"],
                     live_download=False,
+                    clip_to_land=False,
                 )
     
     def test_yorkshire_default(self):
@@ -42,7 +43,11 @@ class TestCreateBoundary:
         
         with patch("sdm.data.spatial.core.resolve_counties_file", return_value=mock_file):
             with patch('geopandas.read_file', return_value=mock_gdf):
-                result = create_boundary(counties_file=mock_file, live_download=False)
+                result = create_boundary(
+                    counties_file=mock_file,
+                    live_download=False,
+                    clip_to_land=False,
+                )
         
         assert len(result) == 1  # Dissolved into single boundary
         assert 'geometry' in result.columns
@@ -64,7 +69,8 @@ class TestCreateBoundary:
             with patch('geopandas.read_file', return_value=mock_gdf):
                 result = create_boundary(
                     counties_file=mock_file,
-                    county_names=["County1", "County2"]
+                    county_names=["County1", "County2"],
+                    clip_to_land=False,
                 )
         
         assert len(result) == 1  # Dissolved into single boundary
@@ -88,4 +94,5 @@ class TestCreateBoundary:
                         counties_file=mock_file,
                         county_names=["NonExistentCounty"],
                         live_download=False,
+                        clip_to_land=False,
                     )

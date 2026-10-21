@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import xarray as xr
 import rioxarray as rxr
@@ -208,7 +208,12 @@ def merge_ev_layers(
     output_path: Path = Path("data/evs/merged_environmental_variables.tif"),
     boundary_path: Path = Path("data/processed/boundary.geojson"),
     boundary_buffer_m: float = 7000,
-    verbose: bool = False
+    verbose: bool = False,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
+    live_download: bool = True,
 ) -> None:
     """
     Core function to merge multiple raster datasets into a single multi-band GeoTIFF file.
@@ -220,6 +225,10 @@ def merge_ev_layers(
         boundary_path: Path to the boundary file for clipping the final merged layer
         boundary_buffer_m: Buffer (meters) for the boundary before final clipping
         verbose: Enable verbose logging
+        clip_to_land: Clip buffered extent to land (mean high water); see #78
+        coastline_path: Optional explicit MHW / coastline path
+        coastline_cache_dir: Optional Boundary-Line cache directory
+        live_download: Allow live coastline download when clipping to land
     """
     setup_logging(verbose=verbose)
     
@@ -243,7 +252,12 @@ def merge_ev_layers(
 
     # Load boundary and project's spatial parameters for reprojection and final clipping
     boundary_gdf, model_transform, grid_bounds, spatial_config = load_boundary_and_transform(
-        boundary_path, buffer_distance=boundary_buffer_m
+        boundary_path,
+        buffer_distance=boundary_buffer_m,
+        clip_to_land=clip_to_land,
+        coastline_path=coastline_path,
+        coastline_cache_dir=coastline_cache_dir,
+        live_download=live_download,
     )
     target_crs = boundary_gdf.crs
     target_resolution = spatial_config["resolution"]

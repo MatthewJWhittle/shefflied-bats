@@ -96,7 +96,8 @@ class TestTerrainDataWorkflow:
                 boundary_path=temp_boundary_file,
                 wcs_download_resolution_m=10,
                 max_concurrent_downloads=1,  # Use minimal concurrency for testing
-                verbose=False
+                verbose=False,
+                clip_to_land=False,
             )
             
             # Verify output directory was created
@@ -168,7 +169,8 @@ class TestTerrainDataWorkflow:
                 wcs_temp_storage=False,
                 wcs_download_resolution_m=5,
                 max_concurrent_downloads=2,
-                verbose=True
+                verbose=True,
+                clip_to_land=False,
             )
             
             # Verify the result
@@ -192,7 +194,8 @@ class TestTerrainDataWorkflow:
         with pytest.raises(Exception):  # Could be FileNotFoundError or DataSourceError
             generate_terrain_data(
                 output_dir=tmp_path / "output",
-                boundary_path=Path("nonexistent_file.geojson")
+                boundary_path=Path("nonexistent_file.geojson"),
+                clip_to_land=False,
             )
     
     def test_terrain_data_processing_pipeline(self, temp_boundary_file, tmp_path):
@@ -253,7 +256,8 @@ class TestTerrainDataWorkflow:
                 boundary_path=temp_boundary_file,
                 wcs_download_resolution_m=10,
                 max_concurrent_downloads=1,
-                verbose=False
+                verbose=False,
+                clip_to_land=False,
             )
             
             # Verify the output file was created and contains expected data
@@ -312,7 +316,8 @@ class TestTerrainDataRealWCS:
             wcs_temp_storage=True,
             wcs_download_resolution_m=10,  # 10m resolution
             max_concurrent_downloads=1,    # Single download for testing
-            verbose=True
+            verbose=True,
+            clip_to_land=False,
         )
         
         # Verify the output file was created

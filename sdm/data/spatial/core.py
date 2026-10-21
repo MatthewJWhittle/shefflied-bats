@@ -22,9 +22,17 @@ def create_boundary(
     target_crs: str = "EPSG:27700",
     simplify_tolerance: Optional[float] = 100.0,
     live_download: bool = True,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
+    coastline_cache_dir: Optional[Path] = None,
 ) -> gpd.GeoDataFrame:
     """
     Create a boundary from UK counties. If no counties specified, creates Yorkshire boundary.
+
+    When ``clip_to_land`` is True (default), the dissolved counties are clipped
+    to the landward side of mean high water so estuary / sea remnants are not
+    retained in the study boundary (#78).
     
     Args:
         counties_file: Path to the UK counties GeoJSON file (optional; live/manual fallback)
@@ -32,6 +40,9 @@ def create_boundary(
         target_crs: Target CRS for the output boundary
         simplify_tolerance: Simplification tolerance in meters (None for no simplification)
         live_download: When True, fetch ONS boundaries from the Open Geography Portal if needed
+        clip_to_land: Clip the dissolved boundary to land using MHW
+        coastline_path: Optional explicit MHW / coastline path
+        coastline_cache_dir: Optional Boundary-Line cache directory
         
     Returns:
         GeoDataFrame with the study boundary
@@ -69,8 +80,20 @@ def create_boundary(
     logger.info("Dissolving all geometries into single boundary")
     dissolved = study_area.dissolve()
     dissolved = dissolved[["geometry"]]
+
+    if clip_to_land:
+        from sdm.data.land_clip import clip_boundary_to_land, load_mhw_for_boundary
+
+        logger.info("Clipping study boundary to land (mean high water)")
+        mhw = load_mhw_for_boundary(
+            dissolved,
+            coastline_path=coastline_path,
+            cache_dir=coastline_cache_dir,
+            live_download=live_download,
+        )
+        dissolved = clip_boundary_to_land(dissolved, mhw, land_gdf=dissolved)
     
-    logger.info(f"Created boundary with 1 feature")
+    logger.info(f"Created boundary with {len(dissolved)} feature(s)")
     return dissolved
 
 

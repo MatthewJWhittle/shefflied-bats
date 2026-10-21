@@ -35,6 +35,10 @@ sdm data -o data/evs-rebuild --cache-dir /tmp/evs-cache --fresh
 
 This is the single documented entry point that rebuilds every environmental layer from the public/live sources wired in the data-prep modules, merges them to `<folder>/all-evs.tif`, then builds `<folder>/evs-to-model.tif` (rename → layer clipping → selected subset → multiscale neighbourhoods).
 
+### Study-area land clip (#78)
+
+Layer builders buffer the study boundary (default 7 km) for neighbourhood / distance edge effects, then **clip the buffered extent to land** using OS Boundary-Line mean high water (CODE 0071). That keeps the inland buffer while dropping seaward cells over the North Sea and Humber estuary. The same land clip applies when creating the study boundary (`sdm setup`). Re-run `sdm setup` and a full `sdm data` rebuild into a **separate** output folder after pulling this change; do not overwrite the live EV set.
+
 ## Ordered steps
 
 ```mermaid

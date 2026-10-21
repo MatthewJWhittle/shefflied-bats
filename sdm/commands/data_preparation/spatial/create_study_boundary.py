@@ -13,10 +13,16 @@ def create_study_boundary_wrapper(
     target_crs: str = "EPSG:27700",
     simplify_tolerance: Optional[float] = 100.0,
     live_download: bool = True,
-    verbose: bool = False
+    verbose: bool = False,
+    *,
+    clip_to_land: bool = True,
+    coastline_path: Optional[Path] = None,
 ) -> Path:
     """
     Creates the study area boundary GeoJSON file.
+
+    By default the dissolved counties are clipped to land (mean high water)
+    so sea / Humber cells are not retained (#78).
     """
     setup_logging(verbose=verbose)
     
@@ -26,6 +32,8 @@ def create_study_boundary_wrapper(
         target_crs=target_crs,
         simplify_tolerance=simplify_tolerance,
         live_download=live_download,
+        clip_to_land=clip_to_land,
+        coastline_path=coastline_path,
     )
 
     output_geojson.parent.mkdir(parents=True, exist_ok=True)

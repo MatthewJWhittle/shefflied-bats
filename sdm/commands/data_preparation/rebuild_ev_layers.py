@@ -139,6 +139,9 @@ def rebuild_environmental_layers(
         recorder.run(recorder_key, fn)
 
     try:
+        # Land clip (#78): buffered extents are clipped to mean high water so
+        # sea / Humber cells are not part of the modelling grid. Coastline is
+        # shared with the coastal-distance step via the Boundary-Line cache.
         _run_or_skip(
             "terrain",
             "generate_terrain_data",
@@ -147,6 +150,9 @@ def rebuild_environmental_layers(
                 boundary_path=boundary_path,
                 buffer_distance_m=buffer_distance_m,
                 verbose=verbose,
+                coastline_path=coastline_path,
+                coastline_cache_dir=caches["boundary_line"],
+                live_download=live_download,
             ),
         )
 
@@ -169,6 +175,9 @@ def rebuild_environmental_layers(
                 worldclim_cache_dir=caches["worldclim"],
                 run_stats=True,
                 verbose=verbose,
+                coastline_path=coastline_path,
+                coastline_cache_dir=caches["boundary_line"],
+                live_download=live_download,
             ),
         )
 
@@ -180,6 +189,9 @@ def rebuild_environmental_layers(
                 boundary_path=boundary_path,
                 ceh_data_path=ceh_data_path,
                 verbose=verbose,
+                coastline_path=coastline_path,
+                coastline_cache_dir=caches["boundary_line"],
+                live_download=live_download,
             ),
         )
 
@@ -191,6 +203,9 @@ def rebuild_environmental_layers(
                 boundary_path=boundary_path,
                 buffer_distance_m=buffer_distance_m,
                 verbose=verbose,
+                coastline_path=coastline_path,
+                coastline_cache_dir=caches["boundary_line"],
+                live_download=live_download,
             ),
         )
 
@@ -219,6 +234,8 @@ def rebuild_environmental_layers(
                 raw_dir=caches["os_raw"],
                 overwrite_cache=fresh,
                 live_download=live_download,
+                coastline_path=coastline_path,
+                coastline_cache_dir=caches["boundary_line"],
                 verbose=verbose,
             ),
         )
@@ -244,6 +261,9 @@ def rebuild_environmental_layers(
                 output_path=merged_output,
                 boundary_buffer_m=buffer_distance_m,
                 verbose=verbose,
+                coastline_path=coastline_path,
+                coastline_cache_dir=caches["boundary_line"],
+                live_download=live_download,
             ),
         )
 

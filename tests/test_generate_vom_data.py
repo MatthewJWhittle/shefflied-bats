@@ -79,7 +79,8 @@ class TestVomDataWorkflow:
                 wcs_download_resolution_m=10,
                 summary_target_resolution_m=100,
                 max_concurrent_downloads=1,  # Use minimal concurrency for testing
-                verbose=False
+                verbose=False,
+                clip_to_land=False,
             )
             
             # Verify output directory was created
@@ -132,7 +133,8 @@ class TestVomDataWorkflow:
                 wcs_download_resolution_m=5,
                 max_concurrent_downloads=2,
                 summary_target_resolution_m=50,
-                verbose=True
+                verbose=True,
+                clip_to_land=False,
             )
             
             # Verify the result
@@ -155,7 +157,8 @@ class TestVomDataWorkflow:
         with pytest.raises(Exception):  # Could be FileNotFoundError or DataSourceError
             generate_vom_data(
                 output_dir=tmp_path / "output",
-                boundary_path=Path("nonexistent_file.geojson")
+                boundary_path=Path("nonexistent_file.geojson"),
+                clip_to_land=False,
             )
     
     def test_vom_data_processing_pipeline(self, temp_boundary_file, tmp_path):
@@ -196,7 +199,8 @@ class TestVomDataWorkflow:
                 wcs_download_resolution_m=10,
                 summary_target_resolution_m=100,
                 max_concurrent_downloads=1,
-                verbose=False
+                verbose=False,
+                clip_to_land=False,
             )
             
             # Verify the output file was created and contains expected data
@@ -256,7 +260,8 @@ class TestVomDataRealWCS:
             wcs_download_resolution_m=10,  # 10m resolution
             max_concurrent_downloads=1,    # Single download for testing
             summary_target_resolution_m=100,  # Coarse summary
-            verbose=True
+            verbose=True,
+            clip_to_land=False,
         )
         
         # Verify the output file was created

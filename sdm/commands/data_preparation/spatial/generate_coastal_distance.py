@@ -162,8 +162,15 @@ def generate_coastal_distance(
 
     explicit_path = coastline_path or bgs_geocoast_shp_path
 
+    coast_cache = cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR
     boundary_gdf, model_transform, grid_bounds, spatial_config = (
-        load_boundary_and_transform(boundary_path)
+        load_boundary_and_transform(
+            boundary_path,
+            clip_to_land=True,
+            coastline_path=explicit_path,
+            coastline_cache_dir=coast_cache,
+            live_download=live_download,
+        )
     )
     model_crs = boundary_gdf.crs
     model_resolution = spatial_config["resolution"]
@@ -171,7 +178,7 @@ def generate_coastal_distance(
 
     coast_path, source_kind = resolve_coastline_source(
         explicit_path,
-        cache_dir=cache_dir if cache_dir is not None else DEFAULT_CACHE_DIR,
+        cache_dir=coast_cache,
         live_download=live_download,
         overwrite=overwrite_cache,
         fallback_bbox=boundary_bounds,

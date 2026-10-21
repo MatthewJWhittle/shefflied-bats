@@ -182,6 +182,7 @@ def test_create_boundary_uses_manual_file_without_live_download(tmp_path: Path) 
                 counties_file=manual,
                 county_names=["Sheffield"],
                 live_download=False,
+                clip_to_land=False,
             )
 
     assert len(result) == 1
