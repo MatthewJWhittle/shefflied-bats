@@ -35,9 +35,70 @@ def test_resolve_active_steps_skip_and_only() -> None:
     assert "ceh" not in active
     assert "coastal" not in active
     assert "merge" in active
+    assert "alan" in active
     assert resolve_active_steps(only=["merge"]) == frozenset({"merge"})
+    assert resolve_active_steps(only=["alan"]) == frozenset({"alan"})
     with pytest.raises(ValueError, match="only one"):
         resolve_active_steps(skip=["ceh"], only=["merge"])
+
+
+def test_rebuild_alan_auto_skips_without_source(tmp_path, monkeypatch):
+    """Missing VIIRS source skips alan and omits it from merge inputs."""
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "evs-rebuild"
+    captured_inputs: dict = {}
+    alan_calls: list = []
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    def _alan(*_args, **_kwargs):
+        alan_calls.append(True)
+        return out / "alan_viirs_radiance.tif"
+
+    def _capture_inputs(*args, **kwargs):
+        captured_inputs["kwargs"] = kwargs
+        return ["terrain=x.tif"]
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    for name in (
+        "generate_terrain_data",
+        "generate_terrain_stats",
+        "generate_climate_data",
+        "generate_ceh_lc_data",
+        "generate_vom_data",
+        "generate_coastal_distance",
+        "process_os_data",
+        "merge_ev_layers",
+    ):
+        monkeypatch.setattr(mod, name, _ok)
+    monkeypatch.setattr(mod, "generate_alan_data", _alan)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", _capture_inputs)
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+    missing = tmp_path / "no-viirs.tif"
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        alan_source_path=missing,
+    )
+    assert alan_calls == []
+    assert captured_inputs.get("kwargs", {}).get("skip_alan") is True
 
 
 def test_cli_skip_ceh_coastal_reaches_rebuild(tmp_path: Path) -> None:

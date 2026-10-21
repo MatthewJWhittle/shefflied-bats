@@ -6,6 +6,9 @@ import logging
 from pathlib import Path
 from typing import Iterable
 
+from sdm.commands.data_preparation.environmental.generate_alan_data import (
+    generate_alan_data,
+)
 from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import (
     generate_ceh_lc_data,
 )
@@ -21,6 +24,7 @@ from sdm.commands.data_preparation.environmental.generate_terrain_stats import (
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
     generate_vom_data,
 )
+from sdm.data.alan import ALAN_OUTPUT_NAME, DEFAULT_ALAN_SOURCE_PATH
 from sdm.commands.data_preparation.processing.build_model_ev_stack import (
     build_model_ev_stack,
     build_settings_from_config,
@@ -77,6 +81,7 @@ def rebuild_environmental_layers(
     fresh: bool = False,
     ceh_data_path: Path = DEFAULT_CEH_PATH,
     coastline_path: Path | None = None,
+    alan_source_path: Path | None = None,
     buffer_distance_m: float = 0,
     config_evs: str | Path | None = None,
     config_ev_tiff: str | Path | None = None,
@@ -224,13 +229,48 @@ def rebuild_environmental_layers(
             ),
         )
 
+        alan_source = (
+            Path(alan_source_path)
+            if alan_source_path is not None
+            else DEFAULT_ALAN_SOURCE_PATH
+        )
+        alan_output = evs_dir / ALAN_OUTPUT_NAME
+        only_set = frozenset(only)
+        if "alan" in active:
+            if alan_source.exists():
+                recorder.run(
+                    "generate_alan_data",
+                    lambda: generate_alan_data(
+                        output_dir=evs_dir,
+                        boundary_path=boundary_path,
+                        alan_source_path=alan_source,
+                        buffer_distance_m=buffer_distance_m,
+                        verbose=verbose,
+                    ),
+                )
+            elif only_set and "alan" in only_set:
+                raise FileNotFoundError(
+                    f"ALAN source not found at {alan_source}. Place a yearly "
+                    "VIIRS night-lights GeoTIFF there (not in git) or pass "
+                    "alan_source_path."
+                )
+            else:
+                logging.warning(
+                    "Skipping alan: no VIIRS source at %s (use --skip alan to "
+                    "silence, or place the file to build the layer)",
+                    alan_source,
+                )
+
         # Omit CEH/coastal from merge only when explicitly ``--skip``'d.
         # ``--only merge`` leaves those steps inactive for generation but must
         # still consume existing outputs in the folder (otherwise all-evs.tif
         # is rewritten without them and the model stack KeyErrors).
+        # ALAN is omitted when explicitly skipped or when the output is absent
+        # (auto-skip when the local VIIRS source has not been supplied yet).
         explicit_skip = frozenset(skip)
         skip_ceh = "ceh" in explicit_skip
         skip_coastal = "coastal" in explicit_skip
+        skip_alan = "alan" in explicit_skip or not alan_output.exists()
         _run_or_skip(
             "merge",
             "merge_ev_layers",
@@ -240,6 +280,7 @@ def rebuild_environmental_layers(
                     resolution,
                     skip_ceh=skip_ceh,
                     skip_coastal=skip_coastal,
+                    skip_alan=skip_alan,
                 ),
                 boundary_path=boundary_path,
                 output_path=merged_output,

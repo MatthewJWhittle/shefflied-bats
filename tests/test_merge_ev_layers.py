@@ -23,16 +23,18 @@ class TestBuildEvDatasetInputs:
         inputs = build_ev_dataset_inputs(evs_dir, resolution=100)
         parsed = parse_dataset_input(inputs)
 
-        assert len(parsed) == 9
+        assert len(parsed) == 10
         assert "ceh_landcover" in parsed
         assert "bgs_coast" in parsed
         assert "terrain" in parsed
         assert "climate_stats" in parsed
         assert "climate_bioclim" in parsed
+        assert "alan" in parsed
         assert parsed["vom_vegetation_height"] == (
             evs_dir / "vom" / "vom_summary_metrics_100m.tif"
         )
         assert parsed["terrain"] == evs_dir / "terrain" / "dtm_dsm_100m.tif"
+        assert parsed["alan"] == evs_dir / "alan_viirs_radiance.tif"
 
     def test_build_ev_dataset_inputs_skip_ceh_and_coastal(self):
         evs_dir = Path("data/evs")
@@ -40,11 +42,12 @@ class TestBuildEvDatasetInputs:
             evs_dir, resolution=100, skip_ceh=True, skip_coastal=True
         )
         parsed = parse_dataset_input(inputs)
-        assert len(parsed) == 7
+        assert len(parsed) == 8
         assert "ceh_landcover" not in parsed
         assert "bgs_coast" not in parsed
         assert "landcover" not in parsed
         assert "coastal" not in parsed
+        assert "alan" in parsed
         for name, path in parsed.items():
             assert path.suffix == ".tif", f"{name} should point to a GeoTIFF, got {path}"
 
@@ -52,6 +55,13 @@ class TestBuildEvDatasetInputs:
             evs_dir / "vom" / "vom_summary_metrics_100m.tif"
         )
         assert parsed["climate_bioclim"] == evs_dir / "climate" / "bio.tif"
+
+    def test_build_ev_dataset_inputs_skip_alan(self):
+        evs_dir = Path("data/evs")
+        inputs = build_ev_dataset_inputs(evs_dir, resolution=100, skip_alan=True)
+        parsed = parse_dataset_input(inputs)
+        assert "alan" not in parsed
+        assert len(parsed) == 9
 
 
 class TestParseDatasetInput:

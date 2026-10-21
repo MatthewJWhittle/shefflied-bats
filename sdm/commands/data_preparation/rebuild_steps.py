@@ -36,6 +36,11 @@ REBUILD_STEPS: tuple[RebuildStep, ...] = (
         "process_os_data",
         "OS Vector Map → os-feature-cover.tif / os-distance-to-feature.tif",
     ),
+    RebuildStep(
+        "alan",
+        "generate_alan_data",
+        "VIIRS night lights → alan_viirs_radiance.tif (local source; auto-skip if missing)",
+    ),
     RebuildStep("merge", "merge_ev_layers", "Merge layers → evs-to-model.tif"),
 )
 
