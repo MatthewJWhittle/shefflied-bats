@@ -157,7 +157,7 @@ def data(
         "--skip",
         help=(
             "Comma-separated rebuild step names to skip "
-            "(registry: terrain,terrain_stats,climate,ceh,vom,coastal,os,merge). "
+            "(registry: terrain,terrain_stats,climate,ceh,vom,coastal,os,alan,merge). "
             "Example: --skip ceh,coastal"
         ),
     ),
