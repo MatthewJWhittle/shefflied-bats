@@ -28,7 +28,7 @@ cluster_id,column_name,include
 5,os_distance_distance_to_buildings,1
 5,os_distance_distance_to_minor_roads,1
 6,climate_bioclim_bio_9,1
-6,bgs_coast_distance_to_coast,1
+6,bgs_coast_distance_to_coast,0
 7,ceh_landcover_upland_heathland,1
 8,terrain_stats_roughness,1
 9,ceh_landcover_grassland,1
