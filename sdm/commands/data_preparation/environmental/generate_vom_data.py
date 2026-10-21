@@ -8,6 +8,10 @@ from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary_and_transform
 from sdm.raster.utils import reproject_data, squeeze_dataset
 from sdm.raster.processing import summarise_raster_metrics
+from sdm.raster.layer_qa import (
+    DEFAULT_NODATA_FILL_MAX_CELLS,
+    fill_xarray_nodata_nearest,
+)
 from sdm.data import WCSDownloader
 
 # Ecology review / #73: tallest plausible UK trees ~40–50 m; cells above this
@@ -98,6 +102,17 @@ async def fetch_and_process_vom_data(
         transform=model_transform,
         resolution=spatial_config["resolution"],
         bounds=grid_bounds,
+    )
+
+    # Thin edge nodata only (#74). Wide sea fringe (#78) and the NE hole
+    # (#79) stay empty beyond DEFAULT_NODATA_FILL_MAX_CELLS.
+    logging.info(
+        "Filling thin VOM edge nodata (max %.0f cells; issue #74).",
+        DEFAULT_NODATA_FILL_MAX_CELLS,
+    )
+    reprojected_vom_summary = fill_xarray_nodata_nearest(
+        reprojected_vom_summary,
+        max_search_distance_cells=DEFAULT_NODATA_FILL_MAX_CELLS,
     )
 
     logging.info("Squeezing final VOM summary dataset...")
