@@ -10,6 +10,32 @@ from sdm.raster.utils import reproject_data, squeeze_dataset
 from sdm.raster.processing import summarise_raster_metrics
 from sdm.data import WCSDownloader
 
+# Ecology review / #73: tallest plausible UK trees ~40–50 m; cells above this
+# are almost certainly masts, pylons or similar structures in the VOM.
+VEGETATION_HEIGHT_MAX_M = 40.0
+
+
+def cap_vegetation_heights(
+    data_array: xr.DataArray,
+    *,
+    max_height_m: float = VEGETATION_HEIGHT_MAX_M,
+) -> xr.DataArray:
+    """Cap implausible vegetation heights (metres) before summary metrics.
+
+    Values above ``max_height_m`` are clipped; NaNs and values at or below the
+    cap are unchanged. Applied on the fine-resolution VOM so mean/min/max/std
+    all reflect the capped heights.
+    """
+    n_above = int((data_array > max_height_m).sum().item())
+    if n_above:
+        logging.info(
+            "Capping %d VOM cells above %.0f m vegetation height (structures)",
+            n_above,
+            max_height_m,
+        )
+    return data_array.clip(max=max_height_m)
+
+
 async def fetch_and_process_vom_data(
     output_dir: Path,
     boundary_path: Path,
@@ -54,7 +80,8 @@ async def fetch_and_process_vom_data(
         raise ValueError("VOM WCS download failed to return data.")
     # The variable name is set to coverage_id by WCSDownloader
     vom_data_array = raw_vom_data[vom_coverage_id]
-    
+    vom_data_array = cap_vegetation_heights(vom_data_array)
+
     logging.info(f"Summarising VOM data to {summary_target_resolution_m}m resolution metrics...")
     # summarise_raster_metrics expects a DataArray
     vom_summary_ds = summarise_raster_metrics(
@@ -85,6 +112,7 @@ async def fetch_and_process_vom_data(
     final_vom_ds.rio.to_raster(output_path)
     logging.info("VOM data processing complete.")
     return output_path
+
 
 def generate_vom_data(
     output_dir: Path,
@@ -131,4 +159,4 @@ def generate_vom_data(
         summary_target_resolution_m=summary_target_resolution_m
     ))
     logging.info("VOM data generation workflow finished.")
-    return result 
+    return result

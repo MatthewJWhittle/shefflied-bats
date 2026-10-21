@@ -83,7 +83,7 @@ Configured under `ev_stack` in `config.yml` and copied into `rebuild_metrics.jso
 
 - Selected variables: `data/ev_clusters_selected.csv` (`include == 1`). Distance to coast (`bgs_coast_distance_to_coast`) is `include = 0` — see [distance-to-coast.md](modelling/distance-to-coast.md) (#75).
 - Multiscale groups: `ceh_landcover`, `os_cover_water`, `vom_vegetation_height` at windows 10/20/30 cells (500/1000/1500 m at 100 m resolution). CEH 500/1000/1500 m neighbourhood averages use the 1%-of-range rule following the architecture review.
-- Layer clipping **ON** by default following the architecture review: coast / building / major-road distances 0–7000 m; curvature 5–95% quantiles. Disabling clipping is out of scope for #38. Concrete clip bounds (including resolved curvature 5%/95% values) are stored under `build_settings.layer_clipping.applied`. Coast clipping still applies if the band is present in a merged stack; it is not selected into `evs-to-model.tif` while `include` is 0.
+- Layer clipping **ON** by default following the architecture review: coast / building / major-road distances 0–7000 m; curvature 5–95% quantiles; vegetation height mean/min/max 0–40 m (#73; masts/pylons). Disabling clipping is out of scope for #38. Concrete clip bounds (including resolved curvature 5%/95% values) are stored under `build_settings.layer_clipping.applied`. Coast clipping still applies if the band is present in a merged stack; it is not selected into `evs-to-model.tif` while `include` is 0. Raw VOM heights are also capped at 40 m before summary metrics so std is not inflated by structures.
 - Per-model feature lists: **18** `data/sdm_config/*/variables_config.yml` files (not 33).
 
 ## Write guards (refused destinations)

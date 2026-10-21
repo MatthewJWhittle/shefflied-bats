@@ -12,9 +12,91 @@ from shapely.geometry import Polygon
 import geopandas as gpd
 
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
-    generate_vom_data
+    VEGETATION_HEIGHT_MAX_M,
+    cap_vegetation_heights,
+    generate_vom_data,
 )
 from sdm.data import WCSDownloader
+
+
+class TestCapVegetationHeights:
+    """Synthetic-data checks for the ecology review 40 m vegetation height cap (#73)."""
+
+    def test_caps_values_above_max(self):
+        data = xr.DataArray(
+            np.array([[10.0, 40.0], [41.0, 61.5]], dtype=np.float32),
+            dims=("y", "x"),
+        )
+        capped = cap_vegetation_heights(data)
+        assert float(capped.max()) == VEGETATION_HEIGHT_MAX_M
+        np.testing.assert_allclose(
+            capped.values, np.array([[10.0, 40.0], [40.0, 40.0]], dtype=np.float32)
+        )
+
+    def test_preserves_nan_and_values_at_or_below_max(self):
+        data = xr.DataArray(
+            np.array([[np.nan, 0.0], [39.9, 40.0]], dtype=np.float32),
+            dims=("y", "x"),
+        )
+        capped = cap_vegetation_heights(data)
+        assert np.isnan(capped.values[0, 0])
+        np.testing.assert_allclose(
+            capped.values[0, 1:], np.array([0.0], dtype=np.float32)
+        )
+        np.testing.assert_allclose(
+            capped.values[1, :], np.array([39.9, 40.0], dtype=np.float32)
+        )
+
+    def test_generate_vom_data_caps_outlier_heights(
+        self, temp_boundary_file, tmp_path
+    ):
+        """End-to-end: WCS heights above 40 m must not survive into the summary TIFF."""
+        output_dir = tmp_path / "output"
+        vom_coverage_id = (
+            "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
+        )
+
+        with patch(
+            "sdm.commands.data_preparation.environmental.generate_vom_data.WCSDownloader"
+        ) as mock_wcs_class:
+            mock_wcs_downloader = mock_wcs_class.return_value
+            mock_wcs_downloader.get_coverage = AsyncMock()
+
+            test_data = np.full((80, 80), 15.0, dtype=np.float32)
+            test_data[30, 30] = 61.5  # mast / pylon outlier
+            test_data[31, 31] = 45.0
+
+            vom_data = xr.DataArray(
+                test_data,
+                dims=("y", "x"),
+                coords={
+                    "y": np.linspace(381000, 380000, 80),
+                    "x": np.linspace(420000, 421000, 80),
+                },
+                name=vom_coverage_id,
+            ).rio.write_crs("EPSG:27700")
+
+            mock_wcs_downloader.get_coverage.return_value = xr.Dataset(
+                {vom_coverage_id: vom_data}
+            )
+
+            result = generate_vom_data(
+                output_dir=output_dir,
+                boundary_path=temp_boundary_file,
+                wcs_download_resolution_m=10,
+                summary_target_resolution_m=100,
+                max_concurrent_downloads=1,
+                verbose=False,
+            )
+
+            with rxr.open_rasterio(result) as processed:
+                for band_idx in range(processed.sizes["band"]):
+                    band = processed.isel(band=band_idx)
+                    valid = band.where(
+                        (band != band.rio.nodata) & np.isfinite(band)
+                    )
+                    if valid.count() > 0:
+                        assert float(valid.max()) <= VEGETATION_HEIGHT_MAX_M
 
 
 @pytest.fixture
@@ -217,9 +299,9 @@ class TestVomDataWorkflow:
                     valid_data = band_data.where(band_data != band_data.rio.nodata)
                     
                     if valid_data.count() > 0:
-                        # Vegetation height should be reasonable (0-50m)
+                        # Vegetation height capped at VEGETATION_HEIGHT_MAX_M (#73)
                         assert valid_data.min() >= 0
-                        assert valid_data.max() <= 50
+                        assert valid_data.max() <= VEGETATION_HEIGHT_MAX_M
 
 
 class TestVomDataRealWCS:
