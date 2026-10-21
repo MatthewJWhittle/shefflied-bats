@@ -252,3 +252,128 @@ def test_wcs_tiles_use_fixed_national_grid_independent_of_study_origin():
     assert _corner_anchored(bbox_a) != tiles_a
     assert _corner_anchored(bbox_b) != tiles_b
 
+
+
+def _write_synthetic_tile(
+    path,
+    tile_bbox: tuple[float, float, float, float],
+    resolution: float,
+    value: float,
+) -> None:
+    """Write a constant-value GeoTIFF for one WCS request box."""
+    import rasterio
+    from rasterio.transform import from_origin
+
+    minx, miny, maxx, maxy = tile_bbox
+    width = int((maxx - minx) / resolution)
+    height = int((maxy - miny) / resolution)
+    transform = from_origin(minx, maxy, resolution, resolution)
+    data = np.full((height, width), value, dtype=np.float32)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=1,
+        dtype="float32",
+        crs="EPSG:27700",
+        transform=transform,
+        nodata=np.nan,
+    ) as dst:
+        dst.write(data, 1)
+
+
+@pytest.mark.asyncio
+async def test_get_coverage_rejects_dropped_tile_that_leaves_ne_gap(monkeypatch):
+    """Failed NE tiles must not be silently omitted from the mosaic.
+
+    #79: elevation and vegetation height share WCSDownloader. Silently
+    filtering ``None`` download results still yields a mosaic whose bounds
+    cover the study box, but the north-east tile region is NaN. After
+    reproject onto the model grid that reads as a missing block. Sources
+    can be complete while the build drops tiles.
+    """
+    coverage_id = "test_coverage_ne_gap"
+    # 3×3 national tiles at 40 m with 10 m cells (synthetic metres only).
+    tile_pixels = (4, 4)
+    resolution = 10.0
+    tile_m = tile_pixels[0] * resolution
+    bbox = (0.0, 0.0, 3 * tile_m, 3 * tile_m)
+    downloader = _wcs_downloader_for_tile_layout(tile_pixels)
+    downloader.coverage_id = coverage_id
+    downloader.use_temp_storage = True
+
+    tiles = downloader.tile_bboxes_for_coverage(bbox, resolution)
+    assert len(tiles) == 9
+    ne_tile = max(tiles, key=lambda t: (t[0], t[1]))
+
+    async def fake_download_tile(session, tile_bbox, resolution_m):
+        if tile_bbox == ne_tile:
+            return None  # silent failure — current code drops this
+        assert downloader.temp_dir is not None
+        path = downloader.temp_dir / (
+            f"tile_{int(tile_bbox[0])}_{int(tile_bbox[1])}.tif"
+        )
+        value = 1.0 + tiles.index(tile_bbox)
+        _write_synthetic_tile(path, tile_bbox, resolution_m, value)
+        return str(path)
+
+    monkeypatch.setattr(downloader, "_download_tile", fake_download_tile)
+
+    with pytest.raises(ValueError, match=r"(tile|download|coverage|incomplete|missing)"):
+        await downloader.get_coverage(bbox=bbox, resolution=resolution, max_concurrent=3)
+
+
+@pytest.mark.asyncio
+async def test_get_coverage_mosaic_has_finite_data_in_every_tile_including_ne(
+    monkeypatch,
+):
+    """Every requested tile must contribute finite values, including the NE.
+
+    Guards the merge path: a complete download set must not leave an empty
+    north-east block after mosaicking (#79).
+    """
+    coverage_id = "test_coverage_full_grid"
+    tile_pixels = (4, 4)
+    resolution = 10.0
+    tile_m = tile_pixels[0] * resolution
+    bbox = (0.0, 0.0, 3 * tile_m, 3 * tile_m)
+    downloader = _wcs_downloader_for_tile_layout(tile_pixels)
+    downloader.coverage_id = coverage_id
+    downloader.use_temp_storage = True
+
+    tiles = downloader.tile_bboxes_for_coverage(bbox, resolution)
+    ne_tile = max(tiles, key=lambda t: (t[0], t[1]))
+
+    async def fake_download_tile(session, tile_bbox, resolution_m):
+        assert downloader.temp_dir is not None
+        path = downloader.temp_dir / (
+            f"tile_{int(tile_bbox[0])}_{int(tile_bbox[1])}.tif"
+        )
+        value = 10.0 + tiles.index(tile_bbox)
+        _write_synthetic_tile(path, tile_bbox, resolution_m, value)
+        return str(path)
+
+    monkeypatch.setattr(downloader, "_download_tile", fake_download_tile)
+
+    result = await downloader.get_coverage(
+        bbox=bbox, resolution=resolution, max_concurrent=3
+    )
+    values = np.asarray(result[coverage_id].values)
+    assert values.ndim >= 2
+    # Sample the centre of each tile in the mosaicked array.
+    da = result[coverage_id]
+    if "band" in da.dims:
+        da = da.isel(band=0)
+    for tile_bbox in tiles:
+        minx, miny, maxx, maxy = tile_bbox
+        cx, cy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
+        sample = float(da.sel(x=cx, y=cy, method="nearest"))
+        assert np.isfinite(sample), f"nodata at tile centre {tile_bbox}"
+    # Explicit NE centre must be finite and match that tile's fill value.
+    minx, miny, maxx, maxy = ne_tile
+    ne_sample = float(
+        da.sel(x=(minx + maxx) / 2.0, y=(miny + maxy) / 2.0, method="nearest")
+    )
+    assert ne_sample == pytest.approx(10.0 + tiles.index(ne_tile))
