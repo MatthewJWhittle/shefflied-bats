@@ -1,6 +1,6 @@
-# Rebuild-5 environmental layer data quality
+# Environmental variables — layer data quality
 
-Study-area aggregate checks on the **rebuild-5** environmental stack (the current layer set after the EV rebuild). Use this when refining models and feature data quality. It is separate from the ecology reference.
+Study-area aggregate checks on **the environmental variables** stack (the current layer set). Use this when refining models and feature data quality. It is separate from the ecology reference.
 
 **Scope.** Study-area aggregates only: no record points, no presence-vs-background tables by location, no site or roost names, no grid references. Licensed rasters and training parquet stay out of git. Do not commit histogram or map image outputs from the QA script.
 
@@ -22,7 +22,7 @@ Study-area aggregate checks on the **rebuild-5** environmental stack (the curren
 
 ## Sources and regeneration
 
-Aggregates from rebuild-5 `evs-to-model.tif` (77 float32 bands, EPSG:27700, 100 m cells, nodata = NaN).
+Aggregates from the environmental variables `evs-to-model.tif` (77 float32 bands, EPSG:27700, 100 m cells, nodata = NaN).
 
 | File | Contents |
 |------|----------|
@@ -87,7 +87,7 @@ Checked and OK (or expected): slope (see units), TWI 5.0–31.0, TPI, aspect, ro
 - `sdm/commands/data_preparation/environmental/generate_terrain_stats.py` — `output_slope_units: str = "radians"`
 - `sdm/raster/terrain.py` — `process_dem_to_terrain_attributes(..., output_slope_units: str = "radians")`; slope is computed in radians and only converted if degrees/percent are requested
 
-Treat rebuild-5 slope/TWI as the trusted scales (the previous stack’s slope/TWI were off scale).
+Treat slope/TWI from the environmental variables as the trusted scales (the previous stack’s slope/TWI were off scale).
 
 ### Distance caps at 7 000 m
 
@@ -97,7 +97,7 @@ Coast, buildings, and major-road distances are clipped to 0–7 000 m in the m
 
 ## Nathusius' pipistrelle (training gap, not a layer bug)
 
-Records exist in the tidy records file (47 after the accuracy filter: 32 roost, 15 in flight). They fail the **15-presence minimum after one-per-cell thinning**: the 32 roost records fall in **3** distinct cells and the 15 in-flight records in **11**. Both are below 15, so no model and no presence-vs-background stats for this species on the rebuild-5 run. That is a data-volume limit, not an environmental-layer defect.
+Records exist in the tidy records file (47 after the accuracy filter: 32 roost, 15 in flight). They fail the **15-presence minimum after one-per-cell thinning**: the 32 roost records fall in **3** distinct cells and the 15 in-flight records in **11**. Both are below 15, so no model and no presence-vs-background stats for this species on the environmental variables run. That is a data-volume limit, not an environmental-layer defect.
 
 The training log wrongly reports **0** presence rather than 3 / 11. Likely cause: small-sample sample-weighting producing NaNs that `dropna()` removes. Worth a small logging fix so the real thinned counts appear. The existing `Pipistrellus_nathusii_Roost` config is from an earlier run; distance-to-coast in that feature list should be reviewed for inland models (see table above).
 

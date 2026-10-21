@@ -3,7 +3,7 @@
 
 Writes only study-area aggregate CSVs (no coordinates, no presence points,
 no training parquet). Intended for regenerating the tables under
-``docs/data_quality/`` when the rebuild-5 (or later) stack path is available.
+``docs/data_quality/`` when the environmental variables stack path is available.
 
 Usage
 -----
