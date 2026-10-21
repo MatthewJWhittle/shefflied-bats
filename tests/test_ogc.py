@@ -377,3 +377,37 @@ async def test_get_coverage_mosaic_has_finite_data_in_every_tile_including_ne(
         da.sel(x=(minx + maxx) / 2.0, y=(miny + maxy) / 2.0, method="nearest")
     )
     assert ne_sample == pytest.approx(10.0 + tiles.index(ne_tile))
+
+
+@pytest.mark.asyncio
+async def test_get_coverage_rejects_all_nodata_tile_inside_bbox(monkeypatch):
+    """A successful download that is all nodata still leaves a coverage gap.
+
+    #79: build logs can show no failed downloads while a tile GeoTIFF is
+    empty. Refuse that mosaic the same way as a dropped tile.
+    """
+    coverage_id = "test_coverage_empty_ne"
+    tile_pixels = (4, 4)
+    resolution = 10.0
+    tile_m = tile_pixels[0] * resolution
+    bbox = (0.0, 0.0, 3 * tile_m, 3 * tile_m)
+    downloader = _wcs_downloader_for_tile_layout(tile_pixels)
+    downloader.coverage_id = coverage_id
+    downloader.use_temp_storage = True
+
+    tiles = downloader.tile_bboxes_for_coverage(bbox, resolution)
+    ne_tile = max(tiles, key=lambda t: (t[0], t[1]))
+
+    async def fake_download_tile(session, tile_bbox, resolution_m):
+        assert downloader.temp_dir is not None
+        path = downloader.temp_dir / (
+            f"tile_{int(tile_bbox[0])}_{int(tile_bbox[1])}.tif"
+        )
+        value = np.nan if tile_bbox == ne_tile else 1.0 + tiles.index(tile_bbox)
+        _write_synthetic_tile(path, tile_bbox, resolution_m, value)
+        return str(path)
+
+    monkeypatch.setattr(downloader, "_download_tile", fake_download_tile)
+
+    with pytest.raises(ValueError, match=r"(nodata|holes|coverage|gap)"):
+        await downloader.get_coverage(bbox=bbox, resolution=resolution, max_concurrent=3)
