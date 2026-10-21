@@ -56,6 +56,9 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     ds = xr.Dataset(
         {
             "bgs_coast_distance_to_coast": (("y", "x"), np.full((4, 4), 9000.0)),
+            "vom_vegetation_height_max": (("y", "x"), np.full((4, 4), 61.5)),
+            "vom_vegetation_height_mean": (("y", "x"), np.full((4, 4), 45.0)),
+            "vom_vegetation_height_min": (("y", "x"), np.full((4, 4), 41.0)),
             "terrain_stats_curvature": (
                 ("y", "x"),
                 np.linspace(-10, 10, 16).reshape(4, 4),
@@ -69,6 +72,9 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     expected_hi = float(ds["terrain_stats_curvature"].quantile(0.95).item())
     clipped, applied = apply_layer_clipping(ds)
     assert float(clipped["bgs_coast_distance_to_coast"].max()) == 7000.0
+    assert float(clipped["vom_vegetation_height_max"].max()) == 40.0
+    assert float(clipped["vom_vegetation_height_mean"].max()) == 40.0
+    assert float(clipped["vom_vegetation_height_min"].max()) == 40.0
     assert float(clipped["terrain_stats_curvature"].min()) > original_min
     assert float(clipped["terrain_stats_curvature"].max()) < original_max
     assert applied["terrain_stats_curvature"]["min"] == expected_lo
@@ -76,6 +82,9 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     assert applied["terrain_stats_curvature"]["quantile_min"] == 0.05
     assert applied["terrain_stats_curvature"]["quantile_max"] == 0.95
     assert applied["bgs_coast_distance_to_coast"] == {"min": 0.0, "max": 7000.0}
+    assert applied["vom_vegetation_height_max"] == {"min": 0.0, "max": 40.0}
+    assert applied["vom_vegetation_height_mean"] == {"min": 0.0, "max": 40.0}
+    assert applied["vom_vegetation_height_min"] == {"min": 0.0, "max": 40.0}
 
 
 def _write_synthetic_all_evs(path: Path, band_names: list[str]) -> None:
@@ -176,8 +185,15 @@ def test_build_settings_recorded_shape() -> None:
         "os_distance_distance_to_buildings",
         "os_distance_distance_to_major_roads",
         "terrain_stats_curvature",
+        "vom_vegetation_height_max",
+        "vom_vegetation_height_mean",
+        "vom_vegetation_height_min",
     ):
         assert layer in settings["layer_clipping"]["layers"]
+    assert settings["layer_clipping"]["layers"]["vom_vegetation_height_max"] == {
+        "min": 0.0,
+        "max": 40.0,
+    }
 
 
 def test_selected_csv_include_count() -> None:

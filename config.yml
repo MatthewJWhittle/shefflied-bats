@@ -55,6 +55,16 @@ ev_stack:
       terrain_stats_curvature:
         quantile_min: 0.05
         quantile_max: 0.95
+      # #73: cap VOM height bands (masts/pylons); std left unclipped
+      vom_vegetation_height_max:
+        min: 0
+        max: 40
+      vom_vegetation_height_mean:
+        min: 0
+        max: 40
+      vom_vegetation_height_min:
+        min: 0
+        max: 40
 
 # MLflow configuration
 mlflow:
