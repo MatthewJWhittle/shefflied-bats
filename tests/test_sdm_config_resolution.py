@@ -155,5 +155,8 @@ def test_allow_config_fallback_uses_base_roster_not_all_bands() -> None:
     base_variables = load_variables_config(
         resolve_sdm_config_root("variables_config.yml")
     )
-    assert len(base_variables.variables) == 42
+    assert len(base_variables.variables) == 36
     assert len(base_variables.variables) < 77
+    assert "os_distance_distance_to_minor_roads" not in base_variables.variables
+    assert "os_cover_buildings" not in base_variables.variables
+    assert "climate_bioclim_bio_9" not in base_variables.variables

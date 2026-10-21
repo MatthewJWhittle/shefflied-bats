@@ -22,7 +22,8 @@ DEFAULT_MULTISCALE_GROUPS: tuple[str, ...] = (
     "os_cover_water",
     "vom_vegetation_height",
 )
-DEFAULT_MULTISCALE_WINDOWS_CELLS: tuple[int, ...] = (10, 20, 30)
+# Single landscape scale (500 m at 100 m resolution) after #72 overlap thinning.
+DEFAULT_MULTISCALE_WINDOWS_CELLS: tuple[int, ...] = (10,)
 DEFAULT_RESOLUTION_M = 100
 
 # Layer-level clipping: settled ON; limits live in config / rebuild_metrics.
@@ -291,7 +292,7 @@ def add_multiscale_layers(
     groups: Sequence[str] = DEFAULT_MULTISCALE_GROUPS,
     windows_cells: Sequence[int] = DEFAULT_MULTISCALE_WINDOWS_CELLS,
 ) -> xr.Dataset:
-    """Add 500/1000/1500 m neighbourhood means for configured variable groups."""
+    """Add neighbourhood means for configured variable groups (default: 500 m only)."""
     multiscale_vars = [
         var
         for var in dataset.data_vars
