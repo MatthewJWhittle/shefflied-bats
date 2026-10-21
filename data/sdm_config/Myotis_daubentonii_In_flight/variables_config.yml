@@ -3,7 +3,6 @@ variables:
 - climate_stats_temp_mat_avg
 - climate_bioclim_bio_9
 - climate_stats_prec_ann_var
-- bgs_coast_distance_to_coast
 - terrain_stats_roughness
 - climate_bioclim_bio_8
 - ceh_landcover_arable

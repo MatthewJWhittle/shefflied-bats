@@ -590,7 +590,6 @@ DEFAULT_CONFIG : Dict[ActivityType, VariablesConfig] = {
         variables=[
             "ceh_landcover_improved_grassland",
             "ceh_landcover_suburban",
-            "bgs_coast_distance_to_coast",
             "ceh_landcover_arable",
             "ceh_landcover_suburban_500m",
             "ceh_landcover_arable_500m",
@@ -619,7 +618,6 @@ DEFAULT_CONFIG : Dict[ActivityType, VariablesConfig] = {
             "os_distance_distance_to_buildings",
             "vom_vegetation_height_mean_500m",
             "ceh_landcover_suburban_500m",
-            "bgs_coast_distance_to_coast",
             "ceh_landcover_broadleaved_woodland_500m",
             "ceh_landcover_improved_grassland",
             "terrain_stats_roughness",

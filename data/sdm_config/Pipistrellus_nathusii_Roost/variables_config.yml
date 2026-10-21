@@ -16,7 +16,6 @@ variables:
 - ceh_landcover_wetland_500m
 - ceh_landcover_urban_500m
 - ceh_landcover_coniferous_woodland_500m
-- bgs_coast_distance_to_coast
 - climate_bioclim_bio_8
 - terrain_stats_roughness
 - ceh_landcover_broadleaved_woodland

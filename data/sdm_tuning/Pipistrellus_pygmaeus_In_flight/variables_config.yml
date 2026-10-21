@@ -1,7 +1,6 @@
 variables:
 - os_distance_distance_to_buildings
 - os_distance_distance_to_minor_roads
-- bgs_coast_distance_to_coast
 - vom_vegetation_height_max
 - vom_vegetation_height_std
 - ceh_landcover_broadleaved_woodland
