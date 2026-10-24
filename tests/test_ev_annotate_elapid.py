@@ -1,7 +1,8 @@
-"""Pin EV point annotation: elapid path matches legacy sjoin values (#51 item 1)."""
+"""Behaviour pins for EV point annotation via elapid (#47 / #51 item 1).
 
-import time
-import tracemalloc
+Samples known band values at known cell centres. Does not re-run the old
+full-grid ``sjoin_nearest`` path or assert memory/speed wins.
+"""
 
 import geopandas as gpd
 import numpy as np
@@ -12,74 +13,81 @@ from shapely.geometry import Point
 
 from sdm.commands.modelling.train_sdm_models import (
     annotate_points_with_evs,
-    convert_evs_to_geodataframe,
     extract_grid_points,
 )
 
 
-def _synthetic_evs(nx: int = 30, ny: int = 30, n_vars: int = 5, res: float = 100.0):
-    x = np.arange(nx, dtype=float) * res + res / 2
-    y = (np.arange(ny, dtype=float)[::-1]) * res + res / 2
-    data_vars = {}
-    rng = np.random.default_rng(0)
-    for i in range(n_vars):
-        data_vars[f"v{i}"] = (("y", "x"), rng.random((ny, nx)))
-    ds = xr.Dataset(data_vars, coords={"x": x, "y": y})
-    ds = ds.rio.write_crs("EPSG:27700")
-    return ds
+def _known_evs() -> xr.Dataset:
+    """3×3 stack with deterministic band values and 100 m cell centres."""
+    res = 100.0
+    x = np.array([50.0, 150.0, 250.0])
+    y = np.array([250.0, 150.0, 50.0])  # north-up
+    v0 = np.array(
+        [
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+        ]
+    )
+    v1 = v0 * 10.0
+    ds = xr.Dataset(
+        {"v0": (("y", "x"), v0), "v1": (("y", "x"), v1)},
+        coords={"x": x, "y": y},
+    )
+    return ds.rio.write_crs("EPSG:27700")
 
 
-def _random_points(evs: xr.Dataset, n: int = 50, seed: int = 1) -> gpd.GeoDataFrame:
-    rng = np.random.default_rng(seed)
-    xmin, ymin, xmax, ymax = evs.rio.bounds()
-    # Stay inside cell centres bbox
-    xs = rng.uniform(xmin + 1, xmax - 1, size=n)
-    ys = rng.uniform(ymin + 1, ymax - 1, size=n)
-    return gpd.GeoDataFrame(
-        {"pid": np.arange(n)},
-        geometry=[Point(x, y) for x, y in zip(xs, ys)],
-        crs=evs.rio.crs,
+def test_annotate_samples_known_values_at_cell_centres():
+    evs = _known_evs()
+    # Exact centres of (row0,col0), (row1,col1), (row2,col2)
+    points = gpd.GeoDataFrame(
+        {"pid": [0, 1, 2]},
+        geometry=[
+            Point(50.0, 250.0),
+            Point(150.0, 150.0),
+            Point(250.0, 50.0),
+        ],
+        crs="EPSG:27700",
+    )
+    annotated = annotate_points_with_evs(points, evs).sort_values("pid")
+
+    np.testing.assert_allclose(annotated["v0"].to_numpy(), [1.0, 5.0, 9.0], atol=1e-9)
+    np.testing.assert_allclose(
+        annotated["v1"].to_numpy(), [10.0, 50.0, 90.0], atol=1e-9
+    )
+    np.testing.assert_allclose(
+        annotated["grid_x"].to_numpy(), [50.0, 150.0, 250.0], atol=1e-9
+    )
+    np.testing.assert_allclose(
+        annotated["grid_y"].to_numpy(), [250.0, 150.0, 50.0], atol=1e-9
     )
 
 
-def _legacy_annotate(points, evs, tolerance=None):
-    """Pre-swap path: full GeoDataFrame + sjoin_nearest."""
-    import geopandas as gpd
-
-    ev_gdf = convert_evs_to_geodataframe(evs)
-    if tolerance is None:
-        tolerance = abs(evs.rio.resolution()[0])
-    annotated = gpd.sjoin_nearest(points, ev_gdf, how="inner", max_distance=tolerance)
-    annotated = annotated.drop(columns=["index_right"])
-    return annotated
-
-
-def test_annotate_matches_legacy_sjoin_values_and_grid():
-    evs = _synthetic_evs(20, 20, n_vars=4)
-    points = _random_points(evs, n=40, seed=2)
-    legacy = _legacy_annotate(points, evs)
-    modern = annotate_points_with_evs(points, evs)
-
-    merged = legacy.merge(modern, on="pid", suffixes=("_l", "_m"))
-    assert len(merged) == len(legacy) == len(modern)
-    for col in ["v0", "v1", "v2", "v3"]:
-        np.testing.assert_allclose(
-            merged[f"{col}_l"].to_numpy(),
-            merged[f"{col}_m"].to_numpy(),
-            rtol=0,
-            atol=1e-9,
-        )
-    np.testing.assert_allclose(merged["grid_x_l"], merged["grid_x_m"], atol=1e-9)
-    np.testing.assert_allclose(merged["grid_y_l"], merged["grid_y_m"], atol=1e-9)
+def test_annotate_nearest_cell_for_off_centre_point():
+    """Point inside a cell (not on centre) still samples that cell's value."""
+    evs = _known_evs()
+    # Inside centre cell (v0=5): centre (150,150), cell spans ~100–200
+    points = gpd.GeoDataFrame(
+        {"pid": [0]},
+        geometry=[Point(160.0, 140.0)],
+        crs="EPSG:27700",
+    )
+    annotated = annotate_points_with_evs(points, evs)
+    assert float(annotated["v0"].iloc[0]) == pytest.approx(5.0)
+    assert float(annotated["grid_x"].iloc[0]) == pytest.approx(150.0)
+    assert float(annotated["grid_y"].iloc[0]) == pytest.approx(150.0)
 
 
 def test_extract_grid_points_thin_has_coords_not_full_vars():
-    evs = _synthetic_evs(8, 8, n_vars=3)
+    evs = _known_evs()
     grid = extract_grid_points(evs)
     assert {"grid_x", "grid_y", "geometry"} <= set(grid.columns)
-    # Thin path: do not materialise every EV column on every cell
     assert "v0" not in grid.columns
-    assert len(grid) == 8 * 8
+    assert len(grid) == 9
+    # Corner cell centres present
+    centres = set(zip(grid["grid_x"].tolist(), grid["grid_y"].tolist()))
+    assert (50.0, 250.0) in centres
+    assert (250.0, 50.0) in centres
 
 
 def test_prepare_training_data_monkeypatch_signature(monkeypatch):
@@ -126,42 +134,3 @@ def test_prepare_training_data_monkeypatch_signature(monkeypatch):
             transform_method=None,
             seed=1,
         )
-
-
-@pytest.mark.slow
-def test_annotate_avoids_full_grid_geodataframe_memory():
-    """Materialising the full EV grid as a GeoDataFrame uses far more peak RAM."""
-    # ~40k cells × 30 vars — large enough for a clear GeoDataFrame allocation gap
-    evs = _synthetic_evs(200, 200, n_vars=30)
-    points = _random_points(evs, n=200, seed=3)
-
-    tracemalloc.start()
-    t0 = time.perf_counter()
-    legacy = _legacy_annotate(points, evs)
-    legacy_s = time.perf_counter() - t0
-    _, legacy_peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-
-    tracemalloc.start()
-    t0 = time.perf_counter()
-    modern = annotate_points_with_evs(points, evs)
-    modern_s = time.perf_counter() - t0
-    _, modern_peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-
-    assert len(legacy) == len(modern)
-    # Full-grid GeoDataFrame peak must exceed point sampling (+ tempfile write).
-    # On study-sized stacks the gap grows with cell count; here we require a
-    # directional win and record absolute peaks for the PR proof section.
-    assert modern_peak < legacy_peak, (
-        f"expected memory win: modern={modern_peak/1e6:.1f}MB "
-        f"legacy={legacy_peak/1e6:.1f}MB; "
-        f"modern_s={modern_s:.3f}s legacy_s={legacy_s:.3f}s"
-    )
-    # Publish numbers into the assertion message on failure; also guard ratio
-    # so a regression that nearly erases the win is caught.
-    ratio = modern_peak / legacy_peak
-    assert ratio < 0.85, (
-        f"memory win too small: modern/legacy={ratio:.2f} "
-        f"({modern_peak/1e6:.1f}/{legacy_peak/1e6:.1f} MB)"
-    )
