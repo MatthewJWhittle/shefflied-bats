@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import pickle
+import tempfile
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
@@ -105,6 +106,9 @@ T = TypeVar("T", bound=pd.DataFrame)
 def convert_evs_to_geodataframe(evs_dataset: xr.Dataset) -> gpd.GeoDataFrame:
     """
     Convert environmental variables xarray Dataset to GeoDataFrame.
+
+    Kept for tests / debugging. Training annotation uses ``annotate_points_with_evs``
+    (elapid) to avoid materialising the full grid.
     
     Args:
         evs_dataset: xarray Dataset with environmental variables
@@ -116,7 +120,8 @@ def convert_evs_to_geodataframe(evs_dataset: xr.Dataset) -> gpd.GeoDataFrame:
     ev_df.reset_index(inplace=True)
     ev_gdf = gpd.GeoDataFrame(ev_df, geometry=gpd.points_from_xy(ev_df.x, ev_df.y))
     ev_gdf.crs = evs_dataset.rio.crs
-    ev_gdf = ev_gdf.drop(columns=["spatial_ref"])
+    if "spatial_ref" in ev_gdf.columns:
+        ev_gdf = ev_gdf.drop(columns=["spatial_ref"])
     ev_gdf.rename(columns={"x": "grid_x", "y": "grid_y"}, inplace=True)
     
     # Drop rows with missing values
@@ -126,36 +131,98 @@ def convert_evs_to_geodataframe(evs_dataset: xr.Dataset) -> gpd.GeoDataFrame:
 
 
 def extract_grid_points(evs_dataset: xr.Dataset) -> gpd.GeoDataFrame:
-    """Point GeoDataFrame over the EV raster grid (for distance / neighbourhood features)."""
-    return convert_evs_to_geodataframe(evs_dataset)
+    """Point GeoDataFrame of EV cell centres (no per-cell EV columns)."""
+    xx, yy = np.meshgrid(evs_dataset.x.values, evs_dataset.y.values)
+    grid = gpd.GeoDataFrame(
+        {
+            "grid_x": xx.ravel(),
+            "grid_y": yy.ravel(),
+        },
+        geometry=gpd.points_from_xy(xx.ravel(), yy.ravel()),
+        crs=evs_dataset.rio.crs,
+    )
+    return grid
+
+
+def _attach_nearest_grid_coords(
+    points: gpd.GeoDataFrame,
+    evs_dataset: xr.Dataset,
+) -> gpd.GeoDataFrame:
+    """Attach nearest EV cell-centre coords as ``grid_x`` / ``grid_y``."""
+    x_coords = np.asarray(evs_dataset.x.values, dtype=float)
+    y_coords = np.asarray(evs_dataset.y.values, dtype=float)
+    xs = points.geometry.x.to_numpy(dtype=float)
+    ys = points.geometry.y.to_numpy(dtype=float)
+    xi = np.abs(xs[:, None] - x_coords[None, :]).argmin(axis=1)
+    yi = np.abs(ys[:, None] - y_coords[None, :]).argmin(axis=1)
+    out = points.copy()
+    out["grid_x"] = x_coords[xi]
+    out["grid_y"] = y_coords[yi]
+    return out
+
+
+def _write_ev_stack_geotiff(evs_dataset: xr.Dataset, path: str) -> List[str]:
+    """Write EV data variables to a multi-band GeoTIFF; return band labels."""
+    ev_columns = list(evs_dataset.data_vars.keys())
+    if not ev_columns:
+        raise ValueError("evs_dataset has no data variables to annotate")
+    evs_dataset[ev_columns].to_array(dim="band").rio.to_raster(path)
+    return ev_columns
 
 
 def annotate_points_with_evs(
     points: gpd.GeoDataFrame,
-    ev_gdf: gpd.GeoDataFrame,
-    tolerance: Optional[float] = None,
+    evs_dataset: xr.Dataset,
+    *,
+    drop_na: bool = True,
+    raster_path: Optional[str] = None,
+    ev_columns: Optional[List[str]] = None,
 ) -> gpd.GeoDataFrame:
     """
-    Annotate points with environmental variables using spatial join.
+    Annotate points with environmental variables via ``elapid.annotate``.
+
+    Samples at point locations from a GeoTIFF (written from ``evs_dataset``
+    when ``raster_path`` is omitted), avoiding a full-grid GeoDataFrame.
+    Attaches ``grid_x`` / ``grid_y`` from the nearest EV cell centre (same
+    columns as the former ``sjoin_nearest`` path used for deduplication).
+
+    Pass ``raster_path`` + ``ev_columns`` when annotating multiple point sets
+    against one already-written stack (see ``prepare_training_data``).
     
     Args:
         points: GeoDataFrame of points to annotate
-        ev_gdf: GeoDataFrame with environmental variables
-        tolerance: Maximum distance for nearest neighbor join (defaults to raster resolution)
+        evs_dataset: Environmental variables as an xarray Dataset (for grid coords)
+        drop_na: Drop records with nodata samples (elapid default)
+        raster_path: Optional existing GeoTIFF path; written from ``evs_dataset`` if omitted
+        ev_columns: Band labels matching ``raster_path`` (required with ``raster_path``)
         
     Returns:
         Annotated GeoDataFrame
     """
-    if tolerance is None:
-        resolution = ev_gdf.rio.resolution()
-        tolerance = abs(resolution[0])
-    
-    annotated = gpd.sjoin_nearest(
-        points, ev_gdf, how="inner", max_distance=tolerance
-    )
-    annotated.drop(columns=["index_right"], inplace=True)
-    
-    return annotated
+    own_raster = raster_path is None
+    if own_raster:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+            raster_path = tmp.name
+        ev_columns = _write_ev_stack_geotiff(evs_dataset, raster_path)
+    elif ev_columns is None:
+        raise ValueError("ev_columns is required when raster_path is provided")
+
+    try:
+        annotated = ela.annotate(
+            points,
+            raster_path,
+            labels=ev_columns,
+            drop_na=drop_na,
+            quiet=True,
+        )
+    finally:
+        if own_raster:
+            try:
+                os.unlink(raster_path)
+            except OSError:
+                pass
+
+    return _attach_nearest_grid_coords(annotated, evs_dataset)
 
 
 def simplify_boundary(boundary: gpd.GeoDataFrame, tolerance: float = 100) -> gpd.GeoDataFrame:
@@ -208,22 +275,10 @@ def prepare_training_data(
     # Derive available feature names from EV dataset
     ev_columns: List[str] = list(evs_to_model.data_vars.keys())
 
-    # Convert EV dataset to GeoDataFrame once
-    ev_gdf = convert_evs_to_geodataframe(evs_to_model)
-
     # Prepare presence data for EV annotation
     split_keys = ["latin_name", "activity_type"]
     occurrence_for_annotation_gdf = occurrence_gdf[split_keys + ["geometry"]].copy()
     occurrence_for_annotation_gdf["class"] = 1
-
-    # Annotate presence points with EVs
-    resolution = evs_to_model.rio.resolution()
-    tolerance = abs(resolution[0])
-    presence_with_evs_gdf = annotate_points_with_evs(
-        occurrence_for_annotation_gdf,
-        ev_gdf,
-        tolerance=tolerance,
-    )
 
     # Generate background points from all occurrence data (not just the filtered subset)
     background_source_gdf = (
@@ -241,12 +296,28 @@ def prepare_training_data(
         seed=seed,
     )
 
-    # Annotate background points with EVs
-    background_with_evs_gdf = annotate_points_with_evs(
-        background_points_gdf,
-        ev_gdf,
-        tolerance=tolerance,
-    )
+    # Write EV stack once; annotate presence + background via elapid (no full-grid GDF)
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        raster_path = tmp.name
+    try:
+        band_labels = _write_ev_stack_geotiff(evs_to_model, raster_path)
+        presence_with_evs_gdf = annotate_points_with_evs(
+            occurrence_for_annotation_gdf,
+            evs_to_model,
+            raster_path=raster_path,
+            ev_columns=band_labels,
+        )
+        background_with_evs_gdf = annotate_points_with_evs(
+            background_points_gdf,
+            evs_to_model,
+            raster_path=raster_path,
+            ev_columns=band_labels,
+        )
+    finally:
+        try:
+            os.unlink(raster_path)
+        except OSError:
+            pass
     background_with_evs_gdf["class"] = 0
 
     logger.info(
