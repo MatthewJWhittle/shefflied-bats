@@ -109,6 +109,27 @@ maps stay in the existing `runs/` (and local predictions) tree — training and
 predict paths do **not** upload prediction GeoTIFFs or input layers as MLflow
 artefacts.
 
+### Measure one run’s artefact size (read-only)
+
+Find a run id in the MLflow UI (open the run; the id is in the header / URL), or
+via the CLI against the same tracking URI:
+
+```bash
+uv run mlflow runs list -e <experiment_name>
+# or: uv run python -c "import mlflow; mlflow.set_tracking_uri('…'); print(mlflow.search_runs())"
+```
+
+The experiment id is on the experiment page (or in `mlflow experiments list`).
+Then, from a machine with Google ADC (read-only list/du — no writes):
+
+```bash
+gcloud storage du -s \
+  "gs://habitat-suitability-modelling-data/mlflow-artifacts/<experiment_id>/<run_id>/"
+```
+
+If the UI shows a different Artifact URI for that run, use that path instead.
+Expect a small total (model + table + settings), not prediction-map scale.
+
 ### 1. Keep a good model (Model Registry)
 
 Promote a keeper by registering it in the MLflow Model Registry — in the UI, or
