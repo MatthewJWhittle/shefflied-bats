@@ -42,9 +42,10 @@ def test_downloader_initialization(wcs_test_params):
     assert hasattr(downloader, 'tile_height')
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_memory_download(test_downloader, test_bbox):
-    """Test basic download functionality using memory storage."""
+    """Live WCS: basic download into memory (opt-in; flakes on provider errors)."""
     result = await test_downloader.get_coverage(
         bbox=test_bbox,
         resolution=10.0,
@@ -61,9 +62,10 @@ async def test_memory_download(test_downloader, test_bbox):
     assert result_box[3] >= test_bbox[3]
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_download_resolution(test_downloader, test_bbox):
-    """Test download functionality with a specified resolution."""
+    """Live WCS: requested resolution is honoured (opt-in)."""
     resolution = 10.0
     result = await test_downloader.get_coverage(
         bbox=test_bbox,
@@ -75,9 +77,14 @@ async def test_download_resolution(test_downloader, test_bbox):
     assert result_res[1] == -resolution
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_download_to_temp_storage(test_bbox, wcs_test_params):
-    """Test download functionality using temporary storage."""
+    """Live WCS: temp-storage path returns an eager dataset (opt-in).
+
+    Default CI excludes this mark; synthetic coverage of the temp-load
+    contract is in ``test_temp_storage_loads_before_tile_cleanup``.
+    """
     temp_downloader = WCSDownloader(
         endpoint=wcs_test_params["endpoint"],
         coverage_id=wcs_test_params["coverage_id"],
