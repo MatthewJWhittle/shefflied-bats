@@ -25,9 +25,8 @@
 #   Pearson 0.87) but adds edge structure. Putting it back raised held-out
 #   AUC on all four seeds and kept urban hotspot counts close to the
 #   11-layer set.
-# - alan_viirs_radiance (#37): light-shy brown long-eared bats; raw VIIRS
-#   average_masked radiance (2025 EOG VNL v2.2). log1p is an optional
-#   experiment only — not the default ML feature.
+# ALAN (`alan_viirs_radiance`, #37) is not enabled here yet — species
+# wiring is a separate second pass (Matt, 24 Oct 2026).
 variables:
 - os_distance_distance_to_minor_roads
 - terrain_stats_slope
@@ -41,4 +40,3 @@ variables:
 - ceh_landcover_broadleaved_woodland_500m
 - ceh_landcover_urban_1500m
 - vom_vegetation_height_std  # canopy structural variability: edges, tree-shrub mix
-- alan_viirs_radiance

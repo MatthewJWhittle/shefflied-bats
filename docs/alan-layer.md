@@ -8,8 +8,8 @@ VIIRS night-lights radiance to the environmental variables stack.
 Rebuild step `alan` on the current environmental-variables pipeline. It
 **auto-skips** when the local VIIRS GeoTIFF is missing so existing rebuilds keep
 working (the model stack then omits `alan_viirs_radiance` from the selected
-subset). Enabled for **Plecotus auritus roost** only. No radiance files are
-committed.
+subset). **Not enabled for any species yet** (brown long-eared / BLE wiring is
+a separate second pass). No radiance files are committed.
 
 ## Source
 
@@ -77,13 +77,15 @@ builds nonlinear features. Treat log1p as a **separate experiment** (same folds
 as raw), not the default. Do not copy map percentile/colour stretches into the
 feature.
 
-## Enabling for a species
+## Enabling for a species (second pass)
+
+Ingest and stack selection are in place (`include=1` in
+`data/ev_clusters_selected.csv`). Species enablement is deferred:
 
 1. Rebuild into a **scratch** output dir so `alan_viirs_radiance` is in
-   `all-evs.tif` / `evs-to-model.tif` (`include=1` in
-   `data/ev_clusters_selected.csv`).
+   `all-evs.tif` / `evs-to-model.tif`.
 2. Add `alan_viirs_radiance` to that species' `variables_config.yml`
-   (currently *Plecotus auritus* roost).
+   (planned first candidate: *Plecotus auritus* roost — not in this PR).
 3. Leave other species unchanged unless ecology supports lighting.
 
 ## Done checks (from #37)
