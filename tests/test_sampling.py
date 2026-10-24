@@ -150,24 +150,34 @@ def test_generate_background_points_from_data(sample_occurrences, sample_boundar
 
 
 
-def test_orientation_of_density_array(sample_occurrences, sample_boundary):
-    """Test that the density array is oriented correctly."""
-    bg_points, density_raster = generate_background_points_from_data(
-        occurrence_data=sample_occurrences,
+def test_orientation_of_density_array(sample_boundary):
+    """Density peaks stay with geographic occurrence cells (no y-flip).
+
+    Pipeline users rely on density→background sampling matching real geography.
+    A north–south flip of the histogram would put the peak opposite the points
+    (here at y=750 instead of y=250 on the 50…950 cell-centre grid).
+    """
+    # Fixed SW cluster — known answer on the model grid (cell centres 50, 150, …).
+    occurrences = gpd.GeoDataFrame(
+        geometry=[
+            Point(x, y)
+            for x in (150.0, 250.0, 350.0)
+            for y in (150.0, 250.0, 350.0)
+        ],
+        crs=sample_boundary.crs,
+    )
+    _, density = generate_background_points_from_data(
+        occurrence_data=occurrences,
         boundary=sample_boundary,
-        n_background_points=100,
+        n_background_points=10,
         background_value=0.0,
         seed=42,
     )
 
-    # The array could be flipped in the y direction if we haven't been careful
-    # All the background points should be within 100m of an occurrence
+    iy, ix = np.unravel_index(np.nanargmax(density.values), density.shape)
+    assert float(density.x.values[ix]) == 250.0
+    assert float(density.y.values[iy]) == 250.0
 
-    # Check that all the background points are within 100m of an occurrence
-    for bg_point in bg_points.geometry:
-        assert any(sample_occurrences.distance(bg_point) < 250)
-
-    
 
 
 
