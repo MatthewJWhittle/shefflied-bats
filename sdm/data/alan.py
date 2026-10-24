@@ -64,6 +64,21 @@ _VNL_NAME_RE = re.compile(
 )
 
 
+def _uri_reachable(ref: str) -> bool:
+    """Like ``uri_exists``, but treat ``gs://`` auth/network errors as missing.
+
+    CI and offline machines must not fail when probing the private ALAN bucket
+    without credentials; operators with ADC still get the bucket fallback.
+    """
+    try:
+        return bool(uri_exists(ref))
+    except Exception as exc:  # noqa: BLE001 — gcsfs/fsspec raise HttpError/OSError/…
+        if str(ref).startswith("gs://"):
+            logging.debug("ALAN URI probe failed for %s: %s", ref, exc)
+            return False
+        raise
+
+
 def resolve_alan_raster_uri(
     override: Optional[Union[str, Path]] = None,
     *,
@@ -76,19 +91,20 @@ def resolve_alan_raster_uri(
     Local paths win when the file exists so offline rebuilds keep working.
     Bucket defaults are the canonical 2025 VNL v2.2 objects under
     ``gs://habitat-suitability-modelling-data/raw/big-files/alan/``.
+    Unauthenticated bucket probes count as missing (no hard CI failure).
     """
     if override is not None:
         ref = str(override)
-        if uri_exists(ref):
+        if _uri_reachable(ref):
             return ref
         raise FileNotFoundError(
             f"ALAN {label} not found at {ref}. Place the GeoTIFF locally or "
             f"pass a reachable path / gs:// URI."
         )
     local_ref = str(local_default)
-    if uri_exists(local_ref):
+    if _uri_reachable(local_ref):
         return local_ref
-    if uri_exists(bucket_default):
+    if _uri_reachable(bucket_default):
         logging.info("ALAN %s: using bucket object %s", label, bucket_default)
         return bucket_default
     raise FileNotFoundError(
@@ -121,9 +137,9 @@ def resolve_alan_cf_cvg_uri(
             label="cf_cvg",
         )
     local_ref = str(DEFAULT_ALAN_CF_CVG_PATH)
-    if uri_exists(local_ref):
+    if _uri_reachable(local_ref):
         return local_ref
-    if uri_exists(DEFAULT_ALAN_CF_CVG_URI):
+    if _uri_reachable(DEFAULT_ALAN_CF_CVG_URI):
         logging.info("ALAN cf_cvg: using bucket object %s", DEFAULT_ALAN_CF_CVG_URI)
         return DEFAULT_ALAN_CF_CVG_URI
     if required:

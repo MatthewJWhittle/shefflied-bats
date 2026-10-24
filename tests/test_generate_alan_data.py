@@ -328,3 +328,17 @@ def test_resolve_cf_cvg_optional_when_absent(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("sdm.data.alan.DEFAULT_ALAN_CF_CVG_PATH", missing)
     monkeypatch.setattr("sdm.data.alan.uri_exists", lambda ref: False)
     assert resolve_alan_cf_cvg_uri(required=False) is None
+
+
+def test_resolve_cf_cvg_soft_fails_bucket_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unauthenticated gs:// probes must not raise (CI has no GCS creds)."""
+    missing = Path("/nonexistent/alan/viirs_cf_cvg.tif")
+    monkeypatch.setattr("sdm.data.alan.DEFAULT_ALAN_CF_CVG_PATH", missing)
+
+    def boom(ref: str) -> bool:
+        if str(ref).startswith("gs://"):
+            raise OSError("Anonymous caller does not have storage.objects.get")
+        return Path(str(ref)).exists()
+
+    monkeypatch.setattr("sdm.data.alan.uri_exists", boom)
+    assert resolve_alan_cf_cvg_uri(required=False) is None
