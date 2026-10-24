@@ -89,6 +89,18 @@ package.json   # schema_version 1, ordered feature_names, metrics, …
 sdm config
 ```
 
+## MLflow run tracking
+
+Training and tuning can log parameters, held-out scores, cut-offs, plots, and
+model files to a **shared** store so runs from either computer are comparable.
+There is no tracking server: clients talk to Neon Postgres for metadata and to a
+private GCS prefix for artefacts. The database password lives in Google Secret
+Manager (or `MLFLOW_DB_PASSWORD` for cloud agents), never in git.
+
+Tracking stays **off** until you copy `mlflow.settings.example.yml` to the
+gitignored `mlflow.settings.yml` and cloud resources are approved. Exact create
+steps for Matt: [docs/mlflow-tracking.md](docs/mlflow-tracking.md).
+
 ## Occurrence data
 
 GeoJSON at `data/processed/bats-tidy.geojson` (or point `config.yml` with `sdm set-occurrence`). Expected columns:

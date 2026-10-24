@@ -11,20 +11,16 @@ import logging
 import math
 import os
 import pickle
-from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import datetime
 from itertools import product
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, TypeVar, cast, Any, Any
 from concurrent.futures import ProcessPoolExecutor
 
 import geopandas as gpd
-import mlflow
 import numpy as np
 import pandas as pd
 import xarray as xr
-from mlflow.sklearn import log_model
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 import elapid as ela
@@ -91,6 +87,12 @@ from sdm.utils.model_runs import (
     model_run_write_context,
     resolve_data_path,
     resolve_output_root,
+)
+from sdm.utils.mlflow_tracking import (
+    TrainingSessionMetadata,
+    configure_mlflow,
+    log_models_to_mlflow,
+    resolve_mlflow_config,
 )
 logger = logging.getLogger(__name__)
 
@@ -622,18 +624,6 @@ def _summarize_cv_scores(
         return np.nan, np.nan, 0, n_total
     
     return float(valid_scores.mean()), float(valid_scores.std()), n_valid, n_total
-
-
-def _configure_mlflow_from_config(project_config: ProjectConfig) -> None:
-    """Configure MLflow tracking URI and experiment from project configuration."""
-    tracking_uri = project_config.mlflow.tracking_uri
-    experiment_name = project_config.mlflow.experiment_name
-    
-    mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment(experiment_name)
-    
-    logger.debug("MLflow tracking URI: %s", tracking_uri)
-    logger.debug("MLflow experiment: %s", experiment_name)
 
 
 def train_single_model(
@@ -1191,119 +1181,6 @@ def save_run_metadata(
     return path
 
 
-def log_models_to_mlflow(
-    models: List[TrainingResults],
-    training_data: List[TrainingData],
-    results_df: pd.DataFrame,
-) -> None:
-    """
-    Log trained models and results to MLflow.
-    
-    Args:
-        models: List of TrainingResults
-        results_df: DataFrame containing model results
-        
-    Returns:
-        None
-    """
-    # Check if a run is already active (e.g., from tuning script)
-    active_run = mlflow.active_run()
-    
-    if active_run is None:
-        # Start parent run for this training session
-        parent_run_name = f"SDM_Training_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        run_context = mlflow.start_run(run_name=parent_run_name)
-        logger.debug(f"Started MLflow parent run: {parent_run_name}")
-    else:
-        # Use existing run (e.g., from tuning)
-        logger.debug(f"Using existing MLflow run: {active_run.info.run_id}")
-        # Create a context manager that does nothing (we're already in a run)
-        run_context = nullcontext()
-    
-    with run_context:
-        # Log results DataFrame
-        mlflow.log_table(data=results_df, artifact_file="model_results.parquet")
-        logger.debug(f"Logging {len(models)} models to MLflow...")
-        
-        # Log individual models
-        for model in models:
-            data = training_data[models.index(model)]
-            model_identifier = model.identifier()
-            with mlflow.start_run(nested=True, run_name=model_identifier):
-                logger.debug(f"Logging model: {model_identifier}")
-                
-                # Log basic model parameters
-                mlflow.log_params(
-                    {
-                        "latin_name": model.latin_name,
-                        "activity_type": model.activity_type,
-                        "n_presence": len(data.occurrence[data.occurrence["class"] == 1]),
-                        "n_background": len(data.occurrence[data.occurrence["class"] == 0]),
-                    }
-                )
-                # log model parameters
-                if model.final_model is not None:
-                    model_params = model.final_model.get_params()
-                    mlflow.log_params(model_params)
-                else:
-                    logger.error(f"Model is None for {model_identifier}")
-                
-                ## Log model tags
-                mlflow.set_tag("latin_name", model.latin_name)
-                genus = model.latin_name.split(" ")[0]
-                species = model.latin_name.split(" ")[1]
-                species_code = genus[:3] + "_" + species[:3]
-                mlflow.set_tag("species_code", species_code)
-                mlflow.set_tag("activity_type", model.activity_type)
-                
-                # Log model metrics
-                cv_mean, cv_std, n_valid, _ = _summarize_cv_scores(model.cv_scores)
-                if n_valid > 0:
-                    mlflow.log_metric("mean_auc", cv_mean)
-                    mlflow.log_metric("std_auc", cv_std)
-                else:
-                    logger.info(
-                        "Skipping MLflow metric logging for %s (no valid CV scores)",
-                        model_identifier,
-                    )
-                
-                # Log model artifact
-                if model.final_model is not None:
-                    occurrence = data.occurrence
-                    x_sample = occurrence.drop(columns=["geometry", "class", "sample_weight"])
-                    x_sample = x_sample.iloc[0]
-                    input_example = pd.DataFrame(x_sample).T
-                    artifact_path = f"{model_identifier}_final_model"
-                    try:
-                        model_info = log_model(
-                            model.final_model,
-                            name=artifact_path,
-                            input_example=input_example,
-                        )
-                        logger.debug(f"✓ Model logged to MLflow: {model_info.model_uri}")
-                    except Exception as e:
-                        if "UNIQUE constraint" in str(e) or "duplicate" in str(e).lower():
-                            logger.warning(
-                                f"MLflow metric conflict for {model_identifier}, but model was saved. Error: {e}"
-                            )
-                        else:
-                            logger.error(
-                                f"Failed to log model {model_identifier} to MLflow: {e}"
-                            )
-                            raise
-                else:
-                    logger.error(f"Model is None for {model_identifier}")
-        
-        # Log summary information at the end of the parent run
-        active_run_after = mlflow.active_run()
-        parent_run_id = (
-            active_run_after.info.run_id if active_run_after else "N/A"
-        )
-        logger.debug(
-            f"MLflow logging complete - Run ID: {parent_run_id}, {len(models)} models logged"
-        )
-
-
 # ============================================================================
 # Main training function
 # ============================================================================
@@ -1672,8 +1549,8 @@ def train_sdm_models(
         fold_params.to_metadata(),
     )
     
-    # Configure MLflow
-    _configure_mlflow_from_config(project_config)
+    mlflow_cfg = resolve_mlflow_config(project_config)
+    mlflow_enabled = configure_mlflow(mlflow_cfg)
     
     # Load data
     logger.info("Loading input data...")
@@ -1929,9 +1806,26 @@ def train_sdm_models(
 
     logger.info("Model run outputs: %s", written_uri)
     
-    # Log to MLflow
-    logger.info("Logging to MLflow...")
-    log_models_to_mlflow(models, training_data, results_df)
+    if mlflow_enabled:
+        logger.info("Logging to MLflow...")
+        session_metadata = TrainingSessionMetadata(
+            occurrence_data=str(bats_uri),
+            ev_data=str(ev_uri),
+            model_config_path=str(model_config_path),
+            variables_config_path=(
+                str(variables_config_path) if variables_config_path else None
+            ),
+            model_run_uri=str(written_uri),
+        )
+        log_models_to_mlflow(
+            models,
+            training_data,
+            results_df,
+            session_metadata=session_metadata,
+            maxent_config_to_dict=_maxent_config_to_dict,
+        )
+    else:
+        logger.info("Skipping MLflow logging (disabled or unavailable).")
     
     logger.info("✓ Training pipeline complete")
 

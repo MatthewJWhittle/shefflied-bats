@@ -68,7 +68,10 @@ ev_stack:
         min: 0
         max: 40
 
-# MLflow configuration
+# MLflow run tracking (#93). Secrets and connection details live in the
+# gitignored mlflow.settings.yml (see mlflow.settings.example.yml). Tracking
+# stays off until that file is filled in and cloud resources are approved.
 mlflow:
-  tracking_uri: "sqlite:///mlflow.db"
+  enabled: false
+  settings_file: "mlflow.settings.yml"
   experiment_name: "species_sdm_experiment"

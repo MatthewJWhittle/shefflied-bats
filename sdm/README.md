@@ -90,6 +90,9 @@ From `config.yml`:
 | Models | `data/sdm_models/` |
 | Predictions | `data/sdm_predictions/` |
 
+Shared MLflow tracking (Neon + GCS artefacts) is documented in
+[docs/mlflow-tracking.md](../docs/mlflow-tracking.md).
+
 ## Adding commands
 
 1. Implement the command under `sdm/commands/`
