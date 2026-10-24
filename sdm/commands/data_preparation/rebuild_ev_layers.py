@@ -77,7 +77,7 @@ def rebuild_environmental_layers(
     fresh: bool = False,
     ceh_data_path: Path = DEFAULT_CEH_PATH,
     coastline_path: Path | None = None,
-    buffer_distance_m: float = 7000,
+    buffer_distance_m: float = 0,
     config_evs: str | Path | None = None,
     config_ev_tiff: str | Path | None = None,
     metrics_stem: str = "rebuild_metrics",
@@ -179,6 +179,7 @@ def rebuild_environmental_layers(
                 output_dir=evs_dir / "landcover",
                 boundary_path=boundary_path,
                 ceh_data_path=ceh_data_path,
+                buffer_distance_m=buffer_distance_m,
                 verbose=verbose,
             ),
         )

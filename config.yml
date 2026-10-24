@@ -23,6 +23,8 @@ spatial:
   left: 313000
   crs: "EPSG:27700"
   resolution: 100
+  # Applied once by `sdm setup` (buffer ∩ ONS BFC land) into paths.boundary.
+  # EV builders load that file with no extra buffer.
   study_area_buffer: 7000
 
 # Coordinate reference system

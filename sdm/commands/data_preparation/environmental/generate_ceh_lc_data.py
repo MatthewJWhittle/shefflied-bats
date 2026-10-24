@@ -176,7 +176,7 @@ def generate_ceh_lc_data(
     output_dir: Path,
     boundary_path: Path,
     ceh_data_path: Path,
-    buffer_distance_m: float = 7000,  # Match original default
+    buffer_distance_m: float = 0,
     output_resolution_m: int = 100,
     verbose: bool = False,
     chunks: Optional[Mapping[str, int]] = None,

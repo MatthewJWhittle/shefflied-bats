@@ -300,10 +300,15 @@ def load_tuning_configs(
 
 def load_boundary_and_transform(
         boundary_path: Union[str, Path],
-        buffer_distance: Union[float, int] = 7000,
+        buffer_distance: Union[float, int] = 0,
 ) -> Tuple[gpd.GeoDataFrame, Affine, tuple, Dict]:
     """
     Load the boundary and construct the model transform.
+
+    Default ``buffer_distance`` is 0: ``sdm setup`` writes the modelling extent
+    (study_area_buffer ∩ ONS BFC land) into ``paths.boundary``, so EV builders
+    should not buffer again.
+
     Returns: Tuple[gpd.GeoDataFrame, Affine, tuple, Dict]
     """
     spatial_config = load_spatial_config()

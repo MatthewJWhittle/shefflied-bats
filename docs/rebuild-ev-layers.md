@@ -119,6 +119,8 @@ Or end-to-end after `sdm setup`:
 sdm pipeline --output-dir data/evs-rebuild --fresh
 ```
 
+`sdm setup` writes `paths.boundary` as the modelling extent: counties dissolved, buffered by `spatial.study_area_buffer`, then clipped to ONS BFC land (keeps inland edge buffers, drops sea / estuary). EV steps load that file with no extra buffer — re-run setup before a rebuild if the boundary is still an unbuffered county dissolve.
+
 ## Implementation notes
 
 Supports comparing a fresh rebuild against the live set without overwriting it. Layer comparison tooling and distance-geometry fixes are tracked separately. Use `--fresh` when source tiles change so stale OS parquets cannot hide updates.
