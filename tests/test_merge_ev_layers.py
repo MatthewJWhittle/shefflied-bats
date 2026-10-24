@@ -29,12 +29,12 @@ class TestBuildEvDatasetInputs:
         assert "terrain" in parsed
         assert "climate_stats" in parsed
         assert "climate_bioclim" in parsed
-        assert "alan" in parsed
+        assert "alan_viirs_radiance" in parsed
         assert parsed["vom_vegetation_height"] == (
             evs_dir / "vom" / "vom_summary_metrics_100m.tif"
         )
         assert parsed["terrain"] == evs_dir / "terrain" / "dtm_dsm_100m.tif"
-        assert parsed["alan"] == evs_dir / "alan_viirs_radiance.tif"
+        assert parsed["alan_viirs_radiance"] == evs_dir / "alan_viirs_radiance.tif"
 
     def test_build_ev_dataset_inputs_skip_ceh_and_coastal(self):
         evs_dir = Path("data/evs")
@@ -47,7 +47,7 @@ class TestBuildEvDatasetInputs:
         assert "bgs_coast" not in parsed
         assert "landcover" not in parsed
         assert "coastal" not in parsed
-        assert "alan" in parsed
+        assert "alan_viirs_radiance" in parsed
         for name, path in parsed.items():
             assert path.suffix == ".tif", f"{name} should point to a GeoTIFF, got {path}"
 
@@ -60,7 +60,7 @@ class TestBuildEvDatasetInputs:
         evs_dir = Path("data/evs")
         inputs = build_ev_dataset_inputs(evs_dir, resolution=100, skip_alan=True)
         parsed = parse_dataset_input(inputs)
-        assert "alan" not in parsed
+        assert "alan_viirs_radiance" not in parsed
         assert len(parsed) == 9
 
 
@@ -313,6 +313,7 @@ class TestMergeGridMatchesRelease:
             "generate_vom_data",
             "generate_coastal_distance",
             "process_os_data",
+            "generate_alan_data",
         ):
             monkeypatch.setattr(mod, name, _ok)
         monkeypatch.setattr(mod, "merge_ev_layers", _merge)
@@ -337,6 +338,7 @@ class TestMergeGridMatchesRelease:
             resolution=100,
             buffer_distance_m=0,
             only=["merge"],
+            alan_source_path=tmp_path / "no-viirs.tif",
         )
         assert captured.get("boundary_buffer_m") == 0
 
@@ -367,6 +369,7 @@ class TestMergeGridMatchesRelease:
             "generate_vom_data",
             "generate_coastal_distance",
             "process_os_data",
+            "generate_alan_data",
         ):
             monkeypatch.setattr(mod, name, _ok)
         monkeypatch.setattr(mod, "merge_ev_layers", _merge)
@@ -390,6 +393,7 @@ class TestMergeGridMatchesRelease:
             boundary_path=boundary,
             resolution=100,
             only=["merge"],
+            alan_source_path=tmp_path / "no-viirs.tif",
         )
         assert captured.get("boundary_buffer_m") == 0
 

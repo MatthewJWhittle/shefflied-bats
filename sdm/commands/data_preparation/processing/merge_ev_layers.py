@@ -51,7 +51,9 @@ def build_ev_dataset_inputs(
             f"bgs_coast={evs_dir / 'coastal_distance.tif'}",
         )
     if not skip_alan:
-        inputs.append(f"alan={evs_dir / 'alan_viirs_radiance.tif'}")
+        # Single-band merge uses the dataset key as the stack name, so the key
+        # must be the full ML band name (not a short prefix).
+        inputs.append(f"alan_viirs_radiance={evs_dir / 'alan_viirs_radiance.tif'}")
     return inputs
 
 

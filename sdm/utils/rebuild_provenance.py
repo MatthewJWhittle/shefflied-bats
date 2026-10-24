@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import requests
 
+from sdm.data.alan import parse_vnl_source_metadata
 from sdm.data.coastline_download import PRODUCT_ID as BOUNDARY_LINE_PRODUCT_ID
 from sdm.data.os_download import BASE_URL as OS_DOWNLOADS_BASE_URL
 from sdm.data.os_download import PRODUCT_ID as OS_VMD_PRODUCT_ID
@@ -18,6 +19,9 @@ DEFAULT_CEH_PATH = Path(
     "data/raw/big-files/CEH/data/"
     "7727ce7d-531e-4d77-b756-5cc59ff016bd/gblcm2023_10m.tif"
 )
+DEFAULT_ALAN_PATH = Path("data/raw/big-files/alan/viirs_annual.tif")
+DEFAULT_ALAN_CF_CVG_PATH = Path("data/raw/big-files/alan/viirs_cf_cvg.tif")
+ALAN_PRODUCT = "EOG VIIRS Nighttime Lights (VNL) annual average_masked"
 
 WORLDCLIM_PRODUCT = "WorldClim 2.1"
 WORLDCLIM_URL_PATTERN = (
@@ -125,9 +129,44 @@ def fetch_os_product_release(
     return meta
 
 
+def _alan_source_meta(
+    alan_path: Path,
+    *,
+    cf_cvg_path: Path,
+) -> dict[str, Any]:
+    """Local ALAN radiance + optional cf_cvg provenance (no secrets)."""
+    meta: dict[str, Any] = {
+        "product": ALAN_PRODUCT,
+        "band_name": "alan_viirs_radiance",
+        "units": "nW/cm^2/sr",
+        "resampling": "bilinear",
+        "validity": (
+            "preserve radiance zeros; cf_cvg<=0 → NaN when coverage present"
+        ),
+        **_path_source_meta(alan_path),
+        "cf_cvg": _path_source_meta(cf_cvg_path),
+    }
+    if alan_path.exists():
+        try:
+            parsed = parse_vnl_source_metadata(alan_path)
+        except (OSError, ValueError) as exc:
+            logger.info("ALAN tag parse skipped: %s", exc)
+        else:
+            for key in ("year", "product_version", "config", "radiance_band"):
+                if key in parsed:
+                    meta[key] = parsed[key]
+            if "source_tags" in parsed:
+                doc = parsed["source_tags"].get("TIFFTAG_DOCUMENTNAME")
+                if doc:
+                    meta["source_document_name"] = doc
+    return meta
+
+
 def collect_rebuild_provenance(
     *,
     ceh_data_path: Path | str | None = None,
+    alan_source_path: Path | str | None = None,
+    alan_cf_cvg_path: Path | str | None = None,
     cwd: Optional[Path] = None,
     session: Optional[requests.Session] = None,
     fetched_at_utc: Optional[str] = None,
@@ -141,6 +180,14 @@ def collect_rebuild_provenance(
     study-area names, grid references, or secrets.
     """
     ceh_path = Path(ceh_data_path) if ceh_data_path is not None else DEFAULT_CEH_PATH
+    alan_path = (
+        Path(alan_source_path) if alan_source_path is not None else DEFAULT_ALAN_PATH
+    )
+    cf_cvg_path = (
+        Path(alan_cf_cvg_path)
+        if alan_cf_cvg_path is not None
+        else DEFAULT_ALAN_CF_CVG_PATH
+    )
     fetched = fetched_at_utc or _utc_now_iso()
     return {
         "recorded_at_utc": fetched,
@@ -182,5 +229,6 @@ def collect_rebuild_provenance(
                 "product": CEH_PRODUCT,
                 **_path_source_meta(ceh_path),
             },
+            "alan_viirs": _alan_source_meta(alan_path, cf_cvg_path=cf_cvg_path),
         },
     }

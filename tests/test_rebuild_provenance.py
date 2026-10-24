@@ -81,6 +81,9 @@ def test_collect_rebuild_provenance_includes_git_and_sources(tmp_path: Path) -> 
     assert sources["ceh_land_cover"]["present"] is True
     assert sources["ceh_land_cover"]["mtime_utc"]
     assert sources["ceh_land_cover"]["size_bytes"] == 8
+    assert sources["alan_viirs"]["band_name"] == "alan_viirs_radiance"
+    assert sources["alan_viirs"]["units"] == "nW/cm^2/sr"
+    assert sources["alan_viirs"]["resampling"] == "bilinear"
     # Public-safe: no study-area labels in provenance.
     blob = json.dumps(payload)
     assert "Skipton" not in blob
@@ -125,6 +128,7 @@ def test_rebuild_metrics_include_provenance_on_orchestrator(
     monkeypatch.setattr(mod, "generate_vom_data", _ok)
     monkeypatch.setattr(mod, "generate_coastal_distance", _ok)
     monkeypatch.setattr(mod, "process_os_data", _ok)
+    monkeypatch.setattr(mod, "generate_alan_data", _ok)
     monkeypatch.setattr(mod, "merge_ev_layers", _ok)
     monkeypatch.setattr(
         mod,
@@ -155,6 +159,7 @@ def test_rebuild_metrics_include_provenance_on_orchestrator(
             out,
             boundary_path=boundary,
             resolution=100,
+            alan_source_path=tmp_path / "no-viirs.tif",
         )
 
     metrics = json.loads((out / "rebuild_metrics.json").read_text(encoding="utf-8"))

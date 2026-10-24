@@ -24,10 +24,17 @@ from sdm.commands.data_preparation.environmental.generate_terrain_stats import (
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
     generate_vom_data,
 )
-from sdm.data.alan import ALAN_OUTPUT_NAME, DEFAULT_ALAN_SOURCE_PATH
+from sdm.data.alan import (
+    ALAN_BAND_NAME,
+    ALAN_OUTPUT_NAME,
+    DEFAULT_ALAN_CF_CVG_PATH,
+    DEFAULT_ALAN_SOURCE_PATH,
+)
 from sdm.commands.data_preparation.processing.build_model_ev_stack import (
+    DEFAULT_SELECTED_VARIABLES_CSV,
     build_model_ev_stack,
     build_settings_from_config,
+    load_selected_variable_names,
 )
 from sdm.commands.data_preparation.processing.merge_ev_layers import (
     build_ev_dataset_inputs,
@@ -82,6 +89,7 @@ def rebuild_environmental_layers(
     ceh_data_path: Path = DEFAULT_CEH_PATH,
     coastline_path: Path | None = None,
     alan_source_path: Path | None = None,
+    alan_cf_cvg_path: Path | None = None,
     buffer_distance_m: float = 0,
     config_evs: str | Path | None = None,
     config_ev_tiff: str | Path | None = None,
@@ -234,6 +242,11 @@ def rebuild_environmental_layers(
             if alan_source_path is not None
             else DEFAULT_ALAN_SOURCE_PATH
         )
+        alan_cf_cvg = (
+            Path(alan_cf_cvg_path)
+            if alan_cf_cvg_path is not None
+            else DEFAULT_ALAN_CF_CVG_PATH
+        )
         alan_output = evs_dir / ALAN_OUTPUT_NAME
         only_set = frozenset(only)
         if "alan" in active:
@@ -244,6 +257,9 @@ def rebuild_environmental_layers(
                         output_dir=evs_dir,
                         boundary_path=boundary_path,
                         alan_source_path=alan_source,
+                        alan_cf_cvg_path=(
+                            alan_cf_cvg if alan_cf_cvg.exists() else None
+                        ),
                         buffer_distance_m=buffer_distance_m,
                         verbose=verbose,
                     ),
@@ -292,12 +308,39 @@ def rebuild_environmental_layers(
         # Model stack needs the merge product. Skip it for --only/--skip paths
         # that did not select merge so a successful single step exits 0.
         if "merge" in active:
+            stack_settings = dict(build_settings)
+            if skip_alan:
+                selected_csv = Path(
+                    stack_settings.get(
+                        "selected_variables_csv", DEFAULT_SELECTED_VARIABLES_CSV
+                    )
+                )
+                try:
+                    selected = load_selected_variable_names(selected_csv)
+                except (OSError, ValueError, FileNotFoundError):
+                    selected = []
+                if ALAN_BAND_NAME in selected:
+                    filtered = [name for name in selected if name != ALAN_BAND_NAME]
+                    filtered_csv = evs_dir / "ev_clusters_selected_without_alan.csv"
+                    filtered_csv.write_text(
+                        "column_name,include\n"
+                        + "".join(f"{name},1\n" for name in filtered),
+                        encoding="utf-8",
+                    )
+                    stack_settings["selected_variables_csv"] = str(filtered_csv)
+                    logging.warning(
+                        "Omitting %s from model stack (alan layer not built); "
+                        "using %s",
+                        ALAN_BAND_NAME,
+                        filtered_csv,
+                    )
+
             def _build_stack() -> Path:
                 nonlocal applied_build_settings
                 path, used_settings = build_model_ev_stack(
                     merged_output,
                     model_stack_output,
-                    build_settings=build_settings,
+                    build_settings=stack_settings,
                     verbose=verbose,
                 )
                 applied_build_settings = used_settings
@@ -316,7 +359,9 @@ def rebuild_environmental_layers(
                 extra={
                     "build_settings": applied_build_settings,
                     "provenance": collect_rebuild_provenance(
-                        ceh_data_path=ceh_data_path
+                        ceh_data_path=ceh_data_path,
+                        alan_source_path=alan_source_path or DEFAULT_ALAN_SOURCE_PATH,
+                        alan_cf_cvg_path=alan_cf_cvg_path or DEFAULT_ALAN_CF_CVG_PATH,
                     ),
                 },
             )

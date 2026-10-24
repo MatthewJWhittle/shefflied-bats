@@ -212,6 +212,7 @@ def test_rebuild_only_merge_uses_existing_ceh_and_coastal(tmp_path, monkeypatch)
         "generate_vom_data",
         "generate_coastal_distance",
         "process_os_data",
+        "generate_alan_data",
         "merge_ev_layers",
     ):
         monkeypatch.setattr(mod, name, _ok)
@@ -231,6 +232,7 @@ def test_rebuild_only_merge_uses_existing_ceh_and_coastal(tmp_path, monkeypatch)
         boundary_path=boundary,
         resolution=100,
         only=["merge"],
+        alan_source_path=tmp_path / "no-viirs.tif",
     )
 
     kwargs = captured_inputs.get("kwargs", {})
@@ -270,6 +272,7 @@ def test_rebuild_explicit_skip_still_omits_ceh_from_merge(tmp_path, monkeypatch)
         "generate_vom_data",
         "generate_coastal_distance",
         "process_os_data",
+        "generate_alan_data",
         "merge_ev_layers",
     ):
         monkeypatch.setattr(mod, name, _ok)
@@ -289,6 +292,7 @@ def test_rebuild_explicit_skip_still_omits_ceh_from_merge(tmp_path, monkeypatch)
         boundary_path=boundary,
         resolution=100,
         skip=["ceh", "coastal"],
+        alan_source_path=tmp_path / "no-viirs.tif",
     )
     kwargs = captured_inputs.get("kwargs", {})
     assert kwargs.get("skip_ceh") is True
@@ -318,6 +322,7 @@ def test_rebuild_only_step_skips_model_stack(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "generate_vom_data", _ok)
     monkeypatch.setattr(mod, "generate_coastal_distance", _ok)
     monkeypatch.setattr(mod, "process_os_data", _ok)
+    monkeypatch.setattr(mod, "generate_alan_data", _ok)
     monkeypatch.setattr(mod, "merge_ev_layers", _ok)
     monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: [])
     stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
@@ -336,6 +341,7 @@ def test_rebuild_only_step_skips_model_stack(tmp_path, monkeypatch):
         boundary_path=boundary,
         resolution=100,
         only=["climate"],
+        alan_source_path=tmp_path / "no-viirs.tif",
     )
     assert stack_calls == [], "model stack must not run when merge was not selected"
 
@@ -404,6 +410,7 @@ def test_rebuild_passes_coastline_path_to_coastal_step(tmp_path, monkeypatch):
         "generate_ceh_lc_data",
         "generate_vom_data",
         "process_os_data",
+        "generate_alan_data",
         "merge_ev_layers",
     ):
         monkeypatch.setattr(mod, name, _ok)
@@ -424,5 +431,6 @@ def test_rebuild_passes_coastline_path_to_coastal_step(tmp_path, monkeypatch):
         resolution=100,
         only=["coastal"],
         coastline_path=coast,
+        alan_source_path=tmp_path / "no-viirs.tif",
     )
     assert captured.get("coastline_path") == coast
