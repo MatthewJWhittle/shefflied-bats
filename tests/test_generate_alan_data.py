@@ -24,9 +24,13 @@ from sdm.commands.data_preparation.processing.merge_ev_layers import (
 from sdm.data.alan import (
     ALAN_BAND_NAME,
     ALAN_OUTPUT_NAME,
+    DEFAULT_ALAN_CF_CVG_URI,
+    DEFAULT_ALAN_SOURCE_URI,
     load_alan_source,
     load_alan_source_windowed,
     reproject_alan_to_model_grid,
+    resolve_alan_cf_cvg_uri,
+    resolve_alan_source_uri,
 )
 from sdm.raster.utils import construct_transform_shift_bounds, grid_shape_from_bounds
 
@@ -294,3 +298,33 @@ def test_generate_alan_data_writes_aligned_layer(tmp_path: Path, monkeypatch) ->
             None,
             "",
         }
+
+
+def test_resolve_alan_prefers_local_over_bucket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    local = tmp_path / "viirs_annual.tif"
+    local.write_bytes(b"x")
+    monkeypatch.setattr("sdm.data.alan.DEFAULT_ALAN_SOURCE_PATH", local)
+    # Bucket must not be probed when local exists.
+    def boom(uri: str) -> bool:  # noqa: ARG001
+        raise AssertionError(f"unexpected uri_exists for {uri}")
+
+    monkeypatch.setattr("sdm.data.alan.uri_exists", lambda ref: Path(str(ref)).exists())
+    assert resolve_alan_source_uri() == str(local)
+
+
+def test_resolve_alan_falls_back_to_bucket(monkeypatch: pytest.MonkeyPatch) -> None:
+    missing = Path("/nonexistent/alan/viirs_annual.tif")
+    monkeypatch.setattr("sdm.data.alan.DEFAULT_ALAN_SOURCE_PATH", missing)
+
+    def fake_exists(ref: str) -> bool:
+        return str(ref) == DEFAULT_ALAN_SOURCE_URI
+
+    monkeypatch.setattr("sdm.data.alan.uri_exists", fake_exists)
+    assert resolve_alan_source_uri() == DEFAULT_ALAN_SOURCE_URI
+
+
+def test_resolve_cf_cvg_optional_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    missing = Path("/nonexistent/alan/viirs_cf_cvg.tif")
+    monkeypatch.setattr("sdm.data.alan.DEFAULT_ALAN_CF_CVG_PATH", missing)
+    monkeypatch.setattr("sdm.data.alan.uri_exists", lambda ref: False)
+    assert resolve_alan_cf_cvg_uri(required=False) is None

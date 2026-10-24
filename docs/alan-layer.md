@@ -16,14 +16,29 @@ committed.
 | Field | Value |
 |-------|--------|
 | Product | EOG annual VNL **v2.2** (`average_masked`) |
-| Year | **2025** composite |
-| Local path | `data/raw/big-files/alan/viirs_annual.tif` |
-| Coverage | Optional matching `cf_cvg` at `data/raw/big-files/alan/viirs_cf_cvg.tif` |
+| Year | **2025** composite (canonical; Matt, 24 Oct 2026) |
+| Bucket (radiance) | `gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_annual.tif` |
+| Bucket (coverage) | `gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_cf_cvg.tif` |
+| Bucket (cf_cvg provenance) | `gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_cf_cvg.provenance.json` |
+| Local cache (override) | `data/raw/big-files/alan/viirs_annual.tif` and `viirs_cf_cvg.tif` |
 | Units | nW/cm²/sr |
 | Native grid | EPSG:4326, ~15″ (~500 m) |
 | Licence | EOG VNL CC-BY 4.0 (attribute Elvidge et al.; mark changes) |
 
 Keep the global download in the bucket / local cache only — **not in git**.
+Generation prefers the local cache when present, otherwise the bucket URIs above
+(via GDAL `/vsigs/`). Explicit `--alan-source-path` / `--alan-cf-cvg-path`
+(local or `gs://`) always win.
+
+```bash
+# Optional: sync bucket objects into the local cache
+mkdir -p data/raw/big-files/alan
+gsutil -m cp \
+  gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_annual.tif \
+  gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_cf_cvg.tif \
+  gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_cf_cvg.provenance.json \
+  data/raw/big-files/alan/
+```
 
 ### Temporal mismatch
 

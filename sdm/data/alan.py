@@ -30,10 +30,24 @@ from rasterio.windows import Window, from_bounds
 from rasterio.warp import transform_bounds
 
 from sdm.raster.utils import reproject_data, squeeze_dataset
+from sdm.utils.fs import uri_exists, uri_for_rasterio
 
-# Default local cache paths (not committed).
+# Default local cache paths (not committed). Prefer these when present.
 DEFAULT_ALAN_SOURCE_PATH = Path("data/raw/big-files/alan/viirs_annual.tif")
 DEFAULT_ALAN_CF_CVG_PATH = Path("data/raw/big-files/alan/viirs_cf_cvg.tif")
+
+# Bucket raw-input objects (2025 EOG VNL v2.2). Used when the local cache is absent.
+ALAN_BUCKET_PREFIX = "gs://habitat-suitability-modelling-data/raw/big-files/alan"
+DEFAULT_ALAN_SOURCE_URI = f"{ALAN_BUCKET_PREFIX}/viirs_annual.tif"
+DEFAULT_ALAN_CF_CVG_URI = f"{ALAN_BUCKET_PREFIX}/viirs_cf_cvg.tif"
+DEFAULT_ALAN_CF_CVG_PROVENANCE_URI = (
+    f"{ALAN_BUCKET_PREFIX}/viirs_cf_cvg.provenance.json"
+)
+
+# Canonical product (Matt: year 2025; average_masked radiance).
+ALAN_CANONICAL_YEAR = 2025
+ALAN_CANONICAL_PRODUCT_VERSION = "VNL v2.2"
+ALAN_CANONICAL_RADIANCE_BAND = "average_masked"
 
 # Stack / merge / species / selection name (single band end-to-end).
 ALAN_BAND_NAME = "alan_viirs_radiance"
@@ -50,8 +64,80 @@ _VNL_NAME_RE = re.compile(
 )
 
 
+def resolve_alan_raster_uri(
+    override: Optional[Union[str, Path]] = None,
+    *,
+    local_default: Union[str, Path],
+    bucket_default: str,
+    label: str,
+) -> str:
+    """Resolve an ALAN raster URI: explicit override, else local cache, else bucket.
+
+    Local paths win when the file exists so offline rebuilds keep working.
+    Bucket defaults are the canonical 2025 VNL v2.2 objects under
+    ``gs://habitat-suitability-modelling-data/raw/big-files/alan/``.
+    """
+    if override is not None:
+        ref = str(override)
+        if uri_exists(ref):
+            return ref
+        raise FileNotFoundError(
+            f"ALAN {label} not found at {ref}. Place the GeoTIFF locally or "
+            f"pass a reachable path / gs:// URI."
+        )
+    local_ref = str(local_default)
+    if uri_exists(local_ref):
+        return local_ref
+    if uri_exists(bucket_default):
+        logging.info("ALAN %s: using bucket object %s", label, bucket_default)
+        return bucket_default
+    raise FileNotFoundError(
+        f"ALAN {label} not found at {local_ref} or {bucket_default}. "
+        "Sync from the bucket into data/raw/big-files/alan/ or pass an explicit path."
+    )
+
+
+def resolve_alan_source_uri(override: Optional[Union[str, Path]] = None) -> str:
+    """Resolve the canonical 2025 average_masked radiance GeoTIFF."""
+    return resolve_alan_raster_uri(
+        override,
+        local_default=DEFAULT_ALAN_SOURCE_PATH,
+        bucket_default=DEFAULT_ALAN_SOURCE_URI,
+        label="radiance source",
+    )
+
+
+def resolve_alan_cf_cvg_uri(
+    override: Optional[Union[str, Path]] = None,
+    *,
+    required: bool = False,
+) -> Optional[str]:
+    """Resolve matching ``cf_cvg`` coverage; ``None`` when optional and absent."""
+    if override is not None:
+        return resolve_alan_raster_uri(
+            override,
+            local_default=DEFAULT_ALAN_CF_CVG_PATH,
+            bucket_default=DEFAULT_ALAN_CF_CVG_URI,
+            label="cf_cvg",
+        )
+    local_ref = str(DEFAULT_ALAN_CF_CVG_PATH)
+    if uri_exists(local_ref):
+        return local_ref
+    if uri_exists(DEFAULT_ALAN_CF_CVG_URI):
+        logging.info("ALAN cf_cvg: using bucket object %s", DEFAULT_ALAN_CF_CVG_URI)
+        return DEFAULT_ALAN_CF_CVG_URI
+    if required:
+        raise FileNotFoundError(
+            f"ALAN cf_cvg not found at {local_ref} or {DEFAULT_ALAN_CF_CVG_URI}."
+        )
+    return None
+
+
 def file_sha256(path: Union[str, Path], *, chunk_size: int = 1024 * 1024) -> str:
-    """Streaming SHA-256 of a local file."""
+    """Streaming SHA-256 of a local file (not for ``gs://`` URIs)."""
+    ref = str(path)
+    if ref.startswith("gs://"):
+        raise ValueError(f"file_sha256 requires a local path, got {ref}")
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
         while True:
@@ -64,14 +150,19 @@ def file_sha256(path: Union[str, Path], *, chunk_size: int = 1024 * 1024) -> str
 
 def parse_vnl_source_metadata(source_path: Union[str, Path]) -> dict[str, Any]:
     """Extract year/product/version hints from path and GeoTIFF tags."""
-    path = Path(source_path)
+    ref = str(source_path)
+    filename = ref.rsplit("/", 1)[-1]
     meta: dict[str, Any] = {
-        "filename": path.name,
+        "filename": filename,
         "units": ALAN_UNITS,
         "product": "EOG VIIRS Nighttime Lights (VNL)",
+        "canonical_year": ALAN_CANONICAL_YEAR,
+        "canonical_product_version": ALAN_CANONICAL_PRODUCT_VERSION,
+        "canonical_radiance_band": ALAN_CANONICAL_RADIANCE_BAND,
     }
     tag_name = ""
-    if path.exists():
+    if not ref.startswith("gs://") and Path(ref).exists():
+        path = Path(ref)
         with rio.open(path) as src:
             tags = src.tags()
             tag_name = str(tags.get("TIFFTAG_DOCUMENTNAME", "") or "")
@@ -88,7 +179,7 @@ def parse_vnl_source_metadata(source_path: Union[str, Path]) -> dict[str, Any]:
             meta["source_dtype"] = str(src.dtypes[0]) if src.count else None
             meta["source_nodata"] = src.nodata
             meta["source_band_count"] = int(src.count)
-    search_blob = f"{path.name} {tag_name}"
+    search_blob = f"{filename} {tag_name}"
     match = _VNL_NAME_RE.search(search_blob.replace("\\", "/"))
     if match:
         meta["year"] = int(match.group("year"))
@@ -209,7 +300,7 @@ def load_alan_source_windowed(
     Parameters
     ----------
     source_path:
-        Local single-band VIIRS radiance GeoTIFF.
+        Local path or ``gs://`` URI to a single-band VIIRS radiance GeoTIFF.
     target_bounds:
         Model-grid bounds (xmin, ymin, xmax, ymax) in ``target_crs``.
     target_crs:
@@ -217,29 +308,32 @@ def load_alan_source_windowed(
     margin_pixels:
         Extra source pixels for bilinear interpolation.
     cf_cvg_path:
-        Optional matching EOG ``cf_cvg`` GeoTIFF. Cells with coverage <= 0
-        become NaN (missing), distinct from valid radiance zeros.
+        Optional matching EOG ``cf_cvg`` GeoTIFF (local or ``gs://``). Cells with
+        coverage <= 0 become NaN (missing), distinct from valid radiance zeros.
+        When omitted, tries the local default then the bucket object.
     """
-    path = Path(source_path)
-    if not path.exists():
+    source_ref = str(source_path)
+    if not uri_exists(source_ref):
         raise FileNotFoundError(
-            f"ALAN source not found: {path}. Place a yearly VIIRS night-lights "
-            "GeoTIFF there (or pass alan_source_path). Do not commit the file."
+            f"ALAN source not found: {source_ref}. Place a yearly VIIRS "
+            "night-lights GeoTIFF locally, use the bucket object, or pass "
+            "alan_source_path. Do not commit the file."
         )
+    source_open = uri_for_rasterio(source_ref)
 
-    with rio.open(path) as src:
-        _validate_single_radiance_band(src, path)
+    with rio.open(source_open) as src:
+        _validate_single_radiance_band(src, Path(source_ref.split("/")[-1]))
         window = _window_for_bounds(
             src, target_bounds, target_crs, margin_pixels=margin_pixels
         )
         if window.width <= 0 or window.height <= 0:
             raise ValueError(
                 f"ALAN window is empty for bounds {target_bounds} in {target_crs} "
-                f"against {path}"
+                f"against {source_ref}"
             )
         logging.info(
             "ALAN windowed read %s window=%s (margin_pixels=%s)",
-            path.name,
+            source_ref.rsplit("/", 1)[-1],
             (
                 int(window.col_off),
                 int(window.row_off),
@@ -253,22 +347,25 @@ def load_alan_source_windowed(
     radiance.attrs["units"] = ALAN_UNITS
     radiance.attrs["long_name"] = ALAN_BAND_NAME
 
-    coverage_path = (
-        Path(cf_cvg_path)
-        if cf_cvg_path is not None
-        else DEFAULT_ALAN_CF_CVG_PATH
-    )
-    if cf_cvg_path is not None or coverage_path.exists():
-        if not coverage_path.exists():
+    # Caller (generate_alan_data) resolves local-or-bucket; here only use an
+    # explicit path or the local default so unit tests stay offline.
+    if cf_cvg_path is not None:
+        coverage_ref: Optional[str] = str(cf_cvg_path)
+    elif uri_exists(str(DEFAULT_ALAN_CF_CVG_PATH)):
+        coverage_ref = str(DEFAULT_ALAN_CF_CVG_PATH)
+    else:
+        coverage_ref = None
+    if coverage_ref is not None:
+        if not uri_exists(coverage_ref):
             raise FileNotFoundError(
-                f"ALAN cf_cvg not found: {coverage_path}. Place the matching "
-                "EOG cf_cvg GeoTIFF beside the radiance file."
+                f"ALAN cf_cvg not found: {coverage_ref}. Place the matching "
+                "EOG cf_cvg GeoTIFF locally or use the bucket object."
             )
-        with rio.open(coverage_path) as cov_src:
+        with rio.open(uri_for_rasterio(coverage_ref)) as cov_src:
             if cov_src.count != 1:
                 raise ValueError(
                     f"ALAN cf_cvg must be single-band, got {cov_src.count} "
-                    f"at {coverage_path}"
+                    f"at {coverage_ref}"
                 )
             cov_window = _window_for_bounds(
                 cov_src, target_bounds, target_crs, margin_pixels=margin_pixels
@@ -288,20 +385,22 @@ def load_alan_source_windowed(
         radiance.attrs["validity"] = (
             "cf_cvg<=0 set to NaN (missing coverage); radiance zeros preserved"
         )
+        radiance.attrs["cf_cvg_uri"] = coverage_ref
         logging.info(
-            "Applied cf_cvg validity mask (%d missing cells of %d)",
+            "Applied cf_cvg validity mask (%d missing cells of %d) from %s",
             int(np.isnan(values).sum()),
             values.size,
+            coverage_ref,
         )
     else:
         radiance.attrs["validity"] = (
             "no cf_cvg supplied; radiance zeros preserved; coverage gaps not masked"
         )
         logging.warning(
-            "ALAN cf_cvg not found at %s — valid zeros preserved, but "
-            "missing-coverage cells are not masked. Place the matching EOG "
-            "cf_cvg GeoTIFF to enable validity masking.",
-            coverage_path,
+            "ALAN cf_cvg not found at %s or %s — valid zeros preserved, but "
+            "missing-coverage cells are not masked.",
+            DEFAULT_ALAN_CF_CVG_PATH,
+            DEFAULT_ALAN_CF_CVG_URI,
         )
 
     return radiance
@@ -408,32 +507,53 @@ def build_alan_provenance(
     checksum: bool = True,
 ) -> dict[str, Any]:
     """Provenance block for rebuild metrics / GeoTIFF tags."""
-    path = Path(source_path)
-    meta = parse_vnl_source_metadata(path)
+    source_ref = str(source_path)
+    local_source = Path(source_ref) if not source_ref.startswith("gs://") else None
+    meta = parse_vnl_source_metadata(local_source if local_source is not None else source_ref)
     meta["resampling"] = resampling.name
+    meta["canonical_year"] = ALAN_CANONICAL_YEAR
+    meta["canonical_product_version"] = ALAN_CANONICAL_PRODUCT_VERSION
+    meta["canonical_radiance_band"] = ALAN_CANONICAL_RADIANCE_BAND
+    cf_ref = str(cf_cvg_path) if cf_cvg_path is not None else None
+    cf_present = bool(cf_ref and uri_exists(cf_ref))
     meta["validity"] = (
         "cf_cvg<=0 → NaN; radiance zeros preserved as valid background"
-        if cf_cvg_path is not None and Path(cf_cvg_path).exists()
+        if cf_present
         else "radiance zeros preserved; cf_cvg not applied"
     )
-    if cf_cvg_path is not None:
-        cov = Path(cf_cvg_path)
-        meta["cf_cvg_path"] = str(cov)
-        meta["cf_cvg_present"] = cov.exists()
-        if cov.exists() and checksum:
-            meta["cf_cvg_sha256"] = file_sha256(cov)
-    if path.exists() and checksum:
-        meta["sha256"] = file_sha256(path)
-    meta["path"] = str(path)
+    if cf_ref is not None:
+        meta["cf_cvg_path"] = cf_ref
+        meta["cf_cvg_present"] = cf_present
+        if (
+            checksum
+            and cf_present
+            and not cf_ref.startswith("gs://")
+            and Path(cf_ref).exists()
+        ):
+            meta["cf_cvg_sha256"] = file_sha256(cf_ref)
+    if (
+        checksum
+        and local_source is not None
+        and local_source.exists()
+    ):
+        meta["sha256"] = file_sha256(local_source)
+    meta["path"] = source_ref
     return meta
 
 
 __all__ = [
     "ALAN_BAND_NAME",
+    "ALAN_BUCKET_PREFIX",
+    "ALAN_CANONICAL_PRODUCT_VERSION",
+    "ALAN_CANONICAL_RADIANCE_BAND",
+    "ALAN_CANONICAL_YEAR",
     "ALAN_OUTPUT_NAME",
     "ALAN_UNITS",
     "DEFAULT_ALAN_CF_CVG_PATH",
+    "DEFAULT_ALAN_CF_CVG_PROVENANCE_URI",
+    "DEFAULT_ALAN_CF_CVG_URI",
     "DEFAULT_ALAN_SOURCE_PATH",
+    "DEFAULT_ALAN_SOURCE_URI",
     "DEFAULT_INTERP_MARGIN_PIXELS",
     "build_alan_provenance",
     "file_sha256",
@@ -441,5 +561,8 @@ __all__ = [
     "load_alan_source_windowed",
     "parse_vnl_source_metadata",
     "reproject_alan_to_model_grid",
+    "resolve_alan_cf_cvg_uri",
+    "resolve_alan_raster_uri",
+    "resolve_alan_source_uri",
     "write_alan_raster",
 ]
