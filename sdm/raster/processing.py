@@ -5,12 +5,11 @@ import logging
 import geopandas as gpd
 import numpy as np
 from typing import Dict, Optional, Sequence, Union, List
-from tempfile import NamedTemporaryFile
 from shapely import STRtree
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
-from .utils import generate_point_grid, rasterise_gdf
+from .utils import generate_point_grid, rasterise_gdf_to_dataarray
 
 
 def nearest_distances_strtree(
@@ -232,27 +231,25 @@ def calculate_feature_cover(
             logging.info(f"Reprojecting {name} from {gdf.crs} to {boundary.crs}")
             gdf = gdf.to_crs(boundary.crs)
 
-        with NamedTemporaryFile(suffix=".tif") as f:
-            # Use the rasterise_gdf from species_sdm.raster.utils
-            rasterise_gdf(
-                gdf, 
-                resolution=base_resolution, 
-                output_file=f.name, 
-                bbox=boundary_union.bounds
-            )
-            # Open with rioxarray, specify chunks for potentially large intermediate rasters
-            cover_raster: xr.DataArray = rxr.open_rasterio(f.name, chunks='auto').squeeze(drop=True)
+        # In-memory rasterise (same snapped grid as rasterise_gdf); no tempfile I/O
+        cover_raster: xr.DataArray = rasterise_gdf_to_dataarray(
+            gdf,
+            resolution=base_resolution,
+            bbox=boundary_union.bounds,
+        )
 
-            if scale_factor > 1:
-                cover_area = cover_raster.coarsen(
-                    x=scale_factor, y=scale_factor, boundary="trim"
-                ).sum()
-            else:
-                cover_area = cover_raster # No coarsening if scale_factor is 1
+        if scale_factor > 1:
+            cover_area = cover_raster.coarsen(
+                x=scale_factor, y=scale_factor, boundary="trim"
+            ).sum()
+        else:
+            cover_area = cover_raster
 
-            logging.debug("NA values for %s cover: %.2f%%", name,
-                          100 * float(cover_area.isnull().mean()) if cover_area.size > 0 else 0)
-        # Return as a Dataset, a_dataset.to_dataset(name=name) if it's a DataArray
+        logging.debug(
+            "NA values for %s cover: %.2f%%",
+            name,
+            100 * float(cover_area.isnull().mean()) if cover_area.size > 0 else 0,
+        )
         return cover_area.rename(name).to_dataset() 
 
     cover_datasets = []

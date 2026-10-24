@@ -11,9 +11,16 @@ from rasterio.transform import from_bounds
 import rioxarray as rxr # import unused but needed to enable rio attributes of xarray
 import xarray as xr
 
-def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=None):
-    # Define the raster size and transform
-    # Here, I'm assuming a 1x1 meter resolution and using the bounds of the GeoDataFrame
+def rasterise_gdf_to_dataarray(
+    gdf: gpd.GeoDataFrame,
+    resolution: float,
+    bbox=None,
+) -> xr.DataArray:
+    """Rasterise geometries to an in-memory 0/1 cover ``DataArray``.
+
+    Same snapped grid as ``rasterise_gdf`` (shared model origin). Zero is
+    valid "no cover" — nodata is not set to 0.
+    """
     if bbox is None:
         raw_bounds = tuple(gdf.total_bounds)
     else:
@@ -27,10 +34,29 @@ def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=
     )
     height, width = grid_shape_from_bounds((x_min, y_min, x_max, y_max), resolution)
 
-    # Create a mask: rasterize the GeoDataFrame. This gives a value of True where the geometry covers a square
-    mask = geometry_mask(gdf.geometry, transform=transform, invert=True, out_shape=(height, width))
-    # Convert the boolean mask to uint8 (or another supported data type)
-    mask = mask.astype('uint8')
+    mask = geometry_mask(
+        gdf.geometry, transform=transform, invert=True, out_shape=(height, width)
+    ).astype("uint8")
+
+    # Cell-centre coordinates matching north-up GeoTIFF layout from transform.
+    res = float(resolution)
+    x_coords = x_min + res / 2.0 + res * np.arange(width)
+    y_coords = y_max - res / 2.0 - res * np.arange(height)
+    cover = xr.DataArray(
+        mask,
+        coords={"y": y_coords, "x": x_coords},
+        dims=["y", "x"],
+        name="cover",
+    )
+    cover = cover.rio.write_crs(gdf.crs)
+    cover = cover.rio.write_transform(transform)
+    return cover
+
+
+def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=None):
+    # Define the raster size and transform
+    # Here, I'm assuming a 1x1 meter resolution and using the bounds of the GeoDataFrame
+    cover = rasterise_gdf_to_dataarray(gdf, resolution, bbox=bbox)
 
     # Write the mask to a raster file
     # 0/1 cover mask: 0 is valid "no cover". Do not tag nodata=0 — masked
@@ -39,14 +65,14 @@ def rasterise_gdf(gdf:gpd.GeoDataFrame, resolution:float, output_file:str, bbox=
         output_file,
         "w",
         driver="GTiff",
-        height=height,
-        width=width,
+        height=cover.sizes["y"],
+        width=cover.sizes["x"],
         count=1,
-        dtype=mask.dtype,
+        dtype=cover.dtype,
         crs=gdf.crs,
-        transform=transform,
+        transform=cover.rio.transform(),
     ) as dest:
-        dest.write(mask, 1)
+        dest.write(np.asarray(cover.values), 1)
 
     return output_file
 
