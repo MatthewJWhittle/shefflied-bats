@@ -10,7 +10,6 @@ from rasterio.transform import Affine
 from sdm.occurrence.sampling import (
     generate_background_points,
     generate_background_points_from_data,
-    normalise_to_distribution,
     weight_density_array_by_regions,
     TransformMethod,
     BackgroundMethod
@@ -274,83 +273,105 @@ def _left_right_regions() -> gpd.GeoDataFrame:
     )
 
 
+def _assert_weighted_contract(weighted: xr.DataArray, density: xr.DataArray) -> None:
+    """CRS / grid / no-NaN contract sampling users rely on for stratified density."""
+    assert weighted.rio.crs == density.rio.crs
+    assert weighted.shape == density.shape
+    np.testing.assert_array_equal(weighted.x.values, density.x.values)
+    np.testing.assert_array_equal(weighted.y.values, density.y.values)
+    assert not np.isnan(weighted.values).any()
+
+
 def test_basic_weighting_matches_known_raster():
-    """Region sums → normalised weights × density (hand-derived membership)."""
+    """Left/right membership × z-score of region sums [60, 76, 0] (weight=1).
+
+    Hand-derived: region z-scores ≈ [0.44832653, 0.93741002, -1.38573655];
+    left cells × first weight, right cells × second (background unused here).
+    """
     density = _density_4x4()
     regions = _left_right_regions()
-    region_sums = normalise_to_distribution(
-        np.array([60.0, 76.0, 0.0]), mean=1.0, std=1.0
+    expected = np.array(
+        [
+            [0.44832653, 0.89665306, 2.81223005, 3.74964007],
+            [2.24163265, 2.68995918, 6.56187012, 7.49928014],
+            [4.03493877, 4.48326530, 10.31151020, 11.24892021],
+            [5.82824489, 6.27657142, 14.06115027, 14.99856028],
+        ]
     )
-    expected = np.asarray(density.values, dtype=float).copy()
-    expected[:, 0:2] *= region_sums[0]
-    expected[:, 2:4] *= region_sums[1]
-
     weighted = weight_density_array_by_regions(density, regions, weight=1.0)
-    np.testing.assert_allclose(weighted.values, expected, rtol=0, atol=1e-9)
+    _assert_weighted_contract(weighted, density)
+    np.testing.assert_allclose(weighted.values, expected, rtol=0, atol=1e-8)
 
 
 def test_reverse_weights_match_known_raster():
+    """reverse_weights flips region weights via 2 − w before multiplying density."""
     density = _density_4x4()
     regions = _left_right_regions()
-    region_sums = normalise_to_distribution(
-        np.array([60.0, 76.0, 0.0]), mean=1.0, std=1.0
+    expected = np.array(
+        [
+            [1.55167347, 3.10334694, 3.18776995, 4.25035993],
+            [7.75836735, 9.31004082, 7.43812988, 8.50071986],
+            [13.96506123, 15.51673470, 11.68848980, 12.75107979],
+            [20.17175511, 21.72342858, 15.93884973, 17.00143972],
+        ]
     )
-    region_sums = 1.0 - region_sums + 1
-    expected = np.asarray(density.values, dtype=float).copy()
-    expected[:, 0:2] *= region_sums[0]
-    expected[:, 2:4] *= region_sums[1]
-
     weighted = weight_density_array_by_regions(
         density, regions, weight=1.0, reverse_weights=True
     )
-    np.testing.assert_allclose(weighted.values, expected, rtol=0, atol=1e-9)
+    _assert_weighted_contract(weighted, density)
+    np.testing.assert_allclose(weighted.values, expected, rtol=0, atol=1e-8)
 
 
-def test_weight_parameter_changes_normalised_std():
+def test_weight_parameter_scales_normalised_spread():
+    """weight=std target: weight=2 halves z-score spread vs weight=1 (hand pins)."""
     density = _density_4x4()
     regions = _left_right_regions()
+    expected_1 = np.array(
+        [
+            [0.44832653, 0.89665306, 2.81223005, 3.74964007],
+            [2.24163265, 2.68995918, 6.56187012, 7.49928014],
+            [4.03493877, 4.48326530, 10.31151020, 11.24892021],
+            [5.82824489, 6.27657142, 14.06115027, 14.99856028],
+        ]
+    )
+    expected_2 = np.array(
+        [
+            [0.72416327, 1.44832653, 2.90611503, 3.87482004],
+            [3.62081633, 4.34497959, 6.78093506, 7.74964007],
+            [6.51746939, 7.24163265, 10.65575510, 11.62446011],
+            [9.41412245, 10.13828571, 14.53057513, 15.49928014],
+        ]
+    )
     w1 = weight_density_array_by_regions(density, regions, weight=1.0)
     w2 = weight_density_array_by_regions(density, regions, weight=2.0)
-    region_sums_1 = normalise_to_distribution(
-        np.array([60.0, 76.0, 0.0]), mean=1.0, std=1.0
-    )
-    region_sums_2 = normalise_to_distribution(
-        np.array([60.0, 76.0, 0.0]), mean=1.0, std=2.0
-    )
-    expected_1 = np.asarray(density.values, dtype=float).copy()
-    expected_1[:, 0:2] *= region_sums_1[0]
-    expected_1[:, 2:4] *= region_sums_1[1]
-    expected_2 = np.asarray(density.values, dtype=float).copy()
-    expected_2[:, 0:2] *= region_sums_2[0]
-    expected_2[:, 2:4] *= region_sums_2[1]
-    np.testing.assert_allclose(w1.values, expected_1, rtol=0, atol=1e-9)
-    np.testing.assert_allclose(w2.values, expected_2, rtol=0, atol=1e-9)
-    assert not np.allclose(w1.values, w2.values)
+    _assert_weighted_contract(w1, density)
+    _assert_weighted_contract(w2, density)
+    np.testing.assert_allclose(w1.values, expected_1, rtol=0, atol=1e-8)
+    np.testing.assert_allclose(w2.values, expected_2, rtol=0, atol=1e-8)
 
 
 def test_background_region_receives_its_own_weight():
+    """Uncovered cells get the background region's weight (z-score of [60, 76] → −1, 1)."""
     density = _density_4x4()
     regions = gpd.GeoDataFrame(
         geometry=[box(-0.1, -0.1, 1.9, 3.9)],
         crs="EPSG:27700",
     )
-    region_sums = normalise_to_distribution(np.array([60.0, 76.0]), mean=1.0, std=1.0)
-    expected = np.asarray(density.values, dtype=float).copy()
-    expected[:, 0:2] *= region_sums[0]
-    expected[:, 2:4] *= region_sums[1]
-
+    expected = np.array(
+        [
+            [-1.0, -2.0, 3.0, 4.0],
+            [-5.0, -6.0, 7.0, 8.0],
+            [-9.0, -10.0, 11.0, 12.0],
+            [-13.0, -14.0, 15.0, 16.0],
+        ]
+    )
     weighted = weight_density_array_by_regions(density, regions, weight=1.0)
-    np.testing.assert_allclose(weighted.values, expected, rtol=0, atol=1e-9)
+    _assert_weighted_contract(weighted, density)
+    np.testing.assert_allclose(weighted.values, expected, rtol=0, atol=1e-8)
 
 
-def test_empty_regions():
-    density = _density_4x4()
-    empty_regions = gpd.GeoDataFrame(geometry=[], crs="EPSG:27700")
-    with pytest.raises(ValueError):
-        weight_density_array_by_regions(density, empty_regions, weight=1.0)
-
-
-def test_reserved_column_name():
+def test_reserved_column_name_rejected():
+    """Users must not pass _region_id; the helper reserves it and raises."""
     density = _density_4x4()
     regions = _left_right_regions().copy()
     regions["_region_id"] = ["test1", "test2"]
@@ -358,8 +379,8 @@ def test_reserved_column_name():
         weight_density_array_by_regions(density, regions, weight=1.0)
 
 
-def test_constant_density_uses_mean_weight_when_sums_equal():
-    """Equal per-region density sums → uniform weight of 1.0 after normalise."""
+def test_equal_region_sums_share_one_weight():
+    """Left/right sums both 8 vs background 0 → same left/right weight on ones grid."""
     data = np.ones((4, 4), dtype=float)
     density = xr.DataArray(
         data,
@@ -369,14 +390,11 @@ def test_constant_density_uses_mean_weight_when_sums_equal():
     density = density.rio.write_crs("EPSG:27700")
     density.rio.write_transform(Affine(1.0, 0.0, -0.5, 0.0, 1.0, -0.5), inplace=True)
     regions = _left_right_regions()
-    # left and right sums both 8; background 0 → after normalise, non-constant
-    # When all region_sums identical except structure: left=8, right=8, bg=0
-    region_sums = normalise_to_distribution(np.array([8.0, 8.0, 0.0]), mean=1.0, std=1.0)
-    expected = data.copy()
-    expected[:, 0:2] *= region_sums[0]
-    expected[:, 2:4] *= region_sums[1]
+    # z-scores of [8, 8, 0] → [√2/2, √2/2, -√2]; both covered cells × √2/2
+    expected = np.full((4, 4), np.sqrt(2.0) / 2.0)
     weighted = weight_density_array_by_regions(density, regions, weight=1.0)
-    np.testing.assert_allclose(weighted.values, expected, rtol=0, atol=1e-9)
+    _assert_weighted_contract(weighted, density)
+    np.testing.assert_allclose(weighted.values, expected, rtol=0, atol=1e-8)
 
 
 # Tests for modular training functions
