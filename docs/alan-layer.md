@@ -94,6 +94,5 @@ Ingest and stack selection are in place (`include=1` in
 - Grid/CRS/extent match the rest of the stack (unit tests: valid zeros, cf_cvg
   missing mask, geographic→model reproject, merged band name).
 - Plausibility: city centre brightest, moorland darkest (scratch rebuild).
-- Brown long-eared roost run with the layer on vs baseline (same seed, spatial
-  folds): check sample sizes do not silently change; inspect response curve and
-  woodland/urban predictions without forcing a negative lighting effect.
+- Species enablement / BLE roost on-vs-baseline comparison: **deferred** to a
+  second pass (not part of this PR).
