@@ -1,0 +1,23 @@
+# Copy to mlflow.settings.yml (gitignored) and fill in local values.
+# Never put the database password in this file — fetch it from Secret Manager
+# or set MLFLOW_DB_PASSWORD for cloud agents (Cursor secret settings).
+
+enabled: true
+experiment_name: species_sdm_experiment
+
+database:
+  host: ""
+  port: 5432
+  name: ""
+  user: ""
+  sslmode: require
+
+password:
+  secret_manager:
+    project_id: ""
+    secret_id: ""
+    version: latest
+
+# Private GCS prefix for plots and model files. MLflow writes under unique
+# experiment/run IDs so existing objects are never overwritten.
+artifact_root: ""

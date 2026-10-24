@@ -449,7 +449,7 @@ def mock_project_config():
         ),
         crs="EPSG:27700",
         mlflow=MlflowConfig(
-            tracking_uri="file:./mlruns",
+            enabled=False,
             experiment_name="test_experiment",
         ),
     )

@@ -37,8 +37,13 @@ class SpatialConfig(BaseModel):
 
 
 class MlflowConfig(BaseModel):
-    tracking_uri: str
-    experiment_name: str
+    """Project-level MLflow knobs; secrets live in the gitignored settings file."""
+
+    enabled: bool = False
+    settings_file: str = "mlflow.settings.yml"
+    experiment_name: str = "species_sdm_experiment"
+    tracking_uri: Optional[str] = None
+    artifact_root: Optional[str] = None
 
 
 class ProjectConfig(BaseModel):

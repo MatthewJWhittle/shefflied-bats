@@ -57,7 +57,13 @@ Example: `gs://habitat-suitability-modelling-data/runs/20251016T120000Z-a1b2c3d4
 | `paths.predictions` | **`sdm predict`** only |
 | `paths.evs` | Directory of layer prep; train uses merged `ev_tiff` only |
 | `config.yml` itself | Loaded from repo checkout (not from bucket) |
-| `mlflow.*` | Local/SQLite tracking URI by default |
+| `mlflow.*` | Shared tracking; see [mlflow-tracking.md](mlflow-tracking.md). Off until local settings exist. |
+
+## MLflow artefacts (planned prefix)
+
+| Prefix | Purpose |
+| --- | --- |
+| `mlflow-artifacts/` | Plots and model files logged by MLflow (`<experiment_id>/<run_id>/…`). Private; never overwrites `inputs/` or `runs/`. |
 
 ## Environment variables
 
@@ -65,6 +71,7 @@ Example: `gs://habitat-suitability-modelling-data/runs/20251016T120000Z-a1b2c3d4
 | --- | --- |
 | `INPUT_DATA_ROOT` | Prefix for config-relative input paths (e.g. `gs://habitat-suitability-modelling-data/inputs`) |
 | `MODEL_OUTPUT_ROOT` | Bucket or directory root for run folders (e.g. `gs://habitat-suitability-modelling-data`) |
+| `MLFLOW_*` | Optional tracking overrides; see [mlflow-tracking.md](mlflow-tracking.md) |
 
 Authentication is standard **gcsfs** / Application Default Credentials or `GOOGLE_APPLICATION_CREDENTIALS` (no custom checks in application code).
 
