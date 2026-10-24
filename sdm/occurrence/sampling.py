@@ -7,6 +7,7 @@ import json
 import numpy as np
 import geopandas as gpd
 import xarray as xr
+from rasterio.features import rasterize
 from scipy.ndimage import gaussian_filter
 from shapely.geometry import box
 import rioxarray as rxr  # Required for .rio accessor, even if not directly called
@@ -233,6 +234,10 @@ def weight_density_array_by_regions(
 
     This function will weight the density array by the number of occurrences in each region.
 
+    Region membership is built with one ``rasterio.features.rasterize`` call
+    (region id grid + background), instead of a per-region ``rio.clip`` loop.
+    Overlapping polygons resolve to the last geometry in ``regions`` order.
+
     Args:
         density_array: The density array to weight.
         regions: The regions to weight the density array by.
@@ -242,55 +247,72 @@ def weight_density_array_by_regions(
     Returns:
         The weighted density array.
     """
-    # make a copy of the regions so we don't modify the original
     regions = regions.copy()
 
     if "_region_id" in regions.columns:
         raise ValueError(
             "'_region_id' is a reserved column name for internal use. Please rename the column."
         )
-    else:
-        regions["_region_id"] = [f"region_{i}" for i in range(len(regions))]
+    if len(regions) == 0:
+        raise ValueError("regions must contain at least one geometry")
 
-    ones = xr.ones_like(density_array).squeeze()
-    ones.rio.write_nodata(0, inplace=True)
-    region_masks = []
-    region_ids = []
-    for idx, row in regions.iterrows():
-        # create a mask for the region
-        mask = ones.rio.clip([row.geometry], density_array.rio.crs, drop=False)
-        region_masks.append(mask)
-        region_ids.append(row["_region_id"])
+    regions["_region_id"] = [f"region_{i}" for i in range(len(regions))]
 
-    region_masks = xr.concat(region_masks, dim="region_id")
-    # get the background region where all regions are 0
-    background_region = region_masks.sum(dim="region_id") == 0
-    region_masks = xr.concat([region_masks, background_region], dim="region_id")
+    grid = density_array.squeeze(drop=True)
+    height = int(grid.sizes["y"])
+    width = int(grid.sizes["x"])
+    transform = density_array.rio.transform()
+    crs = density_array.rio.crs
+    if regions.crs is not None and crs is not None and regions.crs != crs:
+        regions = regions.to_crs(crs)
 
-    region_masks.coords["region_id"] = region_ids + ["background"]
-    region_masks.rio.write_nodata(0, inplace=True)
+    # 1..n = regions, 0 = background (outside all polygons)
+    shapes = [
+        (geom, idx)
+        for idx, geom in enumerate(regions.geometry, start=1)
+        if geom is not None and not geom.is_empty
+    ]
+    if not shapes:
+        raise ValueError("regions must contain at least one non-empty geometry")
 
-    # Calculate density sums for each region
-    region_weights = (density_array * region_masks)
-    region_sums = region_weights.sum(dim=["x", "y"])
+    region_id_grid = rasterize(
+        shapes,
+        out_shape=(height, width),
+        transform=transform,
+        fill=0,
+        dtype=np.int32,
+        all_touched=False,
+    )
 
-    # Normalize the region sums
+    density_values = np.asarray(grid.values, dtype=float)
+    n_regions = len(regions)
+    # Order matches legacy masks: region_0 .. region_{n-1}, then background
+    region_sums = np.empty(n_regions + 1, dtype=float)
+    for rid in range(1, n_regions + 1):
+        region_sums[rid - 1] = np.nansum(density_values[region_id_grid == rid])
+    region_sums[n_regions] = np.nansum(density_values[region_id_grid == 0])
+
     region_sums = normalise_to_distribution(region_sums, mean=1.0, std=weight)
 
-    # Reverse the density so that regions with higher weights have lower density
     if reverse_weights:
         region_sums = 1.0 - region_sums + 1
 
-    # Create a weight array by broadcasting the region weights to the full grid
-    weight_array = xr.zeros_like(density_array)
+    weight_values = np.zeros_like(density_values, dtype=float)
+    for rid in range(1, n_regions + 1):
+        weight_values[region_id_grid == rid] = region_sums[rid - 1]
+    weight_values[region_id_grid == 0] = region_sums[n_regions]
 
-    for region_id, weight in zip(region_masks.coords["region_id"], region_sums):
-        weight_array = weight_array + (region_masks.sel(region_id=region_id) * weight)
+    weight_array = xr.DataArray(
+        weight_values,
+        coords={"y": grid.coords["y"], "x": grid.coords["x"]},
+        dims=["y", "x"],
+    )
+    if crs is not None:
+        weight_array = weight_array.rio.write_crs(crs)
+    weight_array = weight_array.rio.write_transform(transform)
 
-    # Apply the weights to the density array
-    density_array = density_array * weight_array
-
-    return density_array
+    # Broadcast back onto any extra dims (e.g. band) present on the input
+    return density_array * weight_array
 
 
 def generate_background_points_from_data(
