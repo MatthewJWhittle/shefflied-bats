@@ -10,12 +10,7 @@ from .loaders import (
     load_background_points
 )
 
-from .processing import (
-    merge_environmental_layers,
-    process_occurrence_data,
-    process_background_data,
-    extract_environmental_data
-)
+from .processing import annotate_points
 
 from .spatial import (
     create_boundary,
@@ -34,12 +29,9 @@ __all__ = [
     'load_os_shps',
     'load_bat_data',
     'load_background_points',
-    
+
     # Processing
-    'merge_environmental_layers',
-    'process_occurrence_data',
-    'process_background_data',
-    'extract_environmental_data',
+    'annotate_points',
     
     # Spatial
     'create_boundary',
