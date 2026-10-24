@@ -25,6 +25,8 @@
 #   Pearson 0.87) but adds edge structure. Putting it back raised held-out
 #   AUC on all four seeds and kept urban hotspot counts close to the
 #   11-layer set.
+# ALAN (`alan_viirs_radiance`, #37) is not enabled here yet — species
+# wiring is a separate second pass (Matt, 24 Oct 2026).
 variables:
 - os_distance_distance_to_minor_roads
 - terrain_stats_slope

@@ -62,10 +62,11 @@ flowchart TD
   vom --> merge
   coastal --> merge
   os --> merge
+  alan --> merge
   merge --> stack
 ```
 
-Execution order (registry / `--skip` names for steps 1–8; model stack always follows a successful merge):
+Execution order (registry / `--skip` names for steps 1–9; model stack always follows a successful merge):
 
 1. `terrain` — `generate_terrain_data` → `<folder>/terrain/`
 2. `terrain_stats` — `generate_terrain_stats` → `<folder>/terrain_stats.tif`
@@ -74,8 +75,9 @@ Execution order (registry / `--skip` names for steps 1–8; model stack always f
 5. `vom` — `generate_vom_data` → `<folder>/vom/`
 6. `coastal` — `generate_coastal_distance` → `<folder>/coastal_distance.tif` (unless skipped; Boundary-Line under `--cache-dir`/boundary-line). Optional BGS GeoCoast shapefile for a like-for-like coastal layer: `data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp`
 7. `os` — `process_os_data` → `<folder>/os-feature-cover.tif`, `os-distance-to-feature.tif` (OS raw + parquets under `--cache-dir`)
-8. `merge` — `merge_ev_layers` → `<folder>/all-evs.tif`
-9. `build_model_ev_stack` → `<folder>/evs-to-model.tif` (notebook feature-engineering order: rename → clip → subset → multiscale)
+8. `alan` — `generate_alan_data` → `<folder>/alan_viirs_radiance.tif` (local yearly VIIRS GeoTIFF; **auto-skips** if the source file is missing — see [alan-layer.md](alan-layer.md))
+9. `merge` — `merge_ev_layers` → `<folder>/all-evs.tif`
+10. `build_model_ev_stack` → `<folder>/evs-to-model.tif` (notebook feature-engineering order: rename → clip → subset → multiscale)
 
 ### Model stack build settings
 

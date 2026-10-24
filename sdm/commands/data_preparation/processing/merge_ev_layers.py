@@ -19,6 +19,7 @@ def build_ev_dataset_inputs(
     *,
     skip_ceh: bool = False,
     skip_coastal: bool = False,
+    skip_alan: bool = False,
 ) -> List[str]:
     """Build name=path merge inputs for standard ``sdm data`` pipeline outputs.
 
@@ -49,6 +50,10 @@ def build_ev_dataset_inputs(
             insert_at,
             f"bgs_coast={evs_dir / 'coastal_distance.tif'}",
         )
+    if not skip_alan:
+        # Single-band merge uses the dataset key as the stack name, so the key
+        # must be the full ML band name (not a short prefix).
+        inputs.append(f"alan_viirs_radiance={evs_dir / 'alan_viirs_radiance.tif'}")
     return inputs
 
 

@@ -60,3 +60,4 @@ cluster_id,column_name,include
 27,terrain_stats_aspect_northness,0
 28,terrain_stats_aspect_eastness_slope,1
 28,terrain_stats_aspect_eastness,0
+29,alan_viirs_radiance,1
