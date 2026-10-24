@@ -34,17 +34,25 @@ def setup(
     
     boundary_path = Path(PROJECT_CONFIG.paths.boundary)
     
+    # Bake study_area_buffer into the saved boundary (buffer ∩ ONS BFC land) so
+    # EV builders load it as-is without a second buffer that would re-enter the sea.
+    buffer_m = float(PROJECT_CONFIG.spatial.study_area_buffer)
     boundary_gdf = create_boundary(
         counties_file=counties_file,
         county_names=None,  # Yorkshire default
         target_crs=PROJECT_CONFIG.crs,
         simplify_tolerance=100.0,
         live_download=live_download,
+        buffer_distance=buffer_m,
     )
-    
+
     boundary_path.parent.mkdir(parents=True, exist_ok=True)
     boundary_gdf.to_file(boundary_path, driver="GeoJSON")
-    logging.info(f"Study boundary saved to: {boundary_path}")
+    logging.info(
+        "Study boundary saved to: %s (buffer=%sm, land-clipped)",
+        boundary_path,
+        buffer_m,
+    )
 
 def run_data_rebuild(
     output_dir: str,
@@ -192,9 +200,10 @@ def data(
         )
 
         try:
+            # Boundary from `sdm setup` already includes study_area_buffer ∩ land.
             exit_code = run_data_plan(
                 boundary_path=Path(PROJECT_CONFIG.paths.boundary),
-                buffer_m=float(PROJECT_CONFIG.spatial.study_area_buffer),
+                buffer_m=0.0,
                 ceh_data_path=resolved_ceh,
                 cache_dir=Path(cache_dir) if cache_dir else None,
                 skip=skip,

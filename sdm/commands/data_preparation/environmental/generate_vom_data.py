@@ -132,7 +132,7 @@ async def fetch_and_process_vom_data(
 def generate_vom_data(
     output_dir: Path,
     boundary_path: Path,
-    buffer_distance_m: float = 7000,
+    buffer_distance_m: float = 0,
     wcs_tile_width_px: int = 1024,
     wcs_tile_height_px: int = 1024,
     wcs_temp_storage: bool = True,
