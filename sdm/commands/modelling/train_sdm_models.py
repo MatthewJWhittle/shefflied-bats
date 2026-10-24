@@ -28,7 +28,7 @@ from mlflow.sklearn import log_model
 from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
 import elapid as ela
-from shapely import distance
+from scipy.spatial import cKDTree
 import topojson as tp
 
 from sdm.data.loaders.vector import load_bat_data, load_background_points
@@ -304,26 +304,6 @@ def drop_duplicate_grid_points(
     return gdf.drop_duplicates(subset=index_cols)
 
 
-def get_distance_matrix(
-    a: gpd.GeoSeries,
-    b: gpd.GeoSeries,
-) -> np.ndarray:
-    """
-    Calculate pairwise distance matrix between two geometry series.
-    
-    Args:
-        a: First geometry series
-        b: Second geometry series
-        
-    Returns:
-        Distance matrix (len(a) x len(b))
-    """
-    A = a.array.to_numpy()
-    B = b.array.to_numpy()
-    dist_mat = distance(A[:, None], B[None, :])
-    return dist_mat
-
-
 def filter_background_by_distance(
     background_data: gpd.GeoDataFrame,
     presence_data: gpd.GeoDataFrame,
@@ -332,6 +312,10 @@ def filter_background_by_distance(
 ) -> gpd.GeoDataFrame:
     """
     Filter background points by distance from presence points.
+
+    Uses ``scipy.spatial.cKDTree`` for nearest presence distance (projected
+    Point XY). Avoids the O(P×B) pairwise matrix previously built with
+    ``shapely.distance``.
     
     Args:
         background_data: Background points
@@ -344,12 +328,23 @@ def filter_background_by_distance(
     """
     if len(presence_data) == 0:
         return background_data
-    
-    p_dist = get_distance_matrix(
-        presence_data.geometry,
-        background_data.geometry,
-    ).min(axis=0)
-    
+    if len(background_data) == 0:
+        return background_data
+
+    presence_xy = np.column_stack(
+        [
+            presence_data.geometry.x.to_numpy(dtype=float),
+            presence_data.geometry.y.to_numpy(dtype=float),
+        ]
+    )
+    background_xy = np.column_stack(
+        [
+            background_data.geometry.x.to_numpy(dtype=float),
+            background_data.geometry.y.to_numpy(dtype=float),
+        ]
+    )
+    p_dist, _ = cKDTree(presence_xy).query(background_xy, k=1)
+
     filtered = background_data[
         (p_dist >= d_min) & (p_dist <= d_max)
     ]
