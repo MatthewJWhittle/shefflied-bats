@@ -1,17 +1,26 @@
-"""Smoke pins for #51 orphan API cleanup (#47 items 3, 4, 7)."""
+"""Pins for #51 orphan API cleanup (#47 items 3, 4, 7).
+
+Deletion absence checks stay as contract pins. Remaining helpers are exercised
+on synthetic values / a tiny EV GeoTIFF so the suite can fail on wrong behaviour.
+"""
 
 import importlib
-import inspect
+from pathlib import Path
 
+import geopandas as gpd
+import numpy as np
 import pytest
+import rasterio
+from rasterio.transform import from_origin
+from shapely.geometry import Point
 
-
-def test_annotate_points_still_exported():
-    from sdm.data.processing import annotate_points
-    from sdm.data.processing.core import annotate_points as core_annotate
-
-    assert annotate_points is core_annotate
-    assert callable(annotate_points)
+from sdm.data.landcover import (
+    create_binary_raster_from_category,
+    define_broad_habitat_categories,
+    get_ceh_land_cover_codes_v2023,
+)
+from sdm.data.processing import annotate_points
+import xarray as xr
 
 
 @pytest.mark.parametrize(
@@ -39,14 +48,67 @@ def test_ceh_processing_module_removed():
         importlib.import_module("sdm.data.ceh_processing")
 
 
-def test_landcover_canonical_ceh_helpers_remain():
-    from sdm.data.landcover import (
-        define_broad_habitat_categories,
-        get_ceh_land_cover_codes_v2023,
+def test_landcover_ceh_codes_and_habitat_map_values():
+    codes = get_ceh_land_cover_codes_v2023()
+    assert codes["1"] == "Broadleaved woodland"
+    assert codes["20"] == "Urban"
+    assert codes["21"] == "Suburban"
+    assert len(codes) == 21
+
+    cats = define_broad_habitat_categories()
+    assert cats["Grassland"] == [
+        "Neutral grassland",
+        "Calcareous grassland",
+        "Acid grassland",
+    ]
+    assert "Bog" in cats["Wetland"]
+    assert "Saltmarsh" in cats["Marine, Littoral"]
+
+
+def test_create_binary_raster_from_category_matches_mask():
+    source = xr.DataArray(
+        np.array([[1, 2], [2, 1]], dtype=np.int16),
+        dims=("y", "x"),
+    )
+    out = create_binary_raster_from_category(source, category_value=2, output_var_name="c2")
+    np.testing.assert_array_equal(
+        out["c2"].values,
+        np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32),
     )
 
-    codes = get_ceh_land_cover_codes_v2023()
-    cats = define_broad_habitat_categories()
-    assert "1" in codes
-    assert "Grassland" in cats
-    assert inspect.isfunction(get_ceh_land_cover_codes_v2023)
+
+def test_annotate_points_samples_known_raster_values(tmp_path: Path):
+    """Remaining annotate_points path returns EV values at point locations."""
+    raster_path = tmp_path / "ev.tif"
+    # 2×2, 10 m cells, origin top-left (0,20); centres at (5,15), (15,15), (5,5), (15,5)
+    data = np.array([[10.0, 20.0], [30.0, 40.0]], dtype=np.float32)
+    transform = from_origin(0.0, 20.0, 10.0, 10.0)
+    with rasterio.open(
+        raster_path,
+        "w",
+        driver="GTiff",
+        height=2,
+        width=2,
+        count=1,
+        dtype="float32",
+        crs="EPSG:27700",
+        transform=transform,
+        nodata=-9999.0,
+    ) as dst:
+        dst.write(data, 1)
+
+    bats = gpd.GeoDataFrame(
+        {"id": [0]},
+        geometry=[Point(5.0, 15.0)],
+        crs="EPSG:27700",
+    )
+    background = gpd.GeoDataFrame(
+        {"id": [1]},
+        geometry=[Point(15.0, 5.0)],
+        crs="EPSG:27700",
+    )
+    bats_out, bg_out = annotate_points(
+        bats, background, raster_path, ev_columns=["elev"]
+    )
+    assert float(bats_out["elev"].iloc[0]) == pytest.approx(10.0)
+    assert float(bg_out["elev"].iloc[0]) == pytest.approx(40.0)
