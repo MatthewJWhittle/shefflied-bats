@@ -6,7 +6,6 @@ Does not re-open a tempfile GeoTIFF as the oracle or assert timing.
 
 import geopandas as gpd
 import numpy as np
-import pytest
 from shapely.geometry import Polygon, box
 
 from sdm.raster.processing import calculate_feature_cover
