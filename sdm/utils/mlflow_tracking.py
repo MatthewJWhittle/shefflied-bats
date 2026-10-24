@@ -11,13 +11,14 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import subprocess
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, TYPE_CHECKING, Union
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote_plus
 
 import mlflow
 import numpy as np
@@ -41,6 +42,32 @@ _ENV_DB_PASSWORD = "MLFLOW_DB_PASSWORD"
 _ENV_ARTIFACT_ROOT = "MLFLOW_ARTIFACT_ROOT"
 
 DEFAULT_SETTINGS_FILE = "mlflow.settings.yml"
+
+# Redact userinfo passwords in URIs that may appear in driver/SQLAlchemy errors.
+_URI_PASSWORD_RE = re.compile(r"(://[^:/@\s]+):([^@/\s]+)@")
+
+
+def redact_secrets(text: str, *extra_secrets: str) -> str:
+    """Return ``text`` with URI passwords and any known secrets replaced by ``***``."""
+    redacted = _URI_PASSWORD_RE.sub(r"\1:***@", text)
+    for secret in extra_secrets:
+        if secret:
+            redacted = redacted.replace(secret, "***")
+            # URL-encoded form may appear in connection strings.
+            encoded = quote_plus(secret)
+            if encoded != secret:
+                redacted = redacted.replace(encoded, "***")
+    return redacted
+
+
+def _password_from_tracking_uri(uri: Optional[str]) -> Optional[str]:
+    """Extract the userinfo password from a SQLAlchemy / Neon tracking URI."""
+    if not uri:
+        return None
+    match = _URI_PASSWORD_RE.search(uri)
+    if match is None:
+        return None
+    return unquote_plus(match.group(2))
 
 
 class SecretManagerRef(BaseModel):
@@ -144,7 +171,12 @@ def resolve_mlflow_config(
     *,
     repo_root: Optional[Path] = None,
 ) -> MlflowConfig:
-    """Merge ``config.yml``, local settings file, and environment overrides."""
+    """Merge ``config.yml``, local settings file, and environment overrides.
+
+    The database password is fetched only when tracking is enabled and no
+    tracking URI was supplied via the environment. With tracking off, Secret
+    Manager is never contacted.
+    """
     cfg = project_config.mlflow.model_copy(deep=True)
     root = repo_root or Path.cwd()
     settings_path = Path(cfg.settings_file)
@@ -159,24 +191,27 @@ def resolve_mlflow_config(
         if settings.artifact_root:
             cfg.artifact_root = settings.artifact_root
 
-        if not cfg.tracking_uri:
-            try:
-                cfg.tracking_uri = build_tracking_uri(settings)
-            except ValueError as exc:
-                logger.warning("MLflow settings incomplete (%s); tracking stays off.", exc)
-                cfg.enabled = False
-
+    # Resolve enabled / non-secret overrides before any password fetch.
     if _ENV_ENABLED in os.environ:
         cfg.enabled = _parse_bool(os.environ[_ENV_ENABLED])
-
-    if _ENV_TRACKING_URI in os.environ:
-        cfg.tracking_uri = os.environ[_ENV_TRACKING_URI].strip()
 
     if _ENV_EXPERIMENT_NAME in os.environ:
         cfg.experiment_name = os.environ[_ENV_EXPERIMENT_NAME].strip()
 
     if _ENV_ARTIFACT_ROOT in os.environ:
         cfg.artifact_root = os.environ[_ENV_ARTIFACT_ROOT].strip()
+
+    if _ENV_TRACKING_URI in os.environ:
+        cfg.tracking_uri = os.environ[_ENV_TRACKING_URI].strip()
+    elif cfg.enabled and settings_path.is_file() and not cfg.tracking_uri:
+        try:
+            cfg.tracking_uri = build_tracking_uri(settings)
+        except ValueError as exc:
+            logger.warning(
+                "MLflow settings incomplete (%s); tracking stays off.",
+                redact_secrets(str(exc)),
+            )
+            cfg.enabled = False
 
     return cfg
 
@@ -193,7 +228,10 @@ def _ensure_experiment(name: str, artifact_root: Optional[str]) -> None:
 
 
 def configure_mlflow(config: MlflowConfig) -> bool:
-    """Configure the MLflow client. Returns False if tracking is disabled or unavailable."""
+    """Configure the MLflow client. Returns False if tracking is disabled or unavailable.
+
+    Never logs the tracking URI (it may embed the database password).
+    """
     if not config.enabled:
         logger.info("MLflow tracking is disabled (config or %s).", _ENV_ENABLED)
         return False
@@ -206,15 +244,21 @@ def configure_mlflow(config: MlflowConfig) -> bool:
         mlflow.set_tracking_uri(config.tracking_uri)
         _ensure_experiment(config.experiment_name, config.artifact_root)
         logger.debug(
-            "MLflow tracking URI configured; experiment=%s; artifact_root=%s",
+            "MLflow client configured; experiment=%s; artifact_root=%s",
             config.experiment_name,
             config.artifact_root or "(default)",
         )
         return True
     except Exception as exc:
+        uri_password = _password_from_tracking_uri(config.tracking_uri)
+        safe_exc = (
+            redact_secrets(str(exc), uri_password)
+            if uri_password
+            else redact_secrets(str(exc))
+        )
         logger.warning(
             "MLflow tracking unavailable (%s); continuing without experiment logging.",
-            exc,
+            safe_exc,
         )
         return False
 

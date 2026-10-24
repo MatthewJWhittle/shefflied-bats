@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -32,6 +32,7 @@ from sdm.utils.mlflow_tracking import (
     fetch_database_password,
     load_mlflow_settings,
     log_models_to_mlflow,
+    redact_secrets,
     resolve_mlflow_config,
 )
 
@@ -158,6 +159,66 @@ class TestResolveMlflowConfig:
         assert cfg.tracking_uri == "sqlite:///custom.db"
         assert cfg.experiment_name == "from_env"
 
+    def test_disabled_does_not_fetch_password(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """With tracking off, Secret Manager / password env must not be touched."""
+        settings_path = _write_settings(
+            tmp_path / "mlflow.settings.yml", enabled=False
+        )
+        monkeypatch.delenv("MLFLOW_DB_PASSWORD", raising=False)
+        monkeypatch.delenv("MLFLOW_ENABLED", raising=False)
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+        with (
+            patch(
+                "sdm.utils.mlflow_tracking.fetch_database_password",
+                side_effect=AssertionError("password must not be fetched"),
+            ) as mock_fetch,
+            patch(
+                "sdm.utils.mlflow_tracking._access_secret_manager_version",
+                side_effect=AssertionError("Secret Manager must not be contacted"),
+            ) as mock_gsm,
+        ):
+            cfg = resolve_mlflow_config(
+                _sample_project_config(
+                    enabled=False,
+                    settings_file=str(settings_path),
+                ),
+                repo_root=tmp_path,
+            )
+
+        assert cfg.enabled is False
+        assert cfg.tracking_uri is None
+        mock_fetch.assert_not_called()
+        mock_gsm.assert_not_called()
+
+    def test_env_disabled_skips_password_even_if_settings_enabled(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        settings_path = _write_settings(
+            tmp_path / "mlflow.settings.yml", enabled=True
+        )
+        monkeypatch.setenv("MLFLOW_ENABLED", "false")
+        monkeypatch.delenv("MLFLOW_DB_PASSWORD", raising=False)
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+        with patch(
+            "sdm.utils.mlflow_tracking.fetch_database_password",
+            side_effect=AssertionError("password must not be fetched"),
+        ) as mock_fetch:
+            cfg = resolve_mlflow_config(
+                _sample_project_config(
+                    enabled=True,
+                    settings_file=str(settings_path),
+                ),
+                repo_root=tmp_path,
+            )
+
+        assert cfg.enabled is False
+        assert cfg.tracking_uri is None
+        mock_fetch.assert_not_called()
+
 
 class TestConfigureMlflow:
     def test_disabled_skips_client_setup(self) -> None:
@@ -178,6 +239,92 @@ class TestConfigureMlflow:
         experiment = mlflow.get_experiment_by_name("configure_test")
         assert experiment is not None
         assert artifact_root in (experiment.artifact_location or "")
+
+
+class TestPasswordNeverInLogsOrExceptions:
+    """Architecture review: tracking URI password must not appear in logs/errors."""
+
+    DUMMY_PASSWORD = "unique-dummy-password-9f3a2b-never-log"
+
+    def test_redact_secrets_strips_uri_userinfo(self) -> None:
+        uri = (
+            f"postgresql+psycopg://mlflow_tracking:{self.DUMMY_PASSWORD}"
+            "@127.0.0.1:5432/mlflow?sslmode=require"
+        )
+        redacted = redact_secrets(uri, self.DUMMY_PASSWORD)
+        assert self.DUMMY_PASSWORD not in redacted
+        assert "***" in redacted
+
+    def test_configure_mlflow_logs_never_contain_password(
+        self,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        tracking_uri = (
+            f"postgresql+psycopg://mlflow_tracking:{self.DUMMY_PASSWORD}"
+            "@127.0.0.1:5432/mlflow?sslmode=require"
+        )
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError(
+                f"could not connect using {tracking_uri}: connection refused"
+            )
+
+        monkeypatch.setattr(
+            "sdm.utils.mlflow_tracking._ensure_experiment", _boom
+        )
+        with caplog.at_level(logging.DEBUG, logger="sdm.utils.mlflow_tracking"):
+            ok = configure_mlflow(
+                MlflowConfig(
+                    enabled=True,
+                    tracking_uri=tracking_uri,
+                    experiment_name="password_redact_test",
+                    artifact_root=str(tmp_path / "artifacts"),
+                )
+            )
+        assert ok is False
+        assert self.DUMMY_PASSWORD not in caplog.text
+        for record in caplog.records:
+            assert self.DUMMY_PASSWORD not in record.getMessage()
+
+    def test_failed_configure_exception_message_is_redacted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        tracking_uri = (
+            f"postgresql+psycopg://mlflow_tracking:{self.DUMMY_PASSWORD}"
+            "@127.0.0.1:5432/mlflow?sslmode=require"
+        )
+        captured: list[str] = []
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError(
+                f"backend error for {tracking_uri} password={self.DUMMY_PASSWORD}"
+            )
+
+        def _capture_warning(msg, *args, **kwargs):
+            rendered = msg % args if args else msg
+            captured.append(str(rendered))
+
+        monkeypatch.setattr(
+            "sdm.utils.mlflow_tracking._ensure_experiment", _boom
+        )
+        monkeypatch.setattr(
+            "sdm.utils.mlflow_tracking.logger.warning", _capture_warning
+        )
+        ok = configure_mlflow(
+            MlflowConfig(
+                enabled=True,
+                tracking_uri=tracking_uri,
+                experiment_name="password_redact_exc_test",
+                artifact_root=str(tmp_path / "artifacts"),
+            )
+        )
+        assert ok is False
+        assert captured, "expected a warning when configure fails"
+        for message in captured:
+            assert self.DUMMY_PASSWORD not in message
+            assert "***" in message
 
 
 class TestTwoWritersSameBackend:

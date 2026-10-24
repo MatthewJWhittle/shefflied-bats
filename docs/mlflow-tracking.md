@@ -19,6 +19,9 @@ Builds on the draft helpers from [#28](https://github.com/MatthewJWhittle/sheffl
 | Public git | Code, `mlflow.settings.example.yml` (empty values), gitignore for `mlflow.settings.yml` | Safe for an open-source repo. |
 
 Local defaults in `config.yml` keep tracking **off** until a real settings file exists.
+With tracking off, the password is never fetched and Secret Manager is not contacted.
+CI runs [gitleaks](https://github.com/gitleaks/gitleaks) on every pull request so a
+mistakenly committed settings file cannot land silently.
 
 ## Local setup (after cloud resources exist)
 
