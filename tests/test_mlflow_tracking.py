@@ -478,6 +478,23 @@ class TestLogModelsToMlflow:
         assert nested["metrics.mean_auc"].notna().any()
         assert nested["params.latin_name"].iloc[0] == "Myotis daubentonii"
 
+        # Cost-control guard: only small files (model, results, settings) —
+        # never prediction GeoTIFFs or input layers.
+        artifact_root = Path(mlflow.get_experiment(experiment.experiment_id).artifact_location)
+        logged_paths = [
+            p for p in artifact_root.rglob("*") if p.is_file()
+        ]
+        assert logged_paths, "expected at least one logged artefact"
+        banned_suffixes = {".tif", ".tiff", ".geotiff", ".img", ".vrt"}
+        banned = [
+            p for p in logged_paths if p.suffix.lower() in banned_suffixes
+        ]
+        assert banned == [], f"prediction/input rasters must not be MLflow artefacts: {banned}"
+        names = {p.name for p in logged_paths}
+        assert "model_results.parquet" in names or any(
+            "model_results" in p.name for p in logged_paths
+        )
+
 
 class TestTrainingPipelineSkipsMlflowWhenDisabled:
     def test_configure_false_does_not_require_backend(

@@ -356,6 +356,10 @@ def log_models_to_mlflow(
     """
     Log trained models and summary results to MLflow (nested runs per species–activity).
 
+    Artefacts are intentionally small: results table, feature/settings JSON, and
+    the fitted sklearn model. Prediction GeoTIFFs and input layers are never
+    uploaded here — those stay under the local / ``runs/`` prediction paths.
+
     No-op when MLflow is disabled or the tracking backend is unreachable.
     """
     if not models:

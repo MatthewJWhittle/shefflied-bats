@@ -96,6 +96,78 @@ Separate from `inputs/`, `runs/`, and `published/`. See [data-layout.md](data-la
 2. Set `mlflow.enabled: true` in `config.yml` (or rely on `enabled: true` in settings).
 3. Smoke-test: one short train on each computer; confirm both runs appear when searching the shared experiment.
 
+## Keeping and cleaning up runs
+
+Native MLflow only — no scheduler, no extra clean-up script, and **no GCS
+bucket lifecycle rule** on `mlflow-artifacts/`. A lifecycle rule only sees
+object age, not whether a model is registered, so it could delete artefacts
+that still back a Model Registry version.
+
+What goes into MLflow (small files only): the fitted model, the results table,
+settings / feature lists, metrics, and optional small plots. Big prediction
+maps stay in the existing `runs/` (and local predictions) tree — training and
+predict paths do **not** upload prediction GeoTIFFs or input layers as MLflow
+artefacts.
+
+### 1. Keep a good model (Model Registry)
+
+Promote a keeper by registering it in the MLflow Model Registry — in the UI, or
+with `mlflow.register_model` — optionally with an alias such as `champion`.
+Registered versions are the ones you must not delete in the steps below.
+
+### 2. Soft-delete unwanted runs (UI)
+
+Periodically delete old unwanted runs in the MLflow UI. Skip any run that still
+backs a registered model version. Deleting in the UI only moves the run to the
+`deleted` lifecycle stage; artefacts remain in GCS until the next step.
+
+### 3. Permanently remove deleted runs (`mlflow gc`)
+
+Run this from **Matt’s Mac** (trusted machine with Google ADC that can write/
+delete under `gs://habitat-suitability-modelling-data/mlflow-artifacts/`).
+Verified against the project lockfile: **MLflow 3.6.0**.
+
+`mlflow gc` needs:
+
+| Requirement | Why |
+| --- | --- |
+| `--backend-store-uri` | Neon Postgres URI (same SQLAlchemy store the clients use). |
+| `--tracking-uri` or `MLFLOW_TRACKING_URI` | Required by MLflow 3.6.0 even with a direct DB backend; use the same URI. |
+| Google ADC for the bucket | Artefacts live at each run’s `gs://…` URI; there is no tracking-server proxy, so **`--artifacts-destination` is not used**. |
+
+Build the URI in the shell from local settings + a password from the environment
+or Secret Manager. **Never write the password to disk or git.**
+
+```bash
+# Password: env / Cursor secret, or fetch once via ADC (do not echo or redirect to a file).
+# export MLFLOW_DB_PASSWORD=…   # or:
+# MLFLOW_DB_PASSWORD="$(gcloud secrets versions access latest \
+#   --secret=mlflow-tracking-db-password --project=habitat-suitability-modelling)"
+
+# Fill MLFLOW_DB_HOST / MLFLOW_DB_NAME / MLFLOW_DB_USER from gitignored
+# mlflow.settings.yml (values are not written in this doc).
+ENCODED_PW="$(python3 -c 'import os,urllib.parse as u; print(u.quote_plus(os.environ["MLFLOW_DB_PASSWORD"]))')"
+BACKEND="postgresql+psycopg://${MLFLOW_DB_USER}:${ENCODED_PW}@${MLFLOW_DB_HOST}:5432/${MLFLOW_DB_NAME}?sslmode=require"
+
+uv run mlflow gc --backend-store-uri "$BACKEND" --tracking-uri "$BACKEND"
+
+unset MLFLOW_DB_PASSWORD ENCODED_PW BACKEND
+```
+
+That permanently removes soft-deleted runs’ metadata from Neon and their
+artefacts under `gs://habitat-suitability-modelling-data/mlflow-artifacts/`.
+**Do not** soft-delete (and therefore do not `gc`) a run that still backs a
+registered model version — that would remove the model’s files.
+
+Optional flags (same CLI): `--older-than` (e.g. `30d`), `--run-ids`,
+`--experiment-ids`. See `uv run mlflow gc --help`.
+
+### Project budget alert (separate)
+
+A **£5/month** GCP project budget alert is recommended so storage growth is
+noticed early. That is a **manual cloud console step for Matt** to approve and
+create — not part of this PR, and **not** added as Terraform here.
+
 ## Safety
 
 - No secrets, licensed data, or site-specific coordinates in this document or in git.
