@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import secrets
@@ -14,6 +15,11 @@ import fsspec
 
 logger = logging.getLogger(__name__)
 
+_GCP_EXTRA_HINT = (
+    "Install the optional 'gcp' extra with: uv sync --extra gcp "
+    "(provides gcsfs and google-cloud-secret-manager)."
+)
+
 
 def join_uri_path(base: str | Path, *parts: str) -> str:
     base_str = str(base).rstrip("/")
@@ -25,8 +31,30 @@ def join_uri_path(base: str | Path, *parts: str) -> str:
     return str(Path(base_str) / suffix)
 
 
+def _require_gcsfs_for_gs_uri(uri: str) -> None:
+    """Raise a clear ImportError when ``gs://`` is used without the gcp extra."""
+    if not uri.startswith("gs://"):
+        return
+    if importlib.util.find_spec("gcsfs") is not None:
+        return
+    raise ImportError(
+        f"GCS path {uri!r} requires gcsfs from the optional 'gcp' extra. "
+        f"{_GCP_EXTRA_HINT}"
+    )
+
+
 def filesystem_for_uri(uri: str) -> tuple[fsspec.AbstractFileSystem, str]:
-    return fsspec.core.url_to_fs(uri.rstrip("/"))
+    ref = uri.rstrip("/")
+    _require_gcsfs_for_gs_uri(ref)
+    try:
+        return fsspec.core.url_to_fs(ref)
+    except ImportError as exc:
+        if ref.startswith("gs://"):
+            raise ImportError(
+                f"GCS path {ref!r} requires gcsfs from the optional 'gcp' extra. "
+                f"{_GCP_EXTRA_HINT}"
+            ) from exc
+        raise
 
 
 def _protocol_name(fs: fsspec.AbstractFileSystem) -> str:

@@ -15,6 +15,7 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Changed
 
+- `gcsfs` and `google-cloud-secret-manager` moved to an optional `gcp` extra (`uv sync --extra gcp`); Secret Manager is imported only when a secret is fetched, and `gs://` paths raise a clear error without the extra. Local-only import / predict / publish work without it.
 - `sdm setup` writes the modelling boundary as counties buffered by `study_area_buffer` then clipped to ONS BFC land, so EV builders no longer expand into the sea / estuary ([#78](https://github.com/MatthewJWhittle/shefflied-bats/issues/78)).
 - Cap vegetation height at 40 m in the environmental-variables layer path: raw VOM before summary metrics, and mean/min/max bands in model-stack layer clipping ([#73](https://github.com/MatthewJWhittle/shefflied-bats/issues/73)).
 - Default CV fold method is now 10 km spatial `blocks` (5 folds); `kmeans` and `buffered_loo` remain selectable ([#63](https://github.com/MatthewJWhittle/shefflied-bats/issues/63)).
