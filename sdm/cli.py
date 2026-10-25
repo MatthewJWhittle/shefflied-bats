@@ -541,25 +541,54 @@ def predict(
         "--cog/--no-cog",
         help="Emit Cloud Optimized GeoTIFF outputs (default: on).",
     ),
+    publish: bool = typer.Option(
+        False,
+        "--publish/--no-publish",
+        help=(
+            "Also publish each model into a versioned folder under --publish-root "
+            "(prediction.tif, threshold_<rule>.tif, run.json). Opt-in; refuses overwrite."
+        ),
+    ),
+    publish_root: Optional[str] = typer.Option(
+        None,
+        "--publish-root",
+        help=(
+            "Root for versioned prediction maps (local path or gs://). "
+            "Defaults to PREDICTION_PUBLISH_ROOT or "
+            "gs://habitat-suitability-modelling-data/predictions when --publish is set."
+        ),
+    ),
+    publish_label: Optional[str] = typer.Option(
+        None,
+        "--publish-label",
+        help="Optional label stored in each published run.json.",
+    ),
     verbose: bool = False,
 ) -> None:
     """Generate model predictions."""
     from sdm.commands.modelling.predict_sdm_models import predict_sdm_models
     
     setup_logging(verbose=verbose)
-    
-    predict_sdm_models(
-        ev_path=ev_path,
-        models_dir=models_dir,
-        output_dir=output_dir,
-        boundary_path=boundary_path,
-        species=species,
-        activity_types=activity_types,
-        split_files=split_files,
-        prediction_crs=prediction_crs,
-        write_cog=write_cog,
-        verbose=verbose,
-    )
+
+    try:
+        predict_sdm_models(
+            ev_path=ev_path,
+            models_dir=models_dir,
+            output_dir=output_dir,
+            boundary_path=boundary_path,
+            species=species,
+            activity_types=activity_types,
+            split_files=split_files,
+            prediction_crs=prediction_crs,
+            write_cog=write_cog,
+            publish=publish,
+            publish_root=publish_root,
+            publish_label=publish_label,
+            verbose=verbose,
+        )
+    except FileExistsError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
     
     logging.info("Predictions generated!")
 

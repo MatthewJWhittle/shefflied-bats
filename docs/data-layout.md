@@ -40,6 +40,19 @@ Each run: `runs/<UTC>-<hex>/` under the output root.
 
 Example: `gs://habitat-suitability-modelling-data/runs/20251016T120000Z-a1b2c3d4/model_results.csv`
 
+## Outputs (optional: versioned prediction maps)
+
+Opt-in via ``sdm predict --publish`` (or ``PREDICTION_PUBLISH_ROOT``). Local predict still writes under ``paths.predictions`` first. Each model gets a new folder that is never overwritten:
+
+```
+predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<config_hash>/
+  prediction.tif              # suitability COG
+  threshold_<rule>.tif        # yes/no map at the current cut-off rule (omitted if model_limited / no cut-off)
+  run.json                    # model_id, git sha + dirty flag, config + hash, layer versions, cut-off, CV metrics, MLflow link, label, created time
+```
+
+Default root: `gs://habitat-suitability-modelling-data/predictions`. Use `--publish-root` for a local or alternate URI (tests use a fake/local filesystem). See `predictions/README.md` in the bucket for the browsing convention in QGIS.
+
 ## Outputs (written by tune)
 
 | Artifact | Config / CLI | Bucket location (typical) | Notes |
@@ -54,7 +67,7 @@ Example: `gs://habitat-suitability-modelling-data/runs/20251016T120000Z-a1b2c3d4
 | `paths.raw_data` | Data-prep pipeline only |
 | `paths.processed_data` | Parent directory; individual files listed above |
 | `paths.models` | Default **output** root when `MODEL_OUTPUT_ROOT` unset (local `data/sdm_models`) |
-| `paths.predictions` | **`sdm predict`** only |
+| `paths.predictions` | **`sdm predict`** local outputs only; optional versioned publish is separate (below) |
 | `paths.evs` | Directory of layer prep; train uses merged `ev_tiff` only |
 | `config.yml` itself | Loaded from repo checkout (not from bucket) |
 | `mlflow.*` | Shared tracking; see [mlflow-tracking.md](mlflow-tracking.md). Off until local settings exist. |
@@ -71,6 +84,7 @@ Example: `gs://habitat-suitability-modelling-data/runs/20251016T120000Z-a1b2c3d4
 | --- | --- |
 | `INPUT_DATA_ROOT` | Prefix for config-relative input paths (e.g. `gs://habitat-suitability-modelling-data/inputs`) |
 | `MODEL_OUTPUT_ROOT` | Bucket or directory root for run folders (e.g. `gs://habitat-suitability-modelling-data`) |
+| `PREDICTION_PUBLISH_ROOT` | Optional root for versioned prediction maps when `sdm predict --publish` is used |
 | `MLFLOW_*` | Optional tracking overrides; see [mlflow-tracking.md](mlflow-tracking.md) |
 
 Authentication is standard **gcsfs** / Application Default Credentials or `GOOGLE_APPLICATION_CREDENTIALS` (no custom checks in application code).
@@ -81,3 +95,4 @@ Authentication is standard **gcsfs** / Application Default Credentials or `GOOGL
 | --- | --- |
 | `sdm/utils/fs.py` | Storage-agnostic helpers: path joining, existence checks, GDAL `/vsigs/` mapping, downloading remote files for local-only libraries, idempotent byte/text writes, and `staged_directory_context` for publishing a local staging tree to local or remote storage. |
 | `sdm/utils/model_runs.py` | Run layout only: `INPUT_DATA_ROOT` / `MODEL_OUTPUT_ROOT` resolution, `runs/<UTC>-<id>/` URIs, and published artifact paths for `model_results.csv`. |
+| `sdm/utils/prediction_publish.py` | Versioned prediction publish: folder naming, `run.json`, threshold binary maps, refuse-overwrite guard. |
