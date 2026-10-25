@@ -24,7 +24,6 @@ import mlflow
 import numpy as np
 import pandas as pd
 import yaml
-from google.cloud import secretmanager
 from mlflow.sklearn import log_model
 from pydantic import BaseModel, Field
 
@@ -116,7 +115,21 @@ def load_mlflow_settings(path: Union[str, Path]) -> MlflowSettings:
 def _access_secret_manager_version(
     *, project_id: str, secret_id: str, version: str
 ) -> str:
-    """Fetch a secret payload using Application Default Credentials."""
+    """Fetch a secret payload using Application Default Credentials.
+
+    ``google-cloud-secret-manager`` is an optional dependency (``gcp`` extra)
+    so importing training code does not require it until a secret is looked up.
+    """
+    # Optional extra: import only when Secret Manager is actually used.
+    try:
+        from google.cloud import secretmanager
+    except ImportError as exc:
+        raise ImportError(
+            "Google Secret Manager lookup requires the 'gcp' optional extra "
+            "(google-cloud-secret-manager). Install with: uv sync --extra gcp. "
+            "Alternatively set MLFLOW_DB_PASSWORD instead of using Secret Manager."
+        ) from exc
+
     client = secretmanager.SecretManagerServiceClient()
     name = f"projects/{project_id}/secrets/{secret_id}/versions/{version}"
     response = client.access_secret_version(request={"name": name})

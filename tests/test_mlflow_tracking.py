@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -27,6 +28,7 @@ from sdm.types import (
 )
 from sdm.utils.mlflow_tracking import (
     TrainingSessionMetadata,
+    _access_secret_manager_version,
     build_tracking_uri,
     configure_mlflow,
     fetch_database_password,
@@ -128,6 +130,35 @@ class TestFetchDatabasePassword:
         ) as mock_gsm:
             assert fetch_database_password(settings) == "from-gsm"
             mock_gsm.assert_called_once_with(
+                project_id="example-project",
+                secret_id="mlflow-tracking-db-password",
+                version="latest",
+            )
+
+    def test_secret_manager_requires_gcp_extra_when_package_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Clear error when Secret Manager is used without the gcp extra."""
+        real_import = builtins.__import__
+
+        def block_secretmanager(
+            name: str,
+            globals=None,
+            locals=None,
+            fromlist=(),
+            level: int = 0,
+        ):
+            if name == "google.cloud.secretmanager" or (
+                name == "google.cloud"
+                and fromlist
+                and "secretmanager" in fromlist
+            ):
+                raise ImportError("No module named 'google.cloud.secretmanager'")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", block_secretmanager)
+        with pytest.raises(ImportError, match="optional extra"):
+            _access_secret_manager_version(
                 project_id="example-project",
                 secret_id="mlflow-tracking-db-password",
                 version="latest",

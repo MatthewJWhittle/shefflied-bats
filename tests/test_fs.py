@@ -10,6 +10,7 @@ import fsspec
 import pytest
 
 from sdm.utils.fs import (
+    filesystem_for_uri,
     join_uri_path,
     local_materialized_path,
     put_local_tree,
@@ -32,6 +33,24 @@ def test_join_uri_path_local_and_remote() -> None:
 def test_uri_for_rasterio_maps_gs_to_vsigs() -> None:
     assert uri_for_rasterio("gs://bucket/evs/stack.tif") == "/vsigs/bucket/evs/stack.tif"
     assert uri_for_rasterio("/data/local.tif") == "/data/local.tif"
+
+
+def test_gs_uri_requires_gcp_extra_when_gcsfs_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clear error when a gs:// path is used without the optional gcp extra."""
+    import importlib.util as iu
+
+    real_find_spec = iu.find_spec
+
+    def find_spec_without_gcsfs(name: str, package: str | None = None):
+        if name == "gcsfs":
+            return None
+        return real_find_spec(name, package)
+
+    monkeypatch.setattr(iu, "find_spec", find_spec_without_gcsfs)
+    with pytest.raises(ImportError, match="optional 'gcp' extra"):
+        filesystem_for_uri("gs://bucket/path/to/object")
 
 
 def test_write_bytes_idempotent_local_skips_identical(tmp_path: Path) -> None:
