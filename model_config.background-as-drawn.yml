@@ -1,0 +1,74 @@
+# Ready-made #103 trial: comparison points as drawn from the all-bat surface.
+#
+# Diff from baseline model_config.yml:
+#   - 10_000 background points (change n_background_points to 50000 for the
+#     stability run — that is the only edit needed for 50k)
+#   - presence exclusion, background thinning, 10× cap, and background
+#     distance weights off
+#   - presence thinning, class balance, and 10 km block CV unchanged
+#
+# Usage (do not train from CI — Matt runs on the box against the 23 Oct layers):
+#   sdm train --model-config-path model_config.background-as-drawn.yml
+#   # 50k stability: set n_background_points: 50000 below, then the same command.
+
+model:
+  seed: 42
+  record_age_years: 20
+
+  cv:
+    method: blocks
+    n_folds: 3
+    block_size_m: 10000
+    block_n_folds: 5
+    block_n_tries: 500
+    buffer_m: 10000
+    buffered_loo_warn_above: 25
+
+  maxent:
+    feature_types:
+      - "linear"
+      - "hinge"
+    beta_multiplier: 3.0
+    beta_lqp: 1.0
+    beta_hinge: 1.0
+    beta_threshold: 1.0
+    beta_categorical: 1.0
+    n_hinge_features: 10
+    n_threshold_features: 10
+    clamp: true
+    convergence_tolerance: 1.0e-5
+    use_lambdas: "best"
+    n_lambdas: 100
+    class_weights: "balanced"
+    tau: 0.5
+    transform: "cloglog"
+
+  sampling:
+    min_presence: 15
+    subset_occurrence: null
+    subset_background: false
+    order_by_density_for_subset: true
+    sample_weight_n_neighbors: 10
+    grid_size_m: 2000
+    background:
+      factor: 10
+      min_bg: 1000
+      max_bg: 10000
+
+  background:
+    n_background_points: 10000
+    surface: all_bat
+    background_method: contrast
+    background_value: 0.025
+    sigma: 6.5
+    transform_method: presence
+    presence_exclusion_m: 0
+    background_thin_m: 0
+    presence_thin_m: 2000
+    cap_ratio: null
+    min_background: null
+    max_background: null
+    distance_weights: true
+    background_distance_weights: false
+    sample_weight_n_neighbors: 10
+    class_balance: true

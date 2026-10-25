@@ -40,18 +40,37 @@ model:
     subset_occurrence: null
     subset_background: false
     order_by_density_for_subset: true
-    sample_weight_n_neighbors: 5
+    # Deprecated for live train: use background.sample_weight_n_neighbors.
+    sample_weight_n_neighbors: 10
+    # Deprecated for live train: use background.presence_thin_m /
+    # background.background_thin_m (fallback when those are unset).
     grid_size_m: 2000
+    # Legacy absolute caps for older helpers only; live train uses
+    # background.cap_ratio / min_background / max_background.
     background:
       factor: 10
       min_bg: 1000
       max_bg: 10000
 
+  # Live-train background knobs (defaults = today's behaviour).
+  # Global defaults may also live under config.yml `background:`;
+  # this block overrides those. CLI flags override both.
+  # Trial packaging: model_config.background-as-drawn.yml (#103).
+  # See docs/background-points.md.
   background:
     n_background_points: 8000
+    surface: all_bat
     background_method: "contrast"
     background_value: 0.025
     sigma: 6.5
     transform_method: "presence"
-
-
+    presence_exclusion_m: 500
+    background_thin_m: 2000
+    presence_thin_m: 2000
+    cap_ratio: 10
+    min_background: null
+    max_background: null
+    distance_weights: true
+    background_distance_weights: true
+    sample_weight_n_neighbors: 10
+    class_balance: true

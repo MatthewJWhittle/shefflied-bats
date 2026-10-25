@@ -41,6 +41,11 @@ from sdm.occurrence.sampling import (
     BackgroundMethod,
     TransformMethod,
 )
+from sdm.occurrence.background_settings import (
+    BackgroundSurface,
+    ResolvedBackgroundSettings,
+    resolve_background_settings,
+)
 from sdm.raster.io import load_environmental_variables
 from sdm.utils.rng import apply_training_seed
 from sdm.utils.io import (
@@ -64,8 +69,6 @@ from sdm.types import (
     ProjectConfig,
     VariablesConfig,
     ModelConfig,
-    BackgroundConfig,
-    SamplingConfig,
     CvConfig,
 )
 from sdm.commands.modelling.utils import get_model_id
@@ -192,6 +195,8 @@ def prepare_training_data(
     *,
     seed: int,
     background_occurrence_gdf: Optional[gpd.GeoDataFrame] = None,
+    surface: BackgroundSurface | str = BackgroundSurface.ALL_BAT,
+    grid_resolution: int = 100,
 ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, List[str]]:
     """
     Prepare study-level training data shared across all species-activity combinations.
@@ -204,7 +209,7 @@ def prepare_training_data(
     ``background_occurrence_gdf`` is the record set whose density drives background
     sampling. Pass all bat records so that a run filtered to some species or activity
     types samples background exactly as a full run does. When omitted,
-    ``occurrence_gdf`` is used.
+    ``occurrence_gdf`` is used. ``surface="uniform"`` ignores occurrence density.
     """
     logger.info("Preparing shared training data (presence and background with EVs)")
 
@@ -240,8 +245,10 @@ def prepare_training_data(
         background_value=background_value,
         sigma=sigma,
         transform_method=transform_method,
+        grid_resolution=grid_resolution,
         clip_to_boundary=True,
         seed=seed,
+        surface=surface,
     )
 
     # Annotate background points with EVs
@@ -421,6 +428,9 @@ def apply_sample_weights(
     return gdf
 
 
+_N_MAX_BACKGROUND_UNSET = object()
+
+
 def prepare_species_training_data(
     presence_data: gpd.GeoDataFrame,
     background_data: gpd.GeoDataFrame,
@@ -430,11 +440,18 @@ def prepare_species_training_data(
     grid_size_m: float = 500,
     d_min: float = 500,
     d_max: float = np.inf,
-    n_max_background: Optional[int] = None,
+    n_max_background: Any = _N_MAX_BACKGROUND_UNSET,
     sort_density: bool = False,
     sample_weight_n_neighbors: int = 10,
     *,
     random_state: int,
+    presence_thin_m: Optional[float] = None,
+    background_thin_m: Optional[float] = None,
+    distance_weights: bool = True,
+    background_distance_weights: bool = True,
+    cap_ratio: Any = _N_MAX_BACKGROUND_UNSET,
+    min_background: Optional[int] = None,
+    max_background: Optional[int] = None,
 ) -> gpd.GeoDataFrame:
     """
     Prepare training data for a single species-activity combination.
@@ -442,10 +459,11 @@ def prepare_species_training_data(
     This function composes multiple smaller functions to:
     1. Filter presence data for species/activity
     2. Drop duplicates
-    3. Filter background by distance
-    4. Grid sample both presence and background
-    5. Apply sample weights
-    6. Combine into final training dataset
+    3. Filter background by distance (``d_min`` / ``d_max``; ``d_min=0`` skips min)
+    4. Grid-sample presence and/or background (thin ``0`` skips that class)
+    5. Cap background count when ``n_max_background`` is set
+    6. Apply distance sample weights (per-class flags)
+    7. Combine into final training dataset
     
     Args:
         presence_data: All annotated presence data
@@ -453,17 +471,27 @@ def prepare_species_training_data(
         latin_name: Species latin name
         activity_type: Activity type
         ev_columns: List of environmental variable column names
-        grid_size_m: Grid cell size for sampling (meters)
-        d_min: Minimum distance from presence for background (meters)
+        grid_size_m: Fallback thin distance (m) when presence/background thin unset
+        d_min: Minimum distance from presence for background (meters); 0 = off
         d_max: Maximum distance from presence for background (meters)
-        n_max_background: Maximum number of background points (defaults to 10x presence)
+        n_max_background: Max background points. Unset → ``10 ×`` presence
+            (legacy default). Explicit ``None`` → no cap.
         sort_density: Whether to sort background by density before sampling
         sample_weight_n_neighbors: Number of neighbors for sample weighting
         random_state: Random seed for reproducibility in sampling operations
+        presence_thin_m: Presence grid thin (m); 0 = off; default ``grid_size_m``
+        background_thin_m: Background grid thin (m); 0 = off; default ``grid_size_m``
+        distance_weights: Apply distance weights to presence points
+        background_distance_weights: Apply distance weights to background points
         
     Returns:
         Combined training data GeoDataFrame with class, sample_weight, and EV columns
     """
+    presence_thin = float(grid_size_m if presence_thin_m is None else presence_thin_m)
+    background_thin = float(
+        grid_size_m if background_thin_m is None else background_thin_m
+    )
+
     # Filter presence data
     species_presence = get_species_presence_data(
         presence_data, latin_name, activity_type
@@ -476,42 +504,74 @@ def prepare_species_training_data(
     # Drop duplicates
     species_presence = drop_duplicate_grid_points(species_presence)
     
-    # Filter background by distance
+    # Filter background by distance (d_min=0 keeps points on top of presence)
     species_absence = filter_background_by_distance(
         background_data, species_presence, d_min=d_min, d_max=d_max
     )
     species_absence = drop_duplicate_grid_points(species_absence)
     
-    # Grid sample
-    species_presence = grid_sample_points(
-        species_presence, grid_size_x=grid_size_m, grid_size_y=grid_size_m, random_state=random_state
-    )
-    species_absence = grid_sample_points(
-        species_absence, grid_size_x=grid_size_m, grid_size_y=grid_size_m, random_state=random_state
-    )
-    
-    # Limit background points
-    if n_max_background is None:
-        n_max_background = len(species_presence) * 10
-    
-
-    
-    if sort_density and "density" in species_absence.columns:
-        species_absence = species_absence.sort_values(
-            by="density", ascending=False
-        ).head(n_max_background)
-    else:
-        species_absence = species_absence.sample(
-            n=min(len(species_absence), n_max_background), replace=False, random_state=random_state
+    # Grid sample (0 m = skip thinning for that class)
+    if presence_thin > 0:
+        species_presence = grid_sample_points(
+            species_presence,
+            grid_size_x=presence_thin,
+            grid_size_y=presence_thin,
+            random_state=random_state,
         )
+    if background_thin > 0:
+        species_absence = grid_sample_points(
+            species_absence,
+            grid_size_x=background_thin,
+            grid_size_y=background_thin,
+            random_state=random_state,
+        )
+
+    if n_max_background is _N_MAX_BACKGROUND_UNSET:
+        if cap_ratio is _N_MAX_BACKGROUND_UNSET:
+            # Legacy default: 10× thinned presence.
+            n_max_background = len(species_presence) * 10
+        elif cap_ratio is None and min_background is None and max_background is None:
+            n_max_background = None
+        else:
+            n: Optional[int] = None
+            if cap_ratio is not None:
+                n = int(len(species_presence) * float(cap_ratio))
+            if min_background is not None:
+                n = int(min_background) if n is None else max(n, int(min_background))
+            if max_background is not None:
+                n = int(max_background) if n is None else min(n, int(max_background))
+            n_max_background = n
+    
+    # Limit background points when a cap is configured
+    if n_max_background is not None and len(species_absence) > 0:
+        cap = int(n_max_background)
+        if sort_density and "density" in species_absence.columns:
+            species_absence = species_absence.sort_values(
+                by="density", ascending=False
+            ).head(cap)
+        else:
+            species_absence = species_absence.sample(
+                n=min(len(species_absence), cap),
+                replace=False,
+                random_state=random_state,
+            )
     
     # Apply sample weights
-    species_presence = apply_sample_weights(
-        species_presence, n_neighbors=sample_weight_n_neighbors
-    )
-    species_absence = apply_sample_weights(
-        species_absence, n_neighbors=sample_weight_n_neighbors
-    )
+    if distance_weights:
+        species_presence = apply_sample_weights(
+            species_presence, n_neighbors=sample_weight_n_neighbors
+        )
+    else:
+        species_presence = species_presence.copy()
+        species_presence["sample_weight"] = 1.0
+
+    if background_distance_weights:
+        species_absence = apply_sample_weights(
+            species_absence, n_neighbors=sample_weight_n_neighbors
+        )
+    else:
+        species_absence = species_absence.copy()
+        species_absence["sample_weight"] = 1.0
     
     # Combine and select columns
     species_data = pd.concat([species_presence, species_absence])
@@ -1162,6 +1222,7 @@ def save_run_metadata(
     seed: int,
     model_config_path: str,
     fold_params: Optional[FoldParams] = None,
+    background_settings: Optional[ResolvedBackgroundSettings] = None,
 ) -> Path:
     """Write run-level metadata (including the training seed) into the run folder."""
     metadata: Dict[str, Any] = {
@@ -1171,6 +1232,8 @@ def save_run_metadata(
     }
     if fold_params is not None:
         metadata["cv"] = fold_params.to_metadata()
+    if background_settings is not None:
+        metadata["background"] = background_settings.to_metadata()
     path = output_dir / "run_metadata.json"
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
@@ -1446,10 +1509,11 @@ def train_sdm_models(
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     verbose: bool = False,
-    # Species-specific processing parameters
-    d_min: float = 500,
-    d_max: float = np.inf,
-    sample_weight_n_neighbors: int = 10,
+    # Species-specific processing parameters (None → resolved from config)
+    d_min: Optional[float] = None,
+    d_max: Optional[float] = None,
+    sample_weight_n_neighbors: Optional[int] = None,
+    n_background_points: Optional[int] = None,
     allow_config_fallback: bool = False,
     cv_method: Optional[str] = None,
     cv_n_folds: Optional[int] = None,
@@ -1511,22 +1575,18 @@ def train_sdm_models(
         resolve_sdm_config_root(variables_config_path)
     )
     
-    # Get background config from model config (with defaults if not present)
-    background_config = base_model_cfg.background or BackgroundConfig()
-    # BackgroundConfig has default enum values, but add assertions for type checker
-    assert background_config.background_method is not None
-    assert background_config.transform_method is not None
-    logger.info(
-        f"Background point config: n={background_config.n_background_points}, "
-        f"method={background_config.background_method.value}, "
-        f"value={background_config.background_value}, sigma={background_config.sigma}, "
-        f"transform={background_config.transform_method.value}"
-    )
-    
-    # Get sampling config from model config (with defaults if not present)
-    sampling_config = base_model_cfg.sampling or SamplingConfig()
-    grid_size_m = sampling_config.grid_size_m
     training_seed = base_model_cfg.seed
+    background_settings = resolve_background_settings(
+        project_config=project_config,
+        model_config=base_model_cfg,
+        seed=training_seed,
+        n_background_points_override=n_background_points,
+        presence_exclusion_m_override=d_min,
+        presence_exclusion_max_m_override=d_max,
+        sample_weight_n_neighbors_override=sample_weight_n_neighbors,
+    )
+    logger.info("Background settings: %s", background_settings.to_metadata())
+
     fold_params = resolve_fold_params(
         base_model_cfg.cv,
         model_seed=training_seed,
@@ -1537,7 +1597,6 @@ def train_sdm_models(
         buffer_m_override=cv_buffer_m,
         buffered_loo_warn_above_override=cv_buffered_loo_warn_above,
     )
-    logger.info(f"Sampling config: grid_size_m={grid_size_m}")
     logger.info("Training seed (from model_config.yml): %s", training_seed)
     logger.info(
         "CV folds: method=%s params=%s",
@@ -1598,9 +1657,6 @@ def train_sdm_models(
     )
     
     # Prepare shared training data (presence/background annotated with EVs)
-    # Unpack background config for prepare_training_data (keeps interface simple for testing)
-    assert background_config.background_method is not None
-    assert background_config.transform_method is not None
     (
         presence_with_evs_gdf,
         background_with_evs_gdf,
@@ -1610,18 +1666,21 @@ def train_sdm_models(
         background_occurrence_gdf=all_bats_gdf,
         boundary=boundary,
         evs_to_model=evs_to_model,
-        n_background_points=background_config.n_background_points,
-        background_method=background_config.background_method,
-        background_value=background_config.background_value,
-        sigma=background_config.sigma,
-        transform_method=background_config.transform_method,
-        seed=training_seed,
+        n_background_points=background_settings.n_background_points,
+        background_method=background_settings.background_method,
+        background_value=background_settings.background_value,
+        sigma=background_settings.sigma,
+        transform_method=background_settings.transform_method,
+        seed=background_settings.seed,
+        surface=background_settings.surface,
+        grid_resolution=background_settings.surface_resolution_m,
     )
     
     # Create default model config from base config (used as fallback)
     default_model_config = DefaultMaxentConfig.from_config(
         config=base_model_cfg
     )
+    default_model_config.class_weights = background_settings.maxent_class_weights()
     
     # Generate training data for each species-activity combination
     logger.info("Generating training data for each species-activity combination...")
@@ -1642,11 +1701,18 @@ def train_sdm_models(
             latin_name=latin_name,
             activity_type=activity_type,
             ev_columns=ev_columns,
-            grid_size_m=grid_size_m,
-            d_min=d_min,
-            d_max=d_max,
-            sample_weight_n_neighbors=sample_weight_n_neighbors,
-            random_state=training_seed,
+            grid_size_m=background_settings.presence_thin_m,
+            d_min=background_settings.presence_exclusion_m,
+            d_max=background_settings.presence_exclusion_max_m,
+            sample_weight_n_neighbors=background_settings.sample_weight_n_neighbors,
+            random_state=background_settings.seed,
+            presence_thin_m=background_settings.presence_thin_m,
+            background_thin_m=background_settings.background_thin_m,
+            distance_weights=background_settings.distance_weights,
+            background_distance_weights=background_settings.background_distance_weights,
+            cap_ratio=background_settings.cap_ratio,
+            min_background=background_settings.min_background,
+            max_background=background_settings.max_background,
         )
         
         # Check if training data was generated
@@ -1739,6 +1805,9 @@ def train_sdm_models(
                     identifier,
                 )
 
+        # Run-level background.class_balance is the source of truth for balancing.
+        maxent_model_config.class_weights = background_settings.maxent_class_weights()
+
         training_data.append(
             TrainingData(
                 latin_name=latin_name,
@@ -1798,6 +1867,7 @@ def train_sdm_models(
             seed=training_seed,
             model_config_path=repo_relative_config_path(model_config_path),
             fold_params=fold_params,
+            background_settings=background_settings,
         )
 
     logger.info("Model run outputs: %s", written_uri)
