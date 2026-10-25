@@ -21,6 +21,7 @@ from sdm.models.core.prediction import (
 )
 from sdm.models.core.threshold import POOLED_OOF_PERCENTILE_RULE
 from sdm.utils.prediction_publish import (
+    load_species_binomial_by_key,
     publish_model_prediction_version,
     publish_name_slug,
     publish_predictions_from_output_dir,
@@ -33,6 +34,21 @@ from sdm.utils.prediction_publish import (
     threshold_raster_filename,
     version_folder_exists,
 )
+
+# Project map from config.yml (also used as an explicit fixture so tests stay
+# independent of ambient env when asserting naming).
+_PROJECT_SPECIES_MAP = {
+    "brandtii": "myotis_brandtii",
+    "daubentonii": "myotis_daubentonii",
+    "mystacinus": "myotis_mystacinus",
+    "nattereri": "myotis_nattereri",
+    "leisleri": "nyctalus_leisleri",
+    "noctula": "nyctalus_noctula",
+    "pipistrellus": "pipistrellus_pipistrellus",
+    "pygmaeus": "pipistrellus_pygmaeus",
+    "plecotus_auritus": "plecotus_auritus",
+    "nathusii": "pipistrellus_nathusii",
+}
 
 
 def _write_tiny_prediction(path: Path, *, values: np.ndarray | None = None) -> Path:
@@ -86,15 +102,34 @@ def test_build_version_folder_name_format() -> None:
 
 
 def test_resolve_binomial_slug_from_mapping() -> None:
-    assert resolve_binomial_slug("brandtii") == "myotis_brandtii"
-    assert resolve_binomial_slug("Myotis brandtii") == "myotis_brandtii"
-    assert resolve_binomial_slug("pipistrellus") == "pipistrellus_pipistrellus"
-    assert resolve_binomial_slug("plecotus_auritus") == "plecotus_auritus"
-    assert resolve_binomial_slug("Pipistrellus nathusii") == "pipistrellus_nathusii"
+    mapping = _PROJECT_SPECIES_MAP
+    assert resolve_binomial_slug("brandtii", species_binomial_by_key=mapping) == (
+        "myotis_brandtii"
+    )
+    assert resolve_binomial_slug(
+        "Myotis brandtii", species_binomial_by_key=mapping
+    ) == "myotis_brandtii"
+    assert resolve_binomial_slug(
+        "pipistrellus", species_binomial_by_key=mapping
+    ) == "pipistrellus_pipistrellus"
+    assert resolve_binomial_slug(
+        "plecotus_auritus", species_binomial_by_key=mapping
+    ) == "plecotus_auritus"
+    assert resolve_binomial_slug(
+        "Pipistrellus nathusii", species_binomial_by_key=mapping
+    ) == "pipistrellus_nathusii"
+    # Unknown full Latin name passes through (no project map entry required).
+    assert resolve_binomial_slug(
+        "Eptesicus serotinus", species_binomial_by_key=mapping
+    ) == "eptesicus_serotinus"
 
 
 def test_publish_name_slug_and_artifact_filename() -> None:
-    slug = publish_name_slug(latin_name="Myotis brandtii", activity_type="Roost")
+    slug = publish_name_slug(
+        latin_name="Myotis brandtii",
+        activity_type="Roost",
+        species_binomial_by_key=_PROJECT_SPECIES_MAP,
+    )
     assert slug == "myotis_brandtii_roost"
     version = "20261017_unknown_cfg84798104"
     assert (
@@ -110,6 +145,52 @@ def test_publish_name_slug_and_artifact_filename() -> None:
     assert (
         published_artifact_filename(slug, version, "run", ext="json")
         == "prediction__myotis_brandtii_roost__20261017_unknown_cfg84798104__run.json"
+    )
+
+
+def test_pinned_publish_filenames_for_existing_models() -> None:
+    """Published names stay byte-identical; Latin model ids get no doubled genus."""
+    version = "20261017_unknown_cfg84798104"
+    mapping = _PROJECT_SPECIES_MAP
+    pinned = {
+        "myotis_brandtii_roost": (
+            "prediction__myotis_brandtii_roost__"
+            f"{version}__suitability.tif"
+        ),
+        "nyctalus_noctula_in_flight": (
+            "prediction__nyctalus_noctula_in_flight__"
+            f"{version}__suitability.tif"
+        ),
+        "pipistrellus_nathusii_roost": (
+            "prediction__pipistrellus_nathusii_roost__"
+            f"{version}__suitability.tif"
+        ),
+        "plecotus_auritus_roost": (
+            "prediction__plecotus_auritus_roost__"
+            f"{version}__suitability.tif"
+        ),
+    }
+    for model_id, expected_name in pinned.items():
+        slug = publish_name_slug(
+            model_id=model_id, species_binomial_by_key=mapping
+        )
+        # Model ids are already genus_species_behaviour — no myotis_myotis_…
+        assert "myotis_myotis_" not in slug
+        assert "nyctalus_nyctalus_" not in slug
+        assert "pipistrellus_pipistrellus_pipistrellus" not in slug
+        assert "plecotus_plecotus_" not in slug
+        assert (
+            published_artifact_filename(slug, version, "suitability", ext="tif")
+            == expected_name
+        )
+    # Epithet-only latin_name still expands via the config map.
+    assert (
+        publish_name_slug(
+            latin_name="brandtii",
+            activity_type="Roost",
+            species_binomial_by_key=mapping,
+        )
+        == "myotis_brandtii_roost"
     )
 
 
@@ -456,17 +537,62 @@ def test_make_predictions_publish_opt_in(
     )
 
 
-def test_resolve_prediction_publish_root_prefers_cli(
+def test_resolve_prediction_publish_root_prefers_cli_then_env_then_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    project_cfg = {
+        "prediction_publish": {
+            "root": "memory://from-config/predictions",
+            "species_binomial_by_key": dict(_PROJECT_SPECIES_MAP),
+        }
+    }
     monkeypatch.setenv("PREDICTION_PUBLISH_ROOT", "memory://from-env/predictions")
-    assert resolve_prediction_publish_root("/tmp/cli-root") == "/tmp/cli-root"
+    assert resolve_prediction_publish_root("/tmp/cli-root", config=project_cfg) == (
+        "/tmp/cli-root"
+    )
     assert (
-        resolve_prediction_publish_root(None)
+        resolve_prediction_publish_root(None, config=project_cfg)
         == "memory://from-env/predictions"
     )
     monkeypatch.delenv("PREDICTION_PUBLISH_ROOT")
     assert (
-        resolve_prediction_publish_root(None)
-        == "gs://habitat-suitability-modelling-data/predictions"
+        resolve_prediction_publish_root(None, config=project_cfg)
+        == "memory://from-config/predictions"
     )
+
+
+def test_resolve_prediction_publish_root_fails_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PREDICTION_PUBLISH_ROOT", raising=False)
+    with pytest.raises(ValueError, match="publish root is not configured"):
+        resolve_prediction_publish_root(None, config={})
+    with pytest.raises(ValueError, match="publish root is not configured"):
+        resolve_prediction_publish_root(
+            None,
+            config={"prediction_publish": {"species_binomial_by_key": {}}},
+        )
+
+
+def test_load_species_binomial_by_key_from_config() -> None:
+    loaded = load_species_binomial_by_key(
+        {
+            "prediction_publish": {
+                "species_binomial_by_key": dict(_PROJECT_SPECIES_MAP),
+            }
+        }
+    )
+    assert loaded["brandtii"] == "myotis_brandtii"
+    assert loaded["nathusii"] == "pipistrellus_nathusii"
+    assert load_species_binomial_by_key({}) == {}
+
+
+def test_project_config_yml_keeps_publish_root_for_this_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """This project's config.yml supplies the former library default root."""
+    monkeypatch.delenv("PREDICTION_PUBLISH_ROOT", raising=False)
+    assert resolve_prediction_publish_root(None) == (
+        "gs://habitat-suitability-modelling-data/predictions"
+    )
+    assert load_species_binomial_by_key()["brandtii"] == "myotis_brandtii"

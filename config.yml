@@ -75,3 +75,21 @@ mlflow:
   enabled: false
   settings_file: "mlflow.settings.yml"
   experiment_name: "species_sdm_experiment"
+
+# Versioned prediction publish (`sdm predict --publish`). Library code has no
+# project bucket default: set root here, or pass --publish-root / PREDICTION_PUBLISH_ROOT.
+prediction_publish:
+  root: "gs://habitat-suitability-modelling-data/predictions"
+  # Epithet / short key → genus_species slug for published file names.
+  # Full binomials already present in model ids pass through unchanged.
+  species_binomial_by_key:
+    brandtii: myotis_brandtii
+    daubentonii: myotis_daubentonii
+    mystacinus: myotis_mystacinus
+    nattereri: myotis_nattereri
+    leisleri: nyctalus_leisleri
+    noctula: nyctalus_noctula
+    pipistrellus: pipistrellus_pipistrellus
+    pygmaeus: pipistrellus_pygmaeus
+    plecotus_auritus: plecotus_auritus
+    nathusii: pipistrellus_nathusii

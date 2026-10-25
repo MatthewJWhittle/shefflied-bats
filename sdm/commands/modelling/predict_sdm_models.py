@@ -340,16 +340,17 @@ def predict_sdm_models(
             ``ProjectConfig.crs`` from ``config.yml``.
         write_cog: When True (default), emit Cloud Optimized GeoTIFFs.
         publish: When True, also publish versioned maps under *publish_root*.
-        publish_root: Versioned publish root (local path or ``gs://``). Defaults to
-            ``PREDICTION_PUBLISH_ROOT`` or the project predictions bucket prefix.
+        publish_root: Versioned publish root (local path or ``gs://``). Resolved from
+            CLI, else ``PREDICTION_PUBLISH_ROOT``, else ``prediction_publish.root``
+            in ``config.yml``. Required when publishing; there is no library default.
         publish_label: Optional free-text label stored in each ``run.json``.
         rebuild_metrics_path: Optional rebuild metrics JSON for per-layer versions.
         verbose: Enable verbose logging.
 
     Raises:
         FileNotFoundError: If model index or input files are not found.
-        ValueError: If no models match the specified criteria or if no models
-            are successfully loaded.
+        ValueError: If no models match the specified criteria, if no models
+            are successfully loaded, or if ``--publish`` is set with no publish root.
         FileExistsError: If a computed publish version folder already exists.
     """
     setup_logging(level=logging.INFO, verbose=verbose)
@@ -373,11 +374,20 @@ def predict_sdm_models(
     logger.debug("Loading environmental variables...")
     _, ev_raster = load_environmental_variables(ev_path)
 
-    crs_out = prediction_crs if prediction_crs is not None else load_project_config().crs
+    project_config = load_project_config()
+    crs_out = prediction_crs if prediction_crs is not None else project_config.crs
 
     resolved_publish_root: Optional[str] = None
     if publish or publish_root:
-        resolved_publish_root = resolve_prediction_publish_root(publish_root)
+        publish_cfg = None
+        if project_config.prediction_publish is not None:
+            publish_cfg = {
+                "prediction_publish": project_config.prediction_publish.model_dump()
+            }
+        resolved_publish_root = resolve_prediction_publish_root(
+            publish_root,
+            config=publish_cfg if publish_cfg is not None else {},
+        )
 
     if rebuild_metrics_path is None:
         candidate = Path(ev_path).expanduser().resolve().parent / "rebuild_metrics.json"
