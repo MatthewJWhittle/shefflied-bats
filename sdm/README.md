@@ -55,10 +55,10 @@ sdm threshold \
   --models-dir data/sdm_models \
   --output-dir data/sdm_predictions/thresholds
 
-# Predict (COG, project CRS from config.yml)
+# Predict (COG, project CRS from config.yml). Default: newest runs/<id>/;
+# or: sdm predict --run 20261025T2006
 sdm predict \
-  --ev-path data/evs/evs-to-model.tif \
-  --models-dir data/sdm_models
+  --ev-path data/evs/evs-to-model.tif
 
 # Web Mercator bundles for visualisers
 sdm export-rasters data/sdm_predictions/prediction_*.tif \
@@ -72,7 +72,7 @@ sdm visualize \
 
 ## Predict and export behaviour
 
-**`sdm predict`** writes `all_predictions.tif` and, by default, per-model `prediction_{model_id}.tif` files. Outputs use the project CRS (`config.yml`, typically EPSG:27700) and are COG-encoded unless `--no-cog` is passed. Use `--prediction-crs` to change the output CRS. Pass `--publish` to also write versioned maps under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` with names `prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif`, `…__threshold_<rule>.tif`, and `…__run.json`. Publish root comes from `--publish-root`, else `PREDICTION_PUBLISH_ROOT`, else `prediction_publish.root` in `config.yml` (required when publishing). Existing version folders are never overwritten.
+**`sdm predict`** loads the newest `data/sdm_models/runs/<id>/` by default (or `--run <id|prefix>`, or `--models-dir` to a concrete run). It writes `all_predictions.tif` and, by default, per-model `prediction_{model_id}.tif` files. Outputs use the project CRS (`config.yml`, typically EPSG:27700) and are COG-encoded unless `--no-cog` is passed. Use `--prediction-crs` to change the output CRS. Pass `--publish` to also write versioned maps under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` with names `prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif`, `…__threshold_<rule>.tif`, and `…__run.json`. Publish root comes from `--publish-root`, else `PREDICTION_PUBLISH_ROOT`, else `prediction_publish.root` in `config.yml` (required when publishing). Existing version folders are never overwritten.
 
 **`sdm export-rasters`** is for secondary bundles: pass explicit GeoTIFF paths, optionally `--output-crs EPSG:3857` and/or `--cog`. At least one of reprojection or COG encoding must be requested.
 

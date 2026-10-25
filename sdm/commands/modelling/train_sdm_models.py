@@ -87,6 +87,7 @@ from sdm.utils.model_runs import (
     model_run_write_context,
     resolve_data_path,
     resolve_output_root,
+    run_segment_from_uri,
 )
 from sdm.utils.mlflow_tracking import (
     TrainingSessionMetadata,
@@ -1800,7 +1801,9 @@ def train_sdm_models(
         )
 
     logger.info("Model run outputs: %s", written_uri)
-    
+    run_id = run_segment_from_uri(str(written_uri))
+    logger.info("To predict with this run: sdm predict --run %s", run_id)
+
     if mlflow_enabled:
         logger.info("Logging to MLflow...")
         session_metadata = TrainingSessionMetadata(
