@@ -6,7 +6,7 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Added
 
-- Opt-in versioned prediction publishing (`sdm predict --publish`): writes `prediction.tif`, `threshold_<rule>.tif`, and `run.json` under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` without overwriting existing versions.
+- Opt-in versioned prediction publishing (`sdm predict --publish`): writes `prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif`, `…__threshold_<rule>.tif`, and `…__run.json` under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` without overwriting existing versions.
 - Shared MLflow run tracking helpers: Neon Postgres backend (no tracking server), GCS artefact prefix, Secret Manager / `MLFLOW_DB_PASSWORD` for the tracking DB password, example settings file, and dual-writer tests ([#93](https://github.com/MatthewJWhittle/shefflied-bats/issues/93)); see [docs/mlflow-tracking.md](docs/mlflow-tracking.md).
 - Selectable CV fold methods (`kmeans`, `blocks`, `buffered_loo`) via `model.cv` / `sdm train --cv-method` ([#63](https://github.com/MatthewJWhittle/shefflied-bats/issues/63)); see [docs/cv-folds.md](docs/cv-folds.md).
 - Warning when `buffered_loo` is used with more presence records than `model.cv.buffered_loo_warn_above` / `--cv-buffered-loo-warn-above` (default 25); training is unchanged ([#63](https://github.com/MatthewJWhittle/shefflied-bats/issues/63)).

@@ -546,7 +546,8 @@ def predict(
         "--publish/--no-publish",
         help=(
             "Also publish each model into a versioned folder under --publish-root "
-            "(prediction.tif, threshold_<rule>.tif, run.json). Opt-in; refuses overwrite."
+            "(prediction__<species>_<behaviour>__<version>__suitability.tif, "
+            "…__threshold_<rule>.tif, …__run.json). Opt-in; refuses overwrite."
         ),
     ),
     publish_root: Optional[str] = typer.Option(

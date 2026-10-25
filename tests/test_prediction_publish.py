@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -12,7 +13,6 @@ import pytest
 import rasterio
 from rasterio.transform import from_bounds
 from rio_cogeo.cogeo import cog_validate
-from types import SimpleNamespace
 
 import sdm.commands.modelling.predict_sdm_models as pred_mod
 from sdm.models.core.prediction import (
@@ -21,11 +21,15 @@ from sdm.models.core.prediction import (
 )
 from sdm.models.core.threshold import POOLED_OOF_PERCENTILE_RULE
 from sdm.utils.prediction_publish import (
-    build_version_folder_name,
     publish_model_prediction_version,
+    publish_name_slug,
     publish_predictions_from_output_dir,
+    published_artifact_filename,
+    resolve_binomial_slug,
     resolve_prediction_publish_root,
+    build_version_folder_name,
     stable_config_hash,
+    threshold_kind_for_rule,
     threshold_raster_filename,
     version_folder_exists,
 )
@@ -73,12 +77,54 @@ def test_build_version_folder_name_format() -> None:
         config_hash="deadbeef",
     )
     assert name == "20261025_abcdef0_cfgdeadbeef"
+    unknown = build_version_folder_name(
+        created_at=datetime(2026, 10, 17, tzinfo=timezone.utc),
+        git_sha=None,
+        config_hash="84798104",
+    )
+    assert unknown == "20261017_unknown_cfg84798104"
 
 
-def test_threshold_raster_filename_uses_rule() -> None:
+def test_resolve_binomial_slug_from_mapping() -> None:
+    assert resolve_binomial_slug("brandtii") == "myotis_brandtii"
+    assert resolve_binomial_slug("Myotis brandtii") == "myotis_brandtii"
+    assert resolve_binomial_slug("pipistrellus") == "pipistrellus_pipistrellus"
+    assert resolve_binomial_slug("plecotus_auritus") == "plecotus_auritus"
+    assert resolve_binomial_slug("Pipistrellus nathusii") == "pipistrellus_nathusii"
+
+
+def test_publish_name_slug_and_artifact_filename() -> None:
+    slug = publish_name_slug(latin_name="Myotis brandtii", activity_type="Roost")
+    assert slug == "myotis_brandtii_roost"
+    version = "20261017_unknown_cfg84798104"
     assert (
-        threshold_raster_filename(POOLED_OOF_PERCENTILE_RULE)
-        == "threshold_pooled_oof_percentile.tif"
+        published_artifact_filename(slug, version, "suitability", ext="tif")
+        == "prediction__myotis_brandtii_roost__20261017_unknown_cfg84798104__suitability.tif"
+    )
+    assert (
+        published_artifact_filename(
+            slug, version, threshold_kind_for_rule(POOLED_OOF_PERCENTILE_RULE), ext="tif"
+        )
+        == "prediction__myotis_brandtii_roost__20261017_unknown_cfg84798104__threshold_pooled_oof_percentile.tif"
+    )
+    assert (
+        published_artifact_filename(slug, version, "run", ext="json")
+        == "prediction__myotis_brandtii_roost__20261017_unknown_cfg84798104__run.json"
+    )
+
+
+def test_threshold_raster_filename_includes_rule() -> None:
+    assert (
+        threshold_kind_for_rule(POOLED_OOF_PERCENTILE_RULE)
+        == "threshold_pooled_oof_percentile"
+    )
+    assert (
+        threshold_raster_filename(
+            "myotis_brandtii_roost",
+            "20261017_unknown_cfg84798104",
+            POOLED_OOF_PERCENTILE_RULE,
+        )
+        == "prediction__myotis_brandtii_roost__20261017_unknown_cfg84798104__threshold_pooled_oof_percentile.tif"
     )
 
 
@@ -90,11 +136,7 @@ def test_write_threshold_binary_raster_known_answer(tmp_path: Path) -> None:
         ],
         dtype=np.float32,
     )
-    pred = _write_tiny_prediction(
-        tmp_path / "pred.tif",
-        values=np.pad(data, ((0, 6), (0, 3)), constant_values=-9999.0),
-    )
-    # Rewrite with exact 2x3 for clarity of assertion window
+    pred = tmp_path / "pred.tif"
     transform = from_bounds(0, 0, 3, 2, 3, 2)
     with rasterio.open(
         pred,
@@ -110,7 +152,7 @@ def test_write_threshold_binary_raster_known_answer(tmp_path: Path) -> None:
     ) as dst:
         dst.write(data, 1)
 
-    out = tmp_path / "threshold_pooled_oof_percentile.tif"
+    out = tmp_path / "threshold.tif"
     write_threshold_binary_raster(pred, out, cutoff=0.10, as_cog=True)
 
     ok, _, errs = cog_validate(out, quiet=True)
@@ -119,7 +161,6 @@ def test_write_threshold_binary_raster_known_answer(tmp_path: Path) -> None:
         binary = ds.read(1)
         assert ds.nodata == 255
         assert binary.dtype == np.uint8
-        # >= 0.10 suitable (1); < 0.10 unsuitable (0); nodata 255
         assert binary[0, 0] == 0
         assert binary[0, 1] == 1
         assert binary[0, 2] == 255
@@ -131,7 +172,7 @@ def test_write_threshold_binary_raster_known_answer(tmp_path: Path) -> None:
 def test_save_prediction_raster_optional_cog(tmp_path: Path) -> None:
     data = np.ones((4, 4), dtype=np.float32) * 0.4
     transform = from_bounds(0, 0, 4, 4, 4, 4)
-    path = tmp_path / "prediction.tif"
+    path = tmp_path / "suitability.tif"
     save_prediction_raster(
         data,
         path,
@@ -145,12 +186,14 @@ def test_save_prediction_raster_optional_cog(tmp_path: Path) -> None:
 
 def test_publish_model_prediction_version_local_tree(tmp_path: Path) -> None:
     models_dir = tmp_path / "models"
-    model_id = "demo_species_roost"
+    model_id = "myotis_brandtii_roost"
     pkg = models_dir / model_id
     pkg.mkdir(parents=True)
     package = {
         "schema_version": 1,
         "model_id": model_id,
+        "latin_name": "Myotis brandtii",
+        "activity_type": "Roost",
         "feature_names": ["terrain_dtm", "ceh_broadleaved_500m"],
         "metrics": {"mean_cv_auc": 0.81, "n_presence": 40},
         "model_limited": False,
@@ -172,7 +215,7 @@ def test_publish_model_prediction_version_local_tree(tmp_path: Path) -> None:
 
     prediction = _write_tiny_prediction(tmp_path / "local" / f"prediction_{model_id}.tif")
     publish_root = tmp_path / "predictions"
-    created = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
+    created = datetime(2026, 10, 17, 12, 0, tzinfo=timezone.utc)
 
     uri = publish_model_prediction_version(
         model_id=model_id,
@@ -182,33 +225,42 @@ def test_publish_model_prediction_version_local_tree(tmp_path: Path) -> None:
         config={"prediction_crs": "EPSG:27700", "write_cog": True},
         label="unit-test",
         created_at=created,
-        git_sha="abc1234ffff",
+        git_sha="",  # empty → "unknown" segment (no auto git lookup)
         git_dirty=False,
         write_cog=True,
     )
 
     version_dir = Path(uri)
     assert version_dir.is_dir()
-    assert (version_dir / "prediction.tif").is_file()
-    assert (version_dir / "threshold_pooled_oof_percentile.tif").is_file()
-    run = json.loads((version_dir / "run.json").read_text(encoding="utf-8"))
+    assert version_dir.name.startswith("20261017_unknown_cfg")
+    version = version_dir.name
+    slug = "myotis_brandtii_roost"
+    suit_name = f"prediction__{slug}__{version}__suitability.tif"
+    thr_name = (
+        f"prediction__{slug}__{version}__threshold_pooled_oof_percentile.tif"
+    )
+    run_name = f"prediction__{slug}__{version}__run.json"
+    assert (version_dir / suit_name).is_file()
+    assert (version_dir / thr_name).is_file()
+    run = json.loads((version_dir / run_name).read_text(encoding="utf-8"))
     assert run["model_id"] == model_id
-    assert run["git_sha"] == "abc1234ffff"
+    assert run["publish_slug"] == slug
+    assert run["version"] == version
+    assert run["git_sha"] == ""
     assert run["git_dirty"] is False
     assert run["label"] == "unit-test"
     assert run["cutoff"]["rule"] == POOLED_OOF_PERCENTILE_RULE
     assert run["cutoff"]["value"] == pytest.approx(0.25)
     assert run["cv_metrics"]["mean_cv_auc"] == pytest.approx(0.81)
-    assert run["config_hash"]
-    assert "terrain_dtm" in run["environmental_layer_versions"]
-    assert run["environmental_layer_versions"]["terrain_dtm"] is None
-    assert version_dir.name.startswith("20261025_abc1234_cfg")
+    assert run["files"] == {
+        "suitability": suit_name,
+        "threshold": thr_name,
+        "run": run_name,
+    }
 
-    ok_p, _, e_p = cog_validate(version_dir / "prediction.tif", quiet=True)
+    ok_p, _, e_p = cog_validate(version_dir / suit_name, quiet=True)
     assert ok_p, e_p
-    ok_t, _, e_t = cog_validate(
-        version_dir / "threshold_pooled_oof_percentile.tif", quiet=True
-    )
+    ok_t, _, e_t = cog_validate(version_dir / thr_name, quiet=True)
     assert ok_t, e_t
 
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
@@ -220,7 +272,7 @@ def test_publish_model_prediction_version_local_tree(tmp_path: Path) -> None:
             config={"prediction_crs": "EPSG:27700", "write_cog": True},
             label="unit-test",
             created_at=created,
-            git_sha="abc1234ffff",
+            git_sha="",
             git_dirty=False,
             write_cog=True,
         )
@@ -228,13 +280,15 @@ def test_publish_model_prediction_version_local_tree(tmp_path: Path) -> None:
 
 def test_publish_skips_threshold_when_model_limited(tmp_path: Path) -> None:
     models_dir = tmp_path / "models"
-    model_id = "limited_model_in_flight"
+    model_id = "myotis_mystacinus_in_flight"
     pkg = models_dir / model_id
     pkg.mkdir(parents=True)
     (pkg / "package.json").write_text(
         json.dumps(
             {
                 "model_id": model_id,
+                "latin_name": "Myotis mystacinus",
+                "activity_type": "In flight",
                 "feature_names": ["terrain_dtm"],
                 "metrics": {},
                 "model_limited": True,
@@ -265,20 +319,35 @@ def test_publish_skips_threshold_when_model_limited(tmp_path: Path) -> None:
         git_dirty=False,
     )
     version_dir = Path(uri)
-    assert (version_dir / "prediction.tif").is_file()
-    assert (version_dir / "run.json").is_file()
-    assert list(version_dir.glob("threshold_*.tif")) == []
+    version = version_dir.name
+    slug = "myotis_mystacinus_in_flight"
+    suit_name = f"prediction__{slug}__{version}__suitability.tif"
+    run_name = f"prediction__{slug}__{version}__run.json"
+    assert (version_dir / suit_name).is_file()
+    run = json.loads((version_dir / run_name).read_text(encoding="utf-8"))
+    assert run["files"]["suitability"] == suit_name
+    assert run["files"]["threshold"] is None
+    assert run["files"]["run"] == run_name
+    assert list(version_dir.glob("prediction__*__threshold_*.tif")) == []
 
 
 def test_publish_predictions_from_output_dir(tmp_path: Path) -> None:
     models_dir = tmp_path / "models"
     out_dir = tmp_path / "sdm_predictions"
     publish_root = tmp_path / "bucket" / "predictions"
-    model_id = "alpha_roost"
+    model_id = "nyctalus_noctula_roost"
     pkg = models_dir / model_id
     pkg.mkdir(parents=True)
     (pkg / "package.json").write_text(
-        json.dumps({"model_id": model_id, "feature_names": [], "metrics": {}}),
+        json.dumps(
+            {
+                "model_id": model_id,
+                "latin_name": "Nyctalus noctula",
+                "activity_type": "Roost",
+                "feature_names": [],
+                "metrics": {},
+            }
+        ),
         encoding="utf-8",
     )
     (pkg / "thresholds.json").write_text(
@@ -311,11 +380,19 @@ def test_make_predictions_publish_opt_in(
     models_dir = tmp_path / "models"
     publish_root = tmp_path / "published"
     models_dir.mkdir()
-    model_id = "testicus_batidae_foraging"
+    model_id = "plecotus_auritus_roost"
     pkg = models_dir / model_id
     pkg.mkdir()
     (pkg / "package.json").write_text(
-        json.dumps({"model_id": model_id, "feature_names": ["band_a"], "metrics": {}}),
+        json.dumps(
+            {
+                "model_id": model_id,
+                "latin_name": "Plecotus auritus",
+                "activity_type": "Roost",
+                "feature_names": ["band_a"],
+                "metrics": {},
+            }
+        ),
         encoding="utf-8",
     )
     (pkg / "thresholds.json").write_text(
@@ -333,8 +410,8 @@ def test_make_predictions_publish_opt_in(
     df = pd.DataFrame(
         {
             "model_path": [str(models_dir / "dummy.pkl")],
-            "latin_name": ["Testicus batidae"],
-            "activity_type": ["foraging"],
+            "latin_name": ["Plecotus auritus"],
+            "activity_type": ["Roost"],
         }
     )
 
@@ -368,8 +445,15 @@ def test_make_predictions_publish_opt_in(
     )
     assert published is not None
     assert len(published) == 1
-    run = json.loads((Path(published[0]) / "run.json").read_text(encoding="utf-8"))
+    version_dir = Path(published[0])
+    run_files = list(version_dir.glob("prediction__*__run.json"))
+    assert len(run_files) == 1
+    run = json.loads(run_files[0].read_text(encoding="utf-8"))
     assert run["label"] == "pipeline-test"
+    assert run["files"]["suitability"].endswith("__suitability.tif")
+    assert run["files"]["threshold"].endswith(
+        "__threshold_pooled_oof_percentile.tif"
+    )
 
 
 def test_resolve_prediction_publish_root_prefers_cli(

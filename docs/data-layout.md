@@ -46,12 +46,12 @@ Opt-in via ``sdm predict --publish`` (or ``PREDICTION_PUBLISH_ROOT``). Local pre
 
 ```
 predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<config_hash>/
-  prediction.tif              # suitability COG
-  threshold_<rule>.tif        # yes/no map at the current cut-off rule (omitted if model_limited / no cut-off)
-  run.json                    # model_id, git sha + dirty flag, config + hash, layer versions, cut-off, CV metrics, MLflow link, label, created time
+  prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif
+  prediction__…__threshold_<rule>.tif   # yes/no at METHOD.md cut-off (omitted if model_limited / no cut-off)
+  prediction__…__run.json               # metadata + `files` map of the names above
 ```
 
-Default root: `gs://habitat-suitability-modelling-data/predictions`. Use `--publish-root` for a local or alternate URI (tests use a fake/local filesystem). See `predictions/README.md` in the bucket for the browsing convention in QGIS.
+Example: `prediction__myotis_brandtii_roost__20261017_unknown_cfg84798104__suitability.tif`. File names are ordered general → specific so QGIS layer titles stay identifiable. Folder path is unchanged. Default root: `gs://habitat-suitability-modelling-data/predictions`. Use `--publish-root` for a local or alternate URI (tests use a fake/local filesystem). See `predictions/README.md` in the bucket for the browsing convention in QGIS.
 
 ## Outputs (written by tune)
 

@@ -4,13 +4,14 @@ Layout (under a publish root, typically
 ``gs://habitat-suitability-modelling-data/predictions``)::
 
     <model_id>/<YYYYMMDD>_<sha7>_cfg<config_hash>/
-        prediction.tif
-        threshold_<rule>.tif   # omitted when no cut-off (model_limited)
-        run.json
+        prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif
+        prediction__…__threshold_<rule>.tif   # omitted when no cut-off
+        prediction__…__run.json
 
-Publishing is opt-in. Local predict outputs stay under the normal predictions
-directory unless a publish root is requested. Version folders are never
-overwritten.
+File names are ordered general → specific so QGIS layer titles stay identifiable.
+Folder path is unchanged. Publishing is opt-in. Local predict outputs stay under
+the normal predictions directory unless a publish root is requested. Version
+folders are never overwritten.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence, Union
 
+from sdm.commands.modelling.utils import clean_string
 from sdm.models.core.prediction import (
     copy_prediction_as_cog,
     write_threshold_binary_raster,
@@ -39,7 +41,6 @@ from sdm.utils.fs import (
     filesystem_for_uri,
     join_uri_path,
     put_local_tree,
-    uri_exists,
     write_text_idempotent,
 )
 from sdm.utils.rebuild_provenance import git_commit_sha
@@ -50,9 +51,26 @@ DEFAULT_PREDICTION_PUBLISH_ROOT = (
     "gs://habitat-suitability-modelling-data/predictions"
 )
 PREDICTION_PUBLISH_ROOT_ENV = "PREDICTION_PUBLISH_ROOT"
-PREDICTION_FILENAME = "prediction.tif"
-RUN_JSON_FILENAME = "run.json"
 CONFIG_HASH_LENGTH = 8
+SUITABILITY_KIND = "suitability"
+RUN_KIND = "run"
+
+# Epithet / short key → full binomial slug (genus_species). Single mapping for
+# published file names; full binomials also resolve via the values.
+SPECIES_BINOMIAL_BY_KEY: dict[str, str] = {
+    "brandtii": "myotis_brandtii",
+    "daubentonii": "myotis_daubentonii",
+    "mystacinus": "myotis_mystacinus",
+    "nattereri": "myotis_nattereri",
+    "leisleri": "nyctalus_leisleri",
+    "noctula": "nyctalus_noctula",
+    "pipistrellus": "pipistrellus_pipistrellus",
+    "pygmaeus": "pipistrellus_pygmaeus",
+    "plecotus_auritus": "plecotus_auritus",
+    # Present in this project's model set; same shape as Matt's mapping.
+    "nathusii": "pipistrellus_nathusii",
+}
+_BINOMIAL_SLUGS = frozenset(SPECIES_BINOMIAL_BY_KEY.values())
 
 
 def resolve_prediction_publish_root(
@@ -104,8 +122,8 @@ def build_version_folder_name(
     """Build ``<YYYYMMDD>_<sha7>_cfg<hash>`` for a prediction version folder."""
     moment = created_at or datetime.now(timezone.utc)
     date_stamp = moment.strftime("%Y%m%d")
-    sha = (git_sha or "0000000").strip() or "0000000"
-    sha7 = sha[:7]
+    sha = (git_sha or "").strip()
+    sha7 = sha[:7] if sha else "unknown"
     return f"{date_stamp}_{sha7}_cfg{config_hash}"
 
 
@@ -117,11 +135,87 @@ def prediction_version_uri(
     return join_uri_path(publish_root, model_id, version_folder)
 
 
+def resolve_binomial_slug(latin_name: str) -> str:
+    """Resolve a latin name or epithet to ``genus_species`` via the project map."""
+    key = clean_string(latin_name)
+    if key in SPECIES_BINOMIAL_BY_KEY:
+        return SPECIES_BINOMIAL_BY_KEY[key]
+    if key in _BINOMIAL_SLUGS:
+        return key
+    parts = key.split("_")
+    if len(parts) >= 2:
+        # Full binomial already (including species not listed in the short map).
+        return key
+    if parts and parts[-1] in SPECIES_BINOMIAL_BY_KEY:
+        return SPECIES_BINOMIAL_BY_KEY[parts[-1]]
+    raise ValueError(
+        f"Unknown species for prediction publish naming: {latin_name!r}; "
+        f"known keys: {sorted(SPECIES_BINOMIAL_BY_KEY)}"
+    )
+
+
+def normalize_behaviour(activity_type: str) -> str:
+    """Return ``roost`` or ``in_flight`` for published file names."""
+    cleaned = clean_string(activity_type)
+    if cleaned in {"roost"}:
+        return "roost"
+    if cleaned in {"in_flight", "inflight", "foraging", "in-flight"}:
+        return "in_flight"
+    raise ValueError(
+        f"Unknown behaviour/activity for prediction publish naming: {activity_type!r} "
+        "(expected roost or in_flight)"
+    )
+
+
+def publish_name_slug(
+    *,
+    latin_name: Optional[str] = None,
+    activity_type: Optional[str] = None,
+    model_id: Optional[str] = None,
+) -> str:
+    """Build ``<genus>_<species>_<behaviour>`` used inside published file names."""
+    if latin_name and activity_type:
+        binomial = resolve_binomial_slug(latin_name)
+        behaviour = normalize_behaviour(activity_type)
+        return f"{binomial}_{behaviour}"
+
+    if not model_id:
+        raise ValueError("latin_name+activity_type or model_id required for publish naming")
+
+    mid = clean_string(model_id)
+    for behaviour in ("in_flight", "roost"):
+        suffix = f"_{behaviour}"
+        if mid.endswith(suffix):
+            species_part = mid[: -len(suffix)]
+            binomial = resolve_binomial_slug(species_part)
+            return f"{binomial}_{behaviour}"
+    raise ValueError(
+        f"Cannot derive publish slug from model_id={model_id!r}; "
+        "expected …_roost or …_in_flight"
+    )
+
+
+def published_artifact_filename(
+    publish_slug: str,
+    version_folder: str,
+    kind: str,
+    *,
+    ext: str,
+) -> str:
+    """``prediction__<slug>__<version>__<kind>.<ext>`` for QGIS layer names."""
+    return (
+        f"prediction__{publish_slug}__{version_folder}__{kind}.{ext.lstrip('.')}"
+    )
+
+
+def threshold_kind_for_rule(rule: str) -> str:
+    """Map a cut-off rule id to the published threshold file kind."""
+    safe = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in rule)
+    return f"threshold_{safe}"
+
+
 def version_folder_exists(version_uri: str) -> bool:
     """True when a version folder already has published artefacts."""
-    for name in (RUN_JSON_FILENAME, PREDICTION_FILENAME):
-        if uri_exists(join_uri_path(version_uri, name)):
-            return True
     fs, path = filesystem_for_uri(version_uri.rstrip("/"))
     path = path.rstrip("/")
     try:
@@ -133,9 +227,18 @@ def version_folder_exists(version_uri: str) -> bool:
     return False
 
 
-def threshold_raster_filename(rule: str) -> str:
-    safe = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in rule)
-    return f"threshold_{safe}.tif"
+def threshold_raster_filename(
+    publish_slug: str,
+    version_folder: str,
+    rule: str,
+) -> str:
+    """Published threshold GeoTIFF name (includes species, behaviour, version)."""
+    return published_artifact_filename(
+        publish_slug,
+        version_folder,
+        threshold_kind_for_rule(rule),
+        ext="tif",
+    )
 
 
 def load_json_if_exists(path: Path) -> Optional[dict[str, Any]]:
@@ -221,6 +324,8 @@ def environmental_layer_versions(
 def build_run_manifest(
     *,
     model_id: str,
+    version_folder: str,
+    publish_slug: str,
     config: Mapping[str, Any],
     config_hash: str,
     git_sha: Optional[str],
@@ -233,8 +338,9 @@ def build_run_manifest(
     mlflow_run_url: Optional[str] = None,
     label: Optional[str] = None,
     created_at: Optional[datetime] = None,
+    files: Optional[Mapping[str, Optional[str]]] = None,
 ) -> dict[str, Any]:
-    """Assemble ``run.json`` for a published prediction version."""
+    """Assemble published run metadata (written as ``…__run.json``)."""
     moment = created_at or datetime.now(timezone.utc)
     cutoff: dict[str, Any] = {
         "rule": cutoff_rule,
@@ -255,6 +361,8 @@ def build_run_manifest(
     return _json_safe(
         {
             "model_id": model_id,
+            "publish_slug": publish_slug,
+            "version": version_folder,
             "git_sha": git_sha,
             "git_dirty": bool(git_dirty),
             "config": dict(config),
@@ -264,6 +372,7 @@ def build_run_manifest(
             "cv_metrics": dict(cv_metrics or {}),
             "mlflow_run_url": mlflow_run_url,
             "label": label,
+            "files": dict(files or {}),
             "created_at": moment.astimezone(timezone.utc)
             .replace(microsecond=0)
             .isoformat()
@@ -360,8 +469,36 @@ def publish_model_prediction_version(
             (package.get("artifacts") or {}).get("mlflow_run_url")
         )
 
+    latin_name = package.get("latin_name")
+    activity_type = package.get("activity_type")
+    name_slug = publish_name_slug(
+        latin_name=str(latin_name) if latin_name else None,
+        activity_type=str(activity_type) if activity_type else None,
+        model_id=str(package.get("model_id") or model_id),
+    )
+
+    suitability_name = published_artifact_filename(
+        name_slug, version_folder, SUITABILITY_KIND, ext="tif"
+    )
+    run_name = published_artifact_filename(
+        name_slug, version_folder, RUN_KIND, ext="json"
+    )
+    threshold_name: Optional[str] = None
+    write_threshold = cutoff_value is not None and not threshold_meta.get(
+        "model_limited"
+    )
+    if write_threshold:
+        threshold_name = threshold_raster_filename(name_slug, version_folder, rule)
+
+    files = {
+        "suitability": suitability_name,
+        "threshold": threshold_name,
+        "run": run_name,
+    }
     run_manifest = build_run_manifest(
         model_id=model_id,
+        version_folder=version_folder,
+        publish_slug=name_slug,
         config=full_config,
         config_hash=config_hash,
         git_sha=sha,
@@ -374,26 +511,27 @@ def publish_model_prediction_version(
         mlflow_run_url=mlflow_run_url,
         label=label,
         created_at=moment,
+        files=files,
     )
 
     with tempfile.TemporaryDirectory(prefix="sdm-pred-pub-") as tmp:
         staging = Path(tmp)
-        dest_prediction = staging / PREDICTION_FILENAME
+        dest_suitability = staging / suitability_name
         if write_cog:
-            copy_prediction_as_cog(prediction_raster, dest_prediction)
+            copy_prediction_as_cog(prediction_raster, dest_suitability)
         else:
-            shutil.copy2(prediction_raster, dest_prediction)
+            shutil.copy2(prediction_raster, dest_suitability)
 
-        if cutoff_value is not None and not threshold_meta.get("model_limited"):
+        if write_threshold and threshold_name is not None:
             write_threshold_binary_raster(
                 prediction_raster,
-                staging / threshold_raster_filename(rule),
-                cutoff=cutoff_value,
+                staging / threshold_name,
+                cutoff=float(cutoff_value),
                 as_cog=write_cog,
             )
 
         write_text_idempotent(
-            staging / RUN_JSON_FILENAME,
+            staging / run_name,
             json.dumps(run_manifest, indent=2, allow_nan=False) + "\n",
         )
 

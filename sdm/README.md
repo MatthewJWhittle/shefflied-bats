@@ -72,7 +72,7 @@ sdm visualize \
 
 ## Predict and export behaviour
 
-**`sdm predict`** writes `all_predictions.tif` and, by default, per-model `prediction_{model_id}.tif` files. Outputs use the project CRS (`config.yml`, typically EPSG:27700) and are COG-encoded unless `--no-cog` is passed. Use `--prediction-crs` to change the output CRS. Pass `--publish` to also write versioned maps under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` (`prediction.tif`, `threshold_<rule>.tif`, `run.json`); default root is the project bucket prefix (override with `--publish-root` or `PREDICTION_PUBLISH_ROOT`). Existing version folders are never overwritten.
+**`sdm predict`** writes `all_predictions.tif` and, by default, per-model `prediction_{model_id}.tif` files. Outputs use the project CRS (`config.yml`, typically EPSG:27700) and are COG-encoded unless `--no-cog` is passed. Use `--prediction-crs` to change the output CRS. Pass `--publish` to also write versioned maps under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` with names `prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif`, `…__threshold_<rule>.tif`, and `…__run.json`; default root is the project bucket prefix (override with `--publish-root` or `PREDICTION_PUBLISH_ROOT`). Existing version folders are never overwritten.
 
 **`sdm export-rasters`** is for secondary bundles: pass explicit GeoTIFF paths, optionally `--output-crs EPSG:3857` and/or `--cog`. At least one of reprojection or COG encoding must be requested.
 
