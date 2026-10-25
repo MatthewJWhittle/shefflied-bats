@@ -6,6 +6,7 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Added
 
+- Configurable background (comparison) point generation and weighting for `sdm train` (`config.yml` / `model_config.yml` / CLI): pool size, surface (`all_bat` | `uniform`), contrast/sigma, presence exclusion, presence/background thinning, cap ratio, distance weights, class balance, and seed; defaults match previous live behaviour. Ready-made #103 trial file `model_config.background-as-drawn.yml` (10k; set `n_background_points` to 50000 for the stability run). Resolved knobs recorded in `run_metadata.json`. See [docs/background-points.md](docs/background-points.md) ([#103](https://github.com/MatthewJWhittle/shefflied-bats/issues/103)).
 - Opt-in versioned prediction publishing (`sdm predict --publish`): writes `prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif`, `…__threshold_<rule>.tif`, and `…__run.json` under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` without overwriting existing versions.
 - Shared MLflow run tracking helpers: Neon Postgres backend (no tracking server), GCS artefact prefix, Secret Manager / `MLFLOW_DB_PASSWORD` for the tracking DB password, example settings file, and dual-writer tests ([#93](https://github.com/MatthewJWhittle/shefflied-bats/issues/93)); see [docs/mlflow-tracking.md](docs/mlflow-tracking.md).
 - Selectable CV fold methods (`kmeans`, `blocks`, `buffered_loo`) via `model.cv` / `sdm train --cv-method` ([#63](https://github.com/MatthewJWhittle/shefflied-bats/issues/63)); see [docs/cv-folds.md](docs/cv-folds.md).
@@ -15,6 +16,7 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Changed
 
+- Live train reads `background.sample_weight_n_neighbors` (default **10**, matching the previous CLI default). YAML `sampling.sample_weight_n_neighbors: 5` is no longer the live source of truth ([#103](https://github.com/MatthewJWhittle/shefflied-bats/issues/103)).
 - Prediction publish root moved out of library defaults into `prediction_publish.root` in `config.yml` (`--publish-root` / `PREDICTION_PUBLISH_ROOT` still win); `--publish` with no root fails early.
 - Prediction publish file names are built from each model's full Latin binomial (snake case) + behaviour; the short-name → Latin species map is removed. Publishing fails clearly when `latin_name` is missing.
 - `sdm setup` writes the modelling boundary as counties buffered by `study_area_buffer` then clipped to ONS BFC land, so EV builders no longer expand into the sea / estuary ([#78](https://github.com/MatthewJWhittle/shefflied-bats/issues/78)).
