@@ -19,6 +19,7 @@ from rasterio.crs import CRS
 
 from sdm.utils.logging_utils import setup_logging
 from sdm.utils.io import load_boundary, load_pickled_model, load_project_config
+from sdm.utils.model_runs import resolve_predict_models_dir
 from sdm.utils.prediction_publish import (
     publish_predictions_from_output_dir,
     resolve_prediction_publish_root,
@@ -323,13 +324,17 @@ def predict_sdm_models(
     publish_root: Optional[Union[str, Path]] = None,
     publish_label: Optional[str] = None,
     rebuild_metrics_path: Optional[Path] = None,
+    run: Optional[str] = None,
     verbose: bool = False,
 ) -> Optional[List[str]]:
     """Run the model inference pipeline.
 
     Args:
         ev_path: Path to environmental variables raster.
-        models_dir: Directory containing trained models.
+        models_dir: Models root (``…/sdm_models``) or a concrete run folder
+            with ``model_results.csv``. When it is a root, the newest run under
+            ``runs/`` is used unless *run* is set.
+        run: Optional run id or unique prefix under ``models_dir/runs/``.
         output_dir: Directory for output prediction files.
         boundary_path: Optional path to boundary file for clipping output raster.
         species: Optional: Specific species to generate predictions for (Latin names).
@@ -356,6 +361,8 @@ def predict_sdm_models(
     setup_logging(level=logging.INFO, verbose=verbose)
 
     logger.info("Starting prediction pipeline...")
+
+    models_dir = resolve_predict_models_dir(models_dir, run=run)
 
     # Load model index
     logger.debug("Loading model index...")

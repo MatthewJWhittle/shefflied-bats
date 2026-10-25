@@ -514,7 +514,18 @@ def predict(
     ),
     models_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.models),
-        help="Directory containing trained models.",
+        help=(
+            "Models root or a concrete run folder with model_results.csv. "
+            "Default root uses the newest runs/<id>/ unless --run is set."
+        ),
+    ),
+    run: Optional[str] = typer.Option(
+        None,
+        "--run",
+        help=(
+            "Training run id under <models-dir>/runs/ (unique prefix ok, "
+            "e.g. 20261025T2006). Default: newest run."
+        ),
     ),
     output_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.predictions),
@@ -566,7 +577,11 @@ def predict(
     ),
     verbose: bool = False,
 ) -> None:
-    """Generate model predictions."""
+    """Generate model predictions.
+
+    Without ``--models-dir`` pointing at a concrete run, uses the newest
+    ``runs/<id>/`` under the models root (or ``--run <id|prefix>``).
+    """
     from sdm.commands.modelling.predict_sdm_models import predict_sdm_models
     
     setup_logging(verbose=verbose)
@@ -585,15 +600,24 @@ def predict(
             publish=publish,
             publish_root=publish_root,
             publish_label=publish_label,
+            run=run,
             verbose=verbose,
         )
+    except FileNotFoundError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
     except FileExistsError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
     except ValueError as exc:
-        if "publish root is not configured" not in str(exc):
+        message = str(exc)
+        if (
+            "publish root is not configured" not in message
+            and "Run prefix" not in message
+            and "--run cannot be combined" not in message
+        ):
             raise
-        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        typer.secho(message, err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
     
     logging.info("Predictions generated!")
