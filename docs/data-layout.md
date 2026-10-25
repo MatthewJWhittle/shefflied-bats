@@ -51,7 +51,7 @@ predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<config_hash>/
   prediction__…__run.json               # metadata + `files` map of the names above
 ```
 
-Example: `prediction__myotis_brandtii_roost__20261017_unknown_cfg84798104__suitability.tif`. File names are ordered general → specific so QGIS layer titles stay identifiable. Folder path is unchanged. Default root: `gs://habitat-suitability-modelling-data/predictions`. Use `--publish-root` for a local or alternate URI (tests use a fake/local filesystem). See `predictions/README.md` in the bucket for the browsing convention in QGIS.
+Example: `prediction__myotis_brandtii_roost__20261017_unknown_cfg84798104__suitability.tif`. File names are ordered general → specific so QGIS layer titles stay identifiable. Folder path is unchanged. Publish root resolution: `--publish-root`, else `PREDICTION_PUBLISH_ROOT`, else `prediction_publish.root` in `config.yml` (this project sets the HSM bucket prefix there). `--publish` with no root configured fails early. Use `--publish-root` for a local or alternate URI (tests use a fake/local filesystem). See `predictions/README.md` in the bucket for the browsing convention in QGIS.
 
 ## Outputs (written by tune)
 

@@ -555,8 +555,8 @@ def predict(
         "--publish-root",
         help=(
             "Root for versioned prediction maps (local path or gs://). "
-            "Defaults to PREDICTION_PUBLISH_ROOT or "
-            "gs://habitat-suitability-modelling-data/predictions when --publish is set."
+            "Else PREDICTION_PUBLISH_ROOT, else prediction_publish.root in "
+            "config.yml. Required when --publish is set."
         ),
     ),
     publish_label: Optional[str] = typer.Option(
@@ -588,6 +588,11 @@ def predict(
             verbose=verbose,
         )
     except FileExistsError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    except ValueError as exc:
+        if "publish root is not configured" not in str(exc):
+            raise
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
     

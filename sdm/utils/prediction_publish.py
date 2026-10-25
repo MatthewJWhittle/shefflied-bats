@@ -1,7 +1,7 @@
 """Versioned prediction map publishing for QGIS browsing.
 
-Layout (under a publish root, typically
-``gs://habitat-suitability-modelling-data/predictions``)::
+Layout (under a publish root configured via ``--publish-root``,
+``PREDICTION_PUBLISH_ROOT``, or ``prediction_publish.root`` in ``config.yml``)::
 
     <model_id>/<YYYYMMDD>_<sha7>_cfg<config_hash>/
         prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif
@@ -11,7 +11,8 @@ Layout (under a publish root, typically
 File names are ordered general → specific so QGIS layer titles stay identifiable.
 Folder path is unchanged. Publishing is opt-in. Local predict outputs stay under
 the normal predictions directory unless a publish root is requested. Version
-folders are never overwritten.
+folders are never overwritten. The library has no hard-coded project bucket or
+species map; those live in project config.
 """
 
 from __future__ import annotations
@@ -43,46 +44,64 @@ from sdm.utils.fs import (
     put_local_tree,
     write_text_idempotent,
 )
+from sdm.utils.io import load_config
 from sdm.utils.rebuild_provenance import git_commit_sha
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PREDICTION_PUBLISH_ROOT = (
-    "gs://habitat-suitability-modelling-data/predictions"
-)
 PREDICTION_PUBLISH_ROOT_ENV = "PREDICTION_PUBLISH_ROOT"
 CONFIG_HASH_LENGTH = 8
 SUITABILITY_KIND = "suitability"
 RUN_KIND = "run"
+_MISSING_PUBLISH_ROOT_MSG = (
+    "Prediction publish root is not configured. Pass --publish-root, "
+    "set PREDICTION_PUBLISH_ROOT, or set prediction_publish.root in config.yml."
+)
 
-# Epithet / short key → full binomial slug (genus_species). Single mapping for
-# published file names; full binomials also resolve via the values.
-SPECIES_BINOMIAL_BY_KEY: dict[str, str] = {
-    "brandtii": "myotis_brandtii",
-    "daubentonii": "myotis_daubentonii",
-    "mystacinus": "myotis_mystacinus",
-    "nattereri": "myotis_nattereri",
-    "leisleri": "nyctalus_leisleri",
-    "noctula": "nyctalus_noctula",
-    "pipistrellus": "pipistrellus_pipistrellus",
-    "pygmaeus": "pipistrellus_pygmaeus",
-    "plecotus_auritus": "plecotus_auritus",
-    # Present in this project's model set; same shape as Matt's mapping.
-    "nathusii": "pipistrellus_nathusii",
-}
-_BINOMIAL_SLUGS = frozenset(SPECIES_BINOMIAL_BY_KEY.values())
+
+def _prediction_publish_section(
+    config: Optional[Mapping[str, Any]] = None,
+) -> Mapping[str, Any]:
+    """Return the ``prediction_publish`` mapping from *config* or ``config.yml``."""
+    if config is None:
+        config = load_config()
+    section = config.get("prediction_publish") if isinstance(config, Mapping) else None
+    if isinstance(section, Mapping):
+        return section
+    return {}
+
+
+def load_species_binomial_by_key(
+    config: Optional[Mapping[str, Any]] = None,
+) -> dict[str, str]:
+    """Load epithet → ``genus_species`` map from project ``prediction_publish`` config."""
+    section = _prediction_publish_section(config)
+    raw = section.get("species_binomial_by_key") or {}
+    if not isinstance(raw, Mapping):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
 
 
 def resolve_prediction_publish_root(
     cli_root: Optional[Union[str, Path]] = None,
+    *,
+    config: Optional[Mapping[str, Any]] = None,
 ) -> str:
-    """Resolve publish root: CLI, else env, else the project bucket prefix."""
+    """Resolve publish root: CLI, else env, else ``prediction_publish.root``.
+
+    Raises:
+        ValueError: when no root is set (library has no hard-coded default).
+    """
     if cli_root is not None and str(cli_root).strip():
         return str(cli_root).rstrip("/")
     env_root = os.environ.get(PREDICTION_PUBLISH_ROOT_ENV, "").strip()
     if env_root:
         return env_root.rstrip("/")
-    return DEFAULT_PREDICTION_PUBLISH_ROOT
+    section = _prediction_publish_section(config)
+    config_root = section.get("root")
+    if config_root is not None and str(config_root).strip():
+        return str(config_root).rstrip("/")
+    raise ValueError(_MISSING_PUBLISH_ROOT_MSG)
 
 
 def git_working_tree_dirty(*, cwd: Optional[Path] = None) -> bool:
@@ -135,22 +154,36 @@ def prediction_version_uri(
     return join_uri_path(publish_root, model_id, version_folder)
 
 
-def resolve_binomial_slug(latin_name: str) -> str:
-    """Resolve a latin name or epithet to ``genus_species`` via the project map."""
+def resolve_binomial_slug(
+    latin_name: str,
+    *,
+    species_binomial_by_key: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Resolve a latin name or epithet to ``genus_species`` via the project map.
+
+    Unknown full Latin binomials (two or more ``_``-separated parts) pass through
+    unchanged so model ids that are already binomial never get a doubled genus.
+    """
+    mapping = (
+        dict(species_binomial_by_key)
+        if species_binomial_by_key is not None
+        else load_species_binomial_by_key()
+    )
+    binomial_slugs = frozenset(mapping.values())
     key = clean_string(latin_name)
-    if key in SPECIES_BINOMIAL_BY_KEY:
-        return SPECIES_BINOMIAL_BY_KEY[key]
-    if key in _BINOMIAL_SLUGS:
+    if key in mapping:
+        return mapping[key]
+    if key in binomial_slugs:
         return key
     parts = key.split("_")
     if len(parts) >= 2:
         # Full binomial already (including species not listed in the short map).
         return key
-    if parts and parts[-1] in SPECIES_BINOMIAL_BY_KEY:
-        return SPECIES_BINOMIAL_BY_KEY[parts[-1]]
+    if parts and parts[-1] in mapping:
+        return mapping[parts[-1]]
     raise ValueError(
         f"Unknown species for prediction publish naming: {latin_name!r}; "
-        f"known keys: {sorted(SPECIES_BINOMIAL_BY_KEY)}"
+        f"known keys: {sorted(mapping)}"
     )
 
 
@@ -172,10 +205,13 @@ def publish_name_slug(
     latin_name: Optional[str] = None,
     activity_type: Optional[str] = None,
     model_id: Optional[str] = None,
+    species_binomial_by_key: Optional[Mapping[str, str]] = None,
 ) -> str:
     """Build ``<genus>_<species>_<behaviour>`` used inside published file names."""
     if latin_name and activity_type:
-        binomial = resolve_binomial_slug(latin_name)
+        binomial = resolve_binomial_slug(
+            latin_name, species_binomial_by_key=species_binomial_by_key
+        )
         behaviour = normalize_behaviour(activity_type)
         return f"{binomial}_{behaviour}"
 
@@ -187,7 +223,9 @@ def publish_name_slug(
         suffix = f"_{behaviour}"
         if mid.endswith(suffix):
             species_part = mid[: -len(suffix)]
-            binomial = resolve_binomial_slug(species_part)
+            binomial = resolve_binomial_slug(
+                species_part, species_binomial_by_key=species_binomial_by_key
+            )
             return f"{binomial}_{behaviour}"
     raise ValueError(
         f"Cannot derive publish slug from model_id={model_id!r}; "
@@ -417,6 +455,7 @@ def publish_model_prediction_version(
     git_sha: Optional[str] = None,
     git_dirty: Optional[bool] = None,
     write_cog: bool = True,
+    species_binomial_by_key: Optional[Mapping[str, str]] = None,
 ) -> str:
     """Publish one model's prediction maps into a new version folder.
 
@@ -475,6 +514,7 @@ def publish_model_prediction_version(
         latin_name=str(latin_name) if latin_name else None,
         activity_type=str(activity_type) if activity_type else None,
         model_id=str(package.get("model_id") or model_id),
+        species_binomial_by_key=species_binomial_by_key,
     )
 
     suitability_name = published_artifact_filename(
@@ -557,6 +597,7 @@ def publish_predictions_from_output_dir(
     prediction_crs: Optional[str] = None,
     write_cog: bool = True,
     rebuild_metrics_path: Optional[Path] = None,
+    species_binomial_by_key: Optional[Mapping[str, str]] = None,
 ) -> list[str]:
     """Publish each ``prediction_<model_id>.tif`` under *output_dir*."""
     output_dir = Path(output_dir)
@@ -594,6 +635,7 @@ def publish_predictions_from_output_dir(
             label=label,
             rebuild_metrics_path=rebuild_metrics_path,
             write_cog=write_cog,
+            species_binomial_by_key=species_binomial_by_key,
         )
         published.append(uri)
     return published

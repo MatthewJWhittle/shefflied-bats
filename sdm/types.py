@@ -46,11 +46,19 @@ class MlflowConfig(BaseModel):
     artifact_root: Optional[str] = None
 
 
+class PredictionPublishConfig(BaseModel):
+    """Opt-in versioned prediction publish settings (project-specific, not library defaults)."""
+
+    root: Optional[str] = None
+    species_binomial_by_key: Dict[str, str] = Field(default_factory=dict)
+
+
 class ProjectConfig(BaseModel):
     paths: PathsConfig
     spatial: SpatialConfig
     crs: str
     mlflow: MlflowConfig
+    prediction_publish: Optional[PredictionPublishConfig] = None
 
 
 class MaxentConfigModel(BaseModel):
