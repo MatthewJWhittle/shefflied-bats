@@ -140,6 +140,10 @@ Produced by `sdm predict` under `{predictions_dir}/` (default `data/sdm_predicti
 - **Encoding:** COG by default (`--cog/--no-cog`)
 - **Values:** continuous suitability / probability-style scores
 
+### Optional versioned bucket publish
+
+`sdm predict --publish` copies each per-model surface into a new folder under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` with QGIS-friendly names `prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif`, `…__threshold_<rule>.tif` (METHOD.md cut-off when available), and `…__run.json`. Opt-in; never overwrites an existing version. See [data-layout.md](data-layout.md).
+
 ### hsm-app delivery requirements
 
 Upload as multipart field **`file`** on `POST /api/models` (required) or `PUT /api/models/{model_id}` (optional):
