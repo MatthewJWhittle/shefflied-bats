@@ -15,7 +15,8 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Changed
 
-- Prediction publish root and species binomial map moved out of library defaults into `prediction_publish` in `config.yml` (`--publish-root` / `PREDICTION_PUBLISH_ROOT` still win); `--publish` with no root fails early.
+- Prediction publish root moved out of library defaults into `prediction_publish.root` in `config.yml` (`--publish-root` / `PREDICTION_PUBLISH_ROOT` still win); `--publish` with no root fails early.
+- Prediction publish file names are built from each model's full Latin binomial (snake case) + behaviour; the short-name → Latin species map is removed. Publishing fails clearly when `latin_name` is missing.
 - `sdm setup` writes the modelling boundary as counties buffered by `study_area_buffer` then clipped to ONS BFC land, so EV builders no longer expand into the sea / estuary ([#78](https://github.com/MatthewJWhittle/shefflied-bats/issues/78)).
 - Cap vegetation height at 40 m in the environmental-variables layer path: raw VOM before summary metrics, and mean/min/max bands in model-stack layer clipping ([#73](https://github.com/MatthewJWhittle/shefflied-bats/issues/73)).
 - Default CV fold method is now 10 km spatial `blocks` (5 folds); `kmeans` and `buffered_loo` remain selectable ([#63](https://github.com/MatthewJWhittle/shefflied-bats/issues/63)).

@@ -11,8 +11,9 @@ Layout (under a publish root configured via ``--publish-root``,
 File names are ordered general → specific so QGIS layer titles stay identifiable.
 Folder path is unchanged. Publishing is opt-in. Local predict outputs stay under
 the normal predictions directory unless a publish root is requested. Version
-folders are never overwritten. The library has no hard-coded project bucket or
-species map; those live in project config.
+folders are never overwritten. The library has no hard-coded project bucket;
+publish root lives in project config. Publish slugs use the full snake-case
+Latin binomial from model metadata / model id directly (no translation map).
 """
 
 from __future__ import annotations
@@ -69,17 +70,6 @@ def _prediction_publish_section(
     if isinstance(section, Mapping):
         return section
     return {}
-
-
-def load_species_binomial_by_key(
-    config: Optional[Mapping[str, Any]] = None,
-) -> dict[str, str]:
-    """Load epithet → ``genus_species`` map from project ``prediction_publish`` config."""
-    section = _prediction_publish_section(config)
-    raw = section.get("species_binomial_by_key") or {}
-    if not isinstance(raw, Mapping):
-        return {}
-    return {str(key): str(value) for key, value in raw.items()}
 
 
 def resolve_prediction_publish_root(
@@ -154,37 +144,18 @@ def prediction_version_uri(
     return join_uri_path(publish_root, model_id, version_folder)
 
 
-def resolve_binomial_slug(
-    latin_name: str,
-    *,
-    species_binomial_by_key: Optional[Mapping[str, str]] = None,
-) -> str:
-    """Resolve a latin name or epithet to ``genus_species`` via the project map.
+def binomial_slug_from_latin_name(latin_name: str) -> str:
+    """Return ``genus_species`` from a full Latin name (spaces or underscores).
 
-    Unknown full Latin binomials (two or more ``_``-separated parts) pass through
-    unchanged so model ids that are already binomial never get a doubled genus.
+    Epithet-only strings are rejected; publishing keys the full binomial directly.
     """
-    mapping = (
-        dict(species_binomial_by_key)
-        if species_binomial_by_key is not None
-        else load_species_binomial_by_key()
-    )
-    binomial_slugs = frozenset(mapping.values())
     key = clean_string(latin_name)
-    if key in mapping:
-        return mapping[key]
-    if key in binomial_slugs:
-        return key
-    parts = key.split("_")
-    if len(parts) >= 2:
-        # Full binomial already (including species not listed in the short map).
-        return key
-    if parts and parts[-1] in mapping:
-        return mapping[parts[-1]]
-    raise ValueError(
-        f"Unknown species for prediction publish naming: {latin_name!r}; "
-        f"known keys: {sorted(mapping)}"
-    )
+    if len(key.split("_")) < 2:
+        raise ValueError(
+            f"Publish naming requires a full snake-case Latin binomial "
+            f"(genus_species); got {latin_name!r}"
+        )
+    return key
 
 
 def normalize_behaviour(activity_type: str) -> str:
@@ -202,35 +173,27 @@ def normalize_behaviour(activity_type: str) -> str:
 
 def publish_name_slug(
     *,
-    latin_name: Optional[str] = None,
-    activity_type: Optional[str] = None,
-    model_id: Optional[str] = None,
-    species_binomial_by_key: Optional[Mapping[str, str]] = None,
+    latin_name: str,
+    activity_type: str,
 ) -> str:
-    """Build ``<genus>_<species>_<behaviour>`` used inside published file names."""
-    if latin_name and activity_type:
-        binomial = resolve_binomial_slug(
-            latin_name, species_binomial_by_key=species_binomial_by_key
+    """Build ``<genus>_<species>_<behaviour>`` from full Latin name + activity.
+
+    ``latin_name`` must be a full binomial (e.g. ``Myotis brandtii``); there is
+    no short-name → Latin translation map.
+    """
+    if not str(latin_name).strip():
+        raise ValueError(
+            "Publish naming requires a full Latin name on the model "
+            "(e.g. 'Myotis brandtii'); got empty latin_name"
         )
-        behaviour = normalize_behaviour(activity_type)
-        return f"{binomial}_{behaviour}"
-
-    if not model_id:
-        raise ValueError("latin_name+activity_type or model_id required for publish naming")
-
-    mid = clean_string(model_id)
-    for behaviour in ("in_flight", "roost"):
-        suffix = f"_{behaviour}"
-        if mid.endswith(suffix):
-            species_part = mid[: -len(suffix)]
-            binomial = resolve_binomial_slug(
-                species_part, species_binomial_by_key=species_binomial_by_key
-            )
-            return f"{binomial}_{behaviour}"
-    raise ValueError(
-        f"Cannot derive publish slug from model_id={model_id!r}; "
-        "expected …_roost or …_in_flight"
-    )
+    if not str(activity_type).strip():
+        raise ValueError(
+            "Publish naming requires an activity_type (roost or in_flight); "
+            f"got {activity_type!r}"
+        )
+    binomial = binomial_slug_from_latin_name(latin_name)
+    behaviour = normalize_behaviour(activity_type)
+    return f"{binomial}_{behaviour}"
 
 
 def published_artifact_filename(
@@ -455,7 +418,6 @@ def publish_model_prediction_version(
     git_sha: Optional[str] = None,
     git_dirty: Optional[bool] = None,
     write_cog: bool = True,
-    species_binomial_by_key: Optional[Mapping[str, str]] = None,
 ) -> str:
     """Publish one model's prediction maps into a new version folder.
 
@@ -510,11 +472,20 @@ def publish_model_prediction_version(
 
     latin_name = package.get("latin_name")
     activity_type = package.get("activity_type")
+    if latin_name is None or not str(latin_name).strip():
+        raise ValueError(
+            f"Cannot publish prediction for model {model_id!r}: package.json "
+            "has no full Latin name (latin_name). Set latin_name to a binomial "
+            "such as 'Myotis brandtii'."
+        )
+    if activity_type is None or not str(activity_type).strip():
+        raise ValueError(
+            f"Cannot publish prediction for model {model_id!r}: package.json "
+            "has no activity_type (expected roost or in_flight)."
+        )
     name_slug = publish_name_slug(
-        latin_name=str(latin_name) if latin_name else None,
-        activity_type=str(activity_type) if activity_type else None,
-        model_id=str(package.get("model_id") or model_id),
-        species_binomial_by_key=species_binomial_by_key,
+        latin_name=str(latin_name),
+        activity_type=str(activity_type),
     )
 
     suitability_name = published_artifact_filename(
@@ -597,7 +568,6 @@ def publish_predictions_from_output_dir(
     prediction_crs: Optional[str] = None,
     write_cog: bool = True,
     rebuild_metrics_path: Optional[Path] = None,
-    species_binomial_by_key: Optional[Mapping[str, str]] = None,
 ) -> list[str]:
     """Publish each ``prediction_<model_id>.tif`` under *output_dir*."""
     output_dir = Path(output_dir)
@@ -635,7 +605,6 @@ def publish_predictions_from_output_dir(
             label=label,
             rebuild_metrics_path=rebuild_metrics_path,
             write_cog=write_cog,
-            species_binomial_by_key=species_binomial_by_key,
         )
         published.append(uri)
     return published
