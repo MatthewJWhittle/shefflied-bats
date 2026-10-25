@@ -40,6 +40,13 @@ dependencies = [
     "psycopg[binary]>=3.1.0",
 ]
 
+[project.optional-dependencies]
+# Joint DeepMaxent (PyTorch). Base install / default CI stay CPU-only without torch.
+# Install: uv sync --extra dl
+dl = [
+    "torch>=2.2.0",
+]
+
 [project.scripts]
 sdm = "sdm.cli:app"
 

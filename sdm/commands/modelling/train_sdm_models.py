@@ -1006,6 +1006,9 @@ def save_models(
     models: List[TrainingResults],
     training_data: List[TrainingData],
     output_dir: Path,
+    *,
+    trainer: str = "maxent",
+    deepmaxent_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Path]:
     """
     Save each successful model as a small on-disk package for training outputs and API upload.
@@ -1019,6 +1022,8 @@ def save_models(
         models: Training results (only entries with ``final_model`` are written).
         training_data: Parallel list of training data (matched by ``identifier()``).
         output_dir: Root directory for all model packages.
+        trainer: ``maxent`` (default) or ``deepmaxent``.
+        deepmaxent_metadata: Optional joint-model fields recorded in each package.
 
     Returns:
         Map from ``TrainingResults.identifier()`` to path of ``model.pkl`` inside the package
@@ -1047,13 +1052,14 @@ def save_models(
         mean_cv, std_cv, n_valid, n_total = _summarize_cv_scores(model.cv_scores)
         n_presence = int(len(data.occurrence[data.occurrence["class"] == 1]))
         n_background = int(len(data.occurrence[data.occurrence["class"] == 0]))
-        package = {
+        package: Dict[str, Any] = {
             "schema_version": 1,
             "identifier": mid,
             "model_id": get_model_id([model.latin_name, model.activity_type]),
             "latin_name": model.latin_name,
             "activity_type": model.activity_type,
             "model_limited": bool(data.model_limited),
+            "trainer": trainer,
             "feature_names": list(data.model_features),
             "maxent_config": _maxent_config_to_dict(data.maxent_config),
             "metrics": {
@@ -1071,12 +1077,16 @@ def save_models(
             "fold": model.fold_params,
             "artifacts": {"model_pickle": "model.pkl"},
         }
+        if deepmaxent_metadata:
+            package["deepmaxent"] = _json_safe(deepmaxent_metadata)
         if model.validation_scores is not None and len(model.validation_scores) > 0:
             validation_path = pkg_dir / "validation_scores.parquet"
             model.validation_scores.to_parquet(validation_path, index=False)
             package["artifacts"]["validation_scores"] = "validation_scores.parquet"
 
-        if model.fold_method and model.fold_params:
+        # Per-model fold assignments match MaxEnt occurrence rows. Joint DeepMaxent
+        # validation indices refer to the shared site table — skip here.
+        if trainer == "maxent" and model.fold_method and model.fold_params:
             assignments = fold_assignments_frame(
                 data.occurrence,
                 FoldParams(
@@ -1110,6 +1120,7 @@ def save_models(
         logger.info("Saved model package for %s under %s", mid, pkg_dir)
 
     return model_paths
+
 
 
 def save_results(results_df: pd.DataFrame, output_dir: Path) -> None:
@@ -1162,19 +1173,28 @@ def save_run_metadata(
     seed: int,
     model_config_path: str,
     fold_params: Optional[FoldParams] = None,
+    trainer: str = "maxent",
+    device: Optional[str] = None,
+    deepmaxent: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Write run-level metadata (including the training seed) into the run folder."""
     metadata: Dict[str, Any] = {
         "schema_version": 1,
         "seed": seed,
         "model_config_path": model_config_path,
+        "trainer": trainer,
     }
+    if device is not None:
+        metadata["device"] = device
+    if deepmaxent is not None:
+        metadata["deepmaxent"] = _json_safe(deepmaxent)
     if fold_params is not None:
         metadata["cv"] = fold_params.to_metadata()
     path = output_dir / "run_metadata.json"
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
     return path
+
 
 
 # ============================================================================
@@ -1753,17 +1773,66 @@ def train_sdm_models(
     logger.info(
         f"Generated training data for {len(training_data)} species-activity combinations"
     )
-    
-    # Train models
-    logger.info(f"Training {len(training_data)} models...")
-    
-    models = train_models_parallel(
-        training_data=training_data,
-        max_threads_per_model=max_threads_per_model,
-        n_jobs=n_jobs,
-        seed=training_seed,
-        fold_params=fold_params,
-    )
+
+    trainer = str(getattr(base_model_cfg, "type", "maxent") or "maxent").lower()
+    deepmaxent_meta: Optional[Dict[str, Any]] = None
+    run_device: Optional[str] = None
+
+    if trainer == "deepmaxent":
+        from sdm.models.deepmaxent.config import resolve_deepmaxent_params
+        from sdm.models.deepmaxent.data import shared_feature_names
+        from sdm.models.deepmaxent.training import train_deepmaxent_joint
+
+        logger.info(
+            "Training experimental joint DeepMaxent model for %d outputs "
+            "(elapid MaxEnt remains the default when model.type is maxent)...",
+            len(training_data),
+        )
+        dm_params = resolve_deepmaxent_params(
+            base_model_cfg, seed_override=training_seed
+        )
+        joint_features = shared_feature_names(training_data)
+        # Packages / predict use the shared roster the trunk was trained on.
+        training_data = [
+            TrainingData(
+                latin_name=d.latin_name,
+                activity_type=d.activity_type,
+                occurrence=d.occurrence,
+                maxent_config=d.maxent_config,
+                model_features=joint_features,
+                model_limited=d.model_limited,
+            )
+            for d in training_data
+        ]
+        dm_result = train_deepmaxent_joint(
+            training_data, dm_params, fold_params=fold_params
+        )
+        models = dm_result.results
+        run_device = dm_result.device
+        deepmaxent_meta = {
+            **dm_params.to_metadata(),
+            "device_resolved": dm_result.device,
+            "n_outputs": len(dm_result.output_names),
+            "output_names": list(dm_result.output_names),
+            "n_features": len(dm_result.feature_names),
+            "n_sites": len(dm_result.joint_table.features),
+            "n_seed_states": len(dm_result.seed_states),
+        }
+        logger.info(
+            "DeepMaxent joint training complete on device=%s (%d outputs)",
+            run_device,
+            len(models),
+        )
+    else:
+        # Train elapid MaxEnt models (default)
+        logger.info(f"Training {len(training_data)} MaxEnt models...")
+        models = train_models_parallel(
+            training_data=training_data,
+            max_threads_per_model=max_threads_per_model,
+            n_jobs=n_jobs,
+            seed=training_seed,
+            fold_params=fold_params,
+        )
     
     # Prepare and save results
     logger.info("Saving results...")
@@ -1772,7 +1841,13 @@ def train_sdm_models(
     logger.info("Writing model run to %s", run_uri)
 
     with model_run_write_context(run_uri) as (models_output_dir, written_uri):
-        model_paths = save_models(models, training_data, models_output_dir)
+        model_paths = save_models(
+            models,
+            training_data,
+            models_output_dir,
+            trainer=trainer,
+            deepmaxent_metadata=deepmaxent_meta,
+        )
 
         published_paths = {
             identifier: join_run_artifact(
@@ -1798,6 +1873,9 @@ def train_sdm_models(
             seed=training_seed,
             model_config_path=repo_relative_config_path(model_config_path),
             fold_params=fold_params,
+            trainer=trainer,
+            device=run_device,
+            deepmaxent=deepmaxent_meta,
         )
 
     logger.info("Model run outputs: %s", written_uri)

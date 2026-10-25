@@ -78,6 +78,26 @@ class MaxentConfigModel(BaseModel):
     transform: str
 
 
+class DeepMaxentConfigModel(BaseModel):
+    """Optional joint DeepMaxent (PyTorch) settings; requires ``uv sync --extra dl``."""
+
+    device: str = "auto"  # auto | mps | cuda | cpu
+    hidden_size: int = 250
+    n_hidden_layers: int = 2
+    learning_rate: float = 2e-4
+    batch_size: int = 250
+    weight_decay: float = 3e-4
+    epochs: int = 100
+    n_seeds: int = 10
+    epsilon: float = 1e-6
+    # Inverse-frequency species weights (Zbinden-style); off by default — count
+    # weighting can pull rare species toward common patterns.
+    use_species_weights: bool = False
+    transform: str = "cloglog"
+    early_stopping_patience: Optional[int] = None
+
+
+
 class SamplingBackgroundConfig(BaseModel):
     factor: int = 10
     min_bg: int = 1000
@@ -148,12 +168,26 @@ class CvConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     seed: int
+    # Trainer: ``maxent`` (elapid, default) or experimental ``deepmaxent`` (joint MLP).
+    type: str = "maxent"
     maxent: MaxentConfigModel
+    deepmaxent: Optional[DeepMaxentConfigModel] = None
     sampling: Optional[SamplingConfig] = None
     background: Optional[BackgroundConfig] = None
     cv: Optional[CvConfig] = None
     # When true, publish no cut-off (no threshold value / thresholded map).
     model_limited: bool = False
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def validate_model_type(cls, v: Any) -> str:
+        name = str(v or "maxent").strip().lower()
+        if name not in {"maxent", "deepmaxent"}:
+            raise ValueError(
+                f"model.type must be 'maxent' or 'deepmaxent', got {v!r}"
+            )
+        return name
+
 
 
 class SDMModel(BaseModel):
