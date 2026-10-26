@@ -1,9 +1,11 @@
-"""Joint DeepMaxent training, spatial-block CV, and package assembly."""
+"""Joint DeepMaxent training via PyTorch Lightning, CV, and package assembly."""
 
 from __future__ import annotations
 
 import logging
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import geopandas as gpd
@@ -19,17 +21,23 @@ from sdm.models.deepmaxent.data import (
     JointDeepMaxentTable,
     build_joint_presence_background_table,
 )
-from sdm.models.deepmaxent.device import resolve_torch_device, seed_everything
+from sdm.models.deepmaxent.device import seed_everything
 from sdm.models.deepmaxent.estimator import (
     DeepMaxentEnsemble,
     wrap_output_pipeline,
 )
-from sdm.models.deepmaxent.loss import deepmaxent_loss
-from sdm.models.deepmaxent.network import (
-    average_state_dicts,
-    build_residual_mlp,
-    clone_state_dict,
+from sdm.models.deepmaxent.history import (
+    concat_histories,
+    find_lightning_metrics_csv,
+    metrics_csv_to_history,
 )
+from sdm.models.deepmaxent.lightning_module import (
+    build_deepmaxent_module,
+    lightning_accelerator,
+    require_lightning,
+    resolved_trainer_device,
+)
+from sdm.models.deepmaxent.network import average_state_dicts, clone_state_dict
 from sdm.models.maxent.folds import FoldMethod, FoldParams, iter_fold_splits
 from sdm.types import TrainingData, TrainingResults
 
@@ -49,6 +57,7 @@ class DeepMaxentTrainResult:
     joint_table: JointDeepMaxentTable
     validation_by_output: Dict[str, pd.DataFrame]
     seed_states: List[Dict[str, Any]]
+    training_history: pd.DataFrame
 
 
 def _species_weights_from_targets(targets: np.ndarray) -> Optional[np.ndarray]:
@@ -59,89 +68,173 @@ def _species_weights_from_targets(targets: np.ndarray) -> Optional[np.ndarray]:
     return w.astype(np.float64)
 
 
-def _fit_one_seed(
+def _numpy_dataloader(
+    X: np.ndarray,
+    Y: np.ndarray,
+    *,
+    batch_size: int,
+    shuffle: bool,
+    seed: int,
+):
+    """TensorDataset + DataLoader (torch only; no Lightning import needed)."""
+    torch, _nn = require_torch()
+    from torch.utils.data import DataLoader, TensorDataset
+
+    ds = TensorDataset(
+        torch.as_tensor(X, dtype=torch.float32),
+        torch.as_tensor(Y, dtype=torch.float32),
+    )
+    generator = torch.Generator()
+    generator.manual_seed(int(seed))
+    n = X.shape[0]
+    bs = max(2, min(int(batch_size), n))
+    return DataLoader(
+        ds,
+        batch_size=bs,
+        shuffle=shuffle,
+        generator=generator if shuffle else None,
+        drop_last=False,
+    )
+
+
+def _build_loggers(
+    *,
+    log_dir: Path,
+    fit_id: str,
+    seed: int,
+    enable_mlflow: bool,
+) -> list:
+    """CSVLogger always; MLFlowLogger when MLflow is active / requested."""
+    L = require_lightning()
+    from lightning.pytorch.loggers import CSVLogger
+
+    loggers: list = [
+        CSVLogger(
+            save_dir=str(log_dir),
+            name=f"{fit_id}_seed{seed}",
+            version=0,
+        )
+    ]
+    if enable_mlflow:
+        try:
+            import mlflow
+            from lightning.pytorch.loggers import MLFlowLogger
+
+            if mlflow.active_run() is not None or enable_mlflow:
+                loggers.append(
+                    MLFlowLogger(
+                        experiment_name="deepmaxent",
+                        run_name=f"deepmaxent_{fit_id}_seed{seed}",
+                        tracking_uri=mlflow.get_tracking_uri(),
+                    )
+                )
+        except Exception as exc:
+            logger.debug("MLFlowLogger not attached: %s", exc)
+    return loggers
+
+
+def _fit_one_seed_lightning(
     X: np.ndarray,
     Y: np.ndarray,
     *,
     params: DeepMaxentParams,
-    device: str,
     seed: int,
+    output_names: Sequence[str],
+    fit_id: str,
     species_weights: Optional[np.ndarray] = None,
-) -> Dict[str, Any]:
-    torch, _nn = require_torch()
-    seed_everything(seed, device=device)
-    n_features = X.shape[1]
-    n_outputs = Y.shape[1]
-    model = build_residual_mlp(
-        n_features,
-        n_outputs,
-        hidden_size=params.hidden_size,
-        n_hidden_layers=params.n_hidden_layers,
-    ).to(device)
-    optimiser = torch.optim.Adam(
-        model.parameters(),
-        lr=params.learning_rate,
-        weight_decay=params.weight_decay,
+    X_val: Optional[np.ndarray] = None,
+    Y_val: Optional[np.ndarray] = None,
+    log_root: Optional[Path] = None,
+    enable_mlflow: bool = False,
+) -> Tuple[Dict[str, Any], pd.DataFrame, str]:
+    """Train one seed with Lightning Trainer; return state, history, device."""
+    L = require_lightning()
+    seed_everything(seed, device="cpu")
+
+    module = build_deepmaxent_module(
+        n_features=X.shape[1],
+        n_outputs=Y.shape[1],
+        params=params,
+        output_names=output_names,
+        species_weights=species_weights,
     )
+    train_loader = _numpy_dataloader(
+        X, Y, batch_size=params.batch_size, shuffle=True, seed=seed
+    )
+    val_loader = None
+    if X_val is not None and Y_val is not None and len(X_val) >= 2:
+        val_loader = _numpy_dataloader(
+            X_val, Y_val, batch_size=params.batch_size, shuffle=False, seed=seed
+        )
 
-    n = X.shape[0]
-    batch_size = max(2, min(params.batch_size, n))
-    rng = np.random.default_rng(seed)
-    best_state = clone_state_dict(model)
-    best_loss = float("inf")
-    patience = params.early_stopping_patience
-    wait = 0
+    if log_root is None:
+        tmp = tempfile.TemporaryDirectory(prefix="deepmaxent_logs_")
+        log_dir = Path(tmp.name)
+        cleanup_tmp = tmp
+    else:
+        log_dir = Path(log_root)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        cleanup_tmp = None
 
-    x_all = torch.as_tensor(X, dtype=torch.float32, device=device)
-    y_all = torch.as_tensor(Y, dtype=torch.float32, device=device)
-    sw = None
-    if species_weights is not None:
-        sw = torch.as_tensor(species_weights, dtype=torch.float32, device=device)
+    try:
+        loggers = _build_loggers(
+            log_dir=log_dir,
+            fit_id=fit_id,
+            seed=seed,
+            enable_mlflow=enable_mlflow,
+        )
+        callbacks = []
+        if params.early_stopping_patience is not None and params.early_stopping_patience > 0:
+            from lightning.pytorch.callbacks import EarlyStopping
 
-    for epoch in range(params.epochs):
-        model.train()
-        order = rng.permutation(n)
-        epoch_losses: List[float] = []
-        for start in range(0, n, batch_size):
-            idx = order[start : start + batch_size]
-            if idx.size < 2:
-                continue
-            logits = model(x_all[idx])
-            loss = deepmaxent_loss(
-                logits,
-                y_all[idx],
-                epsilon=params.epsilon,
-                species_weights=sw,
-            )
-            optimiser.zero_grad()
-            loss.backward()
-            optimiser.step()
-            epoch_losses.append(float(loss.detach().cpu()))
-        mean_loss = float(np.mean(epoch_losses)) if epoch_losses else float("inf")
-        if mean_loss < best_loss - 1e-8:
-            best_loss = mean_loss
-            best_state = clone_state_dict(model)
-            wait = 0
-        else:
-            wait += 1
-            if patience is not None and patience > 0 and wait >= patience:
-                logger.info(
-                    "DeepMaxent early stop at epoch %d (seed=%d, loss=%.5f)",
-                    epoch + 1,
-                    seed,
-                    best_loss,
+            monitor = "val_loss" if val_loader is not None else "train_loss"
+            callbacks.append(
+                EarlyStopping(
+                    monitor=monitor,
+                    patience=int(params.early_stopping_patience),
+                    mode="min",
                 )
-                break
-        if (epoch + 1) % 25 == 0 or epoch == 0:
-            logger.debug(
-                "DeepMaxent seed=%d epoch=%d/%d loss=%.5f",
-                seed,
-                epoch + 1,
-                params.epochs,
-                mean_loss,
             )
 
-    return best_state
+        accelerator = lightning_accelerator(params.device)
+        trainer = L.Trainer(
+            max_epochs=int(params.epochs),
+            accelerator=accelerator,
+            devices=1,
+            logger=loggers,
+            callbacks=callbacks,
+            enable_checkpointing=False,
+            enable_model_summary=False,
+            enable_progress_bar=False,
+            deterministic=accelerator == "cpu",
+            num_sanity_val_steps=0,
+        )
+        if val_loader is not None:
+            trainer.fit(module, train_dataloaders=train_loader, val_dataloaders=val_loader)
+        else:
+            trainer.fit(module, train_dataloaders=train_loader)
+
+        device = resolved_trainer_device(trainer)
+        state = clone_state_dict(module.net)
+        metrics_path = find_lightning_metrics_csv(log_dir / f"{fit_id}_seed{seed}")
+        if metrics_path is None:
+            history = metrics_csv_to_history(
+                Path("/nonexistent"),
+                fit_id=fit_id,
+                seed=seed,
+                output_names=output_names,
+            )
+        else:
+            history = metrics_csv_to_history(
+                metrics_path,
+                fit_id=fit_id,
+                seed=seed,
+                output_names=output_names,
+            )
+        return state, history, device
+    finally:
+        if cleanup_tmp is not None:
+            cleanup_tmp.cleanup()
 
 
 def fit_ensemble(
@@ -149,10 +242,13 @@ def fit_ensemble(
     params: DeepMaxentParams,
     *,
     row_index: Optional[np.ndarray] = None,
+    val_row_index: Optional[np.ndarray] = None,
     n_seeds: Optional[int] = None,
-) -> Tuple[DeepMaxentEnsemble, List[Dict[str, Any]], str]:
-    """Fit StandardScaler + residual MLP ensemble on selected joint-table rows."""
-    device = resolve_torch_device(params.device)
+    fit_id: str = "final",
+    log_root: Optional[Path] = None,
+    enable_mlflow: bool = False,
+) -> Tuple[DeepMaxentEnsemble, List[Dict[str, Any]], str, pd.DataFrame]:
+    """Fit StandardScaler + Lightning residual MLP ensemble on joint-table rows."""
     idx = (
         np.arange(len(table.features))
         if row_index is None
@@ -164,25 +260,37 @@ def fit_ensemble(
     X = scaler.fit_transform(X_df.to_numpy(dtype=float))
     Y = Y_df.to_numpy(dtype=float)
 
+    X_val = Y_val = None
+    if val_row_index is not None and len(val_row_index) >= 2:
+        val_idx = np.asarray(val_row_index, dtype=int)
+        X_val = scaler.transform(table.features.iloc[val_idx].to_numpy(dtype=float))
+        Y_val = table.targets.iloc[val_idx].to_numpy(dtype=float)
+
     weights = (
         _species_weights_from_targets(Y) if params.use_species_weights else None
     )
     seeds_n = params.n_seeds if n_seeds is None else int(n_seeds)
     seed_list = [params.seed + i for i in range(seeds_n)]
     states: List[Dict[str, Any]] = []
+    histories: List[pd.DataFrame] = []
+    device = "cpu"
     for s in seed_list:
-        states.append(
-            _fit_one_seed(
-                X,
-                Y,
-                params=params,
-                device=device,
-                seed=s,
-                species_weights=weights,
-            )
+        state, hist, device = _fit_one_seed_lightning(
+            X,
+            Y,
+            params=params,
+            seed=s,
+            output_names=table.output_names,
+            fit_id=fit_id,
+            species_weights=weights,
+            X_val=X_val,
+            Y_val=Y_val,
+            log_root=log_root,
+            enable_mlflow=enable_mlflow,
         )
+        states.append(state)
+        histories.append(hist)
 
-    # Store mean weights for a compact default predictor; keep all seeds for spread.
     mean_state = average_state_dicts(states)
     ensemble = DeepMaxentEnsemble(
         feature_names=table.feature_names,
@@ -190,16 +298,18 @@ def fit_ensemble(
         state_dicts=[mean_state],
         hidden_size=params.hidden_size,
         n_hidden_layers=params.n_hidden_layers,
+        dropout=params.dropout,
         transform=params.transform,
-        device=device,
+        device="cpu" if str(device).startswith("cpu") else str(device).split(":")[0],
         scaler_mean=np.asarray(scaler.mean_, dtype=float),
         scaler_scale=np.asarray(scaler.scale_, dtype=float),
     )
-    return ensemble, states, device
+    # Prefer a plain device label for metadata / sklearn predict.
+    device_label = ensemble.device
+    return ensemble, states, device_label, concat_histories(histories)
 
 
 def _points_gdf_for_folds(table: JointDeepMaxentTable) -> gpd.GeoDataFrame:
-    """GeoDataFrame with class=1 on any presence so block CV sees all sites."""
     any_presence = (table.targets.to_numpy() > 0).any(axis=1).astype(int)
     return gpd.GeoDataFrame(
         {"class": any_presence},
@@ -212,8 +322,11 @@ def cross_validate_joint(
     table: JointDeepMaxentTable,
     params: DeepMaxentParams,
     fold_params: FoldParams,
-) -> Tuple[Dict[str, np.ndarray], Dict[str, pd.DataFrame], FoldParams]:
-    """Shared 10 km block folds; per-output held-out AUC and score tables."""
+    *,
+    log_root: Optional[Path] = None,
+    enable_mlflow: bool = False,
+) -> Tuple[Dict[str, np.ndarray], Dict[str, pd.DataFrame], FoldParams, pd.DataFrame]:
+    """Shared spatial-block folds; per-output held-out AUC and Lightning history."""
     if fold_params.method is not FoldMethod.BLOCKS:
         logger.warning(
             "DeepMaxent joint CV expected spatial blocks; got %s",
@@ -223,18 +336,28 @@ def cross_validate_joint(
     splits = list(iter_fold_splits(points, fold_params))
     scores: Dict[str, List[float]] = {name: [] for name in table.output_names}
     val_rows: Dict[str, List[Dict[str, Any]]] = {name: [] for name in table.output_names}
+    histories: List[pd.DataFrame] = []
 
-    # One seed during CV for speed; final fit uses full n_seeds.
-    cv_params = DeepMaxentParams(**{**params.to_metadata(), "n_seeds": 1, "epochs": params.epochs})
+    cv_params = DeepMaxentParams(
+        **{**params.to_metadata(), "n_seeds": 1, "epochs": params.epochs}
+    )
 
     for fold_id, train_idx, test_idx in splits:
         if len(train_idx) < 4 or len(test_idx) < 2:
             for name in table.output_names:
                 scores[name].append(np.nan)
             continue
-        ensemble, _states, _device = fit_ensemble(
-            table, cv_params, row_index=train_idx, n_seeds=1
+        ensemble, _states, _device, hist = fit_ensemble(
+            table,
+            cv_params,
+            row_index=train_idx,
+            val_row_index=test_idx,
+            n_seeds=1,
+            fit_id=f"fold_{fold_id}",
+            log_root=log_root,
+            enable_mlflow=enable_mlflow,
         )
+        histories.append(hist)
         proba = ensemble.predict_proba_multi(table.features.iloc[test_idx])
         for j, name in enumerate(table.output_names):
             y = (table.targets.iloc[test_idx][name].to_numpy() > 0).astype(int)
@@ -258,19 +381,20 @@ def cross_validate_joint(
 
     score_arrays = {k: np.asarray(v, dtype=float) for k, v in scores.items()}
     val_frames = {
-        k: pd.DataFrame(rows) if rows else pd.DataFrame(
-            columns=["point_index", "class", "fold", "held_out_score"]
-        )
+        k: pd.DataFrame(rows)
+        if rows
+        else pd.DataFrame(columns=["point_index", "class", "fold", "held_out_score"])
         for k, rows in val_rows.items()
     }
-    return score_arrays, val_frames, fold_params
+    return score_arrays, val_frames, fold_params, concat_histories(histories)
 
 
-def _latin_activity_from_id(model_id: str, training_data: Sequence[TrainingData]) -> Tuple[str, str]:
+def _latin_activity_from_id(
+    model_id: str, training_data: Sequence[TrainingData]
+) -> Tuple[str, str]:
     for data in training_data:
         if get_model_id([data.latin_name, data.activity_type]) == model_id:
             return data.latin_name, data.activity_type
-    # Fallback parse: last token roost/in_flight style is unreliable; raise.
     raise KeyError(f"No TrainingData matching model_id={model_id!r}")
 
 
@@ -278,18 +402,34 @@ def train_deepmaxent_joint(
     training_data: Sequence[TrainingData],
     params: DeepMaxentParams,
     fold_params: FoldParams,
+    *,
+    log_root: Optional[Path] = None,
+    enable_mlflow: bool = False,
 ) -> DeepMaxentTrainResult:
-    """Train one shared multi-output DeepMaxent model for all TrainingData rows."""
+    """Train one shared multi-output DeepMaxent model (Lightning Trainer)."""
     table = build_joint_presence_background_table(training_data)
     logger.info(
-        "Training DeepMaxent joint model (%d outputs) on device preference=%s",
+        "Training DeepMaxent joint model (%d outputs) via Lightning "
+        "(device preference=%s)",
         len(table.output_names),
         params.device,
     )
-    cv_scores, val_by_out, used_folds = cross_validate_joint(table, params, fold_params)
-    ensemble, seed_states, device = fit_ensemble(table, params)
-    # Attach all seed states for optional spread analysis; predict uses mean.
+    cv_scores, val_by_out, used_folds, cv_history = cross_validate_joint(
+        table,
+        params,
+        fold_params,
+        log_root=log_root,
+        enable_mlflow=enable_mlflow,
+    )
+    ensemble, seed_states, device, final_history = fit_ensemble(
+        table,
+        params,
+        fit_id="final",
+        log_root=log_root,
+        enable_mlflow=enable_mlflow,
+    )
     ensemble.state_dicts = [average_state_dicts(seed_states)]
+    training_history = concat_histories([cv_history, final_history])
 
     results: List[TrainingResults] = []
     for name in table.output_names:
@@ -322,4 +462,5 @@ def train_deepmaxent_joint(
         joint_table=table,
         validation_by_output=val_by_out,
         seed_states=seed_states,
+        training_history=training_history,
     )

@@ -15,6 +15,7 @@ class DeepMaxentParams:
     device: str = "auto"
     hidden_size: int = 250
     n_hidden_layers: int = 2
+    dropout: float = 0.0
     learning_rate: float = 2e-4
     batch_size: int = 250
     weight_decay: float = 3e-4
@@ -25,6 +26,7 @@ class DeepMaxentParams:
     transform: str = "cloglog"
     early_stopping_patience: Optional[int] = None
     seed: int = 42
+
 
     def to_metadata(self) -> Dict[str, Any]:
         return asdict(self)
@@ -44,6 +46,7 @@ def resolve_deepmaxent_params(
         device=section.device,
         hidden_size=section.hidden_size,
         n_hidden_layers=section.n_hidden_layers,
+        dropout=section.dropout,
         learning_rate=section.learning_rate,
         batch_size=section.batch_size,
         weight_decay=section.weight_decay,

@@ -32,6 +32,7 @@ class DeepMaxentEnsemble(BaseEstimator, ClassifierMixin):
         state_dicts: Sequence[Dict[str, Any]],
         hidden_size: int = 250,
         n_hidden_layers: int = 2,
+        dropout: float = 0.0,
         transform: str = "cloglog",
         device: str = "cpu",
         scaler_mean: Optional[np.ndarray] = None,
@@ -42,10 +43,12 @@ class DeepMaxentEnsemble(BaseEstimator, ClassifierMixin):
         self.state_dicts = list(state_dicts)
         self.hidden_size = hidden_size
         self.n_hidden_layers = n_hidden_layers
+        self.dropout = float(dropout)
         self.transform = transform
         self.device = device
         self.scaler_mean = scaler_mean
         self.scaler_scale = scaler_scale
+
 
     def _scaler(self) -> StandardScaler:
         scaler = StandardScaler()
@@ -84,6 +87,7 @@ class DeepMaxentEnsemble(BaseEstimator, ClassifierMixin):
                 len(self.output_names),
                 hidden_size=self.hidden_size,
                 n_hidden_layers=self.n_hidden_layers,
+                dropout=self.dropout,
             )
             model.load_state_dict(state)
             model.to(self.device)

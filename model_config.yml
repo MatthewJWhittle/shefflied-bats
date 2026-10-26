@@ -26,6 +26,7 @@ model:
     device: auto
     hidden_size: 250
     n_hidden_layers: 2
+    dropout: 0.0
     learning_rate: 0.0002
     batch_size: 250
     weight_decay: 0.0003

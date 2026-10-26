@@ -13,32 +13,41 @@ def build_residual_mlp(
     *,
     hidden_size: int = 250,
     n_hidden_layers: int = 2,
+    dropout: float = 0.0,
 ):
-    """Shared trunk: BatchNorm over sites, two (or more) ReLU hidden layers with
-    residual skips between consecutive hidden layers, then one logit per output.
+    """Shared trunk: BatchNorm over sites, ReLU hidden layers with residual skips,
+    optional dropout on hidden activations, then one logit per output.
 
-    Matches Ryckewaert et al. 2024 (DeepMaxent) residual MLP; BatchNorm1d is
-    applied on the site batch so covariates are standardised per mini-batch.
+    Residual skips apply between consecutive hidden layers of equal width
+    (works for 2 or 4+ layers). ``dropout=0`` (default) disables dropout.
     """
     torch, nn = require_torch()
+    rate = float(dropout)
+    if rate < 0.0 or rate >= 1.0:
+        raise ValueError(f"dropout must be in [0, 1), got {dropout!r}")
 
     class ResidualMLP(nn.Module):
         def __init__(self) -> None:
             super().__init__()
             if n_hidden_layers < 1:
                 raise ValueError("n_hidden_layers must be >= 1")
+            if hidden_size < 1:
+                raise ValueError("hidden_size must be >= 1")
             self.input_bn = nn.BatchNorm1d(n_features)
             self.fc_in = nn.Linear(n_features, hidden_size)
             self.hidden = nn.ModuleList(
                 [nn.Linear(hidden_size, hidden_size) for _ in range(n_hidden_layers)]
             )
+            self.dropout = nn.Dropout(p=rate)
             self.fc_out = nn.Linear(hidden_size, n_outputs)
+            self.dropout_rate = rate
 
         def forward(self, x):
             x = self.input_bn(x)
-            x = self.fc_in(x).relu()
+            x = self.dropout(self.fc_in(x).relu())
             for layer in self.hidden:
-                x = layer(x).relu() + x
+                # Residual skip between hidden layers (equal width).
+                x = self.dropout(layer(x).relu()) + x
             return self.fc_out(x)
 
     return ResidualMLP()

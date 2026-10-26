@@ -84,6 +84,7 @@ class DeepMaxentConfigModel(BaseModel):
     device: str = "auto"  # auto | mps | cuda | cpu
     hidden_size: int = 250
     n_hidden_layers: int = 2
+    dropout: float = 0.0  # 0 = off
     learning_rate: float = 2e-4
     batch_size: int = 250
     weight_decay: float = 3e-4
@@ -95,6 +96,7 @@ class DeepMaxentConfigModel(BaseModel):
     use_species_weights: bool = False
     transform: str = "cloglog"
     early_stopping_patience: Optional[int] = None
+
 
 
 

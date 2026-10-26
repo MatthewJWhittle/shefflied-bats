@@ -1778,6 +1778,7 @@ def train_sdm_models(
     deepmaxent_meta: Optional[Dict[str, Any]] = None
     run_device: Optional[str] = None
 
+    dm_history: Optional[Any] = None
     if trainer == "deepmaxent":
         from sdm.models.deepmaxent.config import resolve_deepmaxent_params
         from sdm.models.deepmaxent.data import shared_feature_names
@@ -1805,10 +1806,14 @@ def train_sdm_models(
             for d in training_data
         ]
         dm_result = train_deepmaxent_joint(
-            training_data, dm_params, fold_params=fold_params
+            training_data,
+            dm_params,
+            fold_params=fold_params,
+            enable_mlflow=bool(mlflow_enabled),
         )
         models = dm_result.results
         run_device = dm_result.device
+        dm_history = dm_result.training_history
         deepmaxent_meta = {
             **dm_params.to_metadata(),
             "device_resolved": dm_result.device,
@@ -1817,6 +1822,7 @@ def train_sdm_models(
             "n_features": len(dm_result.feature_names),
             "n_sites": len(dm_result.joint_table.features),
             "n_seed_states": len(dm_result.seed_states),
+            "training_history": "deepmaxent_training_history.csv",
         }
         logger.info(
             "DeepMaxent joint training complete on device=%s (%d outputs)",
@@ -1868,6 +1874,10 @@ def train_sdm_models(
         save_results(results_df, models_output_dir)
         save_training_data(training_data, models_output_dir)
         save_run_thresholds(models, training_data, models_output_dir)
+        if dm_history is not None and len(dm_history) > 0:
+            from sdm.models.deepmaxent.history import save_training_history
+
+            save_training_history(dm_history, models_output_dir)
         save_run_metadata(
             models_output_dir,
             seed=training_seed,
@@ -1900,8 +1910,12 @@ def train_sdm_models(
             session_metadata=session_metadata,
             maxent_config_to_dict=_maxent_config_to_dict,
         )
+        # DeepMaxent per-epoch metrics are logged during fit via Lightning MLFlowLogger
+        # when enable_mlflow is true; CSV history is also on disk in the run folder.
     else:
         logger.info("Skipping MLflow logging (disabled or unavailable).")
+
+
     
     logger.info("✓ Training pipeline complete")
 
