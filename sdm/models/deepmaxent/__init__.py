@@ -1,7 +1,8 @@
 """DeepMaxent: shared multi-output residual MLP with MaxEnt / Poisson loss.
 
-Experimental alternative to per-model elapid MaxEnt. Requires the optional
-``dl`` extra (``uv sync --extra dl``). MaxEnt remains the default trainer.
+Experimental alternative to per-model elapid MaxEnt. Training uses PyTorch
+Lightning. Requires the optional ``dl`` extra (``uv sync --extra dl``).
+MaxEnt remains the default trainer.
 """
 
 from __future__ import annotations
