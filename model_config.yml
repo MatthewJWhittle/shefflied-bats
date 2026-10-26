@@ -34,6 +34,9 @@ model:
     n_seeds: 10
     epsilon: 1.0e-6
     use_species_weights: false
+    # Guarantee k presence rows per output each batch (rare species). Off by default.
+    balanced_batches: false
+    presences_per_output: 4
     transform: cloglog
     # early_stopping_patience: null
 

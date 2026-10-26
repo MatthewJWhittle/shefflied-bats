@@ -94,6 +94,9 @@ class DeepMaxentConfigModel(BaseModel):
     # Inverse-frequency species weights (Zbinden-style); off by default — count
     # weighting can pull rare species toward common patterns.
     use_species_weights: bool = False
+    # Guarantee k presence rows per output in each train batch (off by default).
+    balanced_batches: bool = False
+    presences_per_output: int = 4
     transform: str = "cloglog"
     early_stopping_patience: Optional[int] = None
 

@@ -16,6 +16,11 @@ def deepmaxent_loss(
 ):
     """Mini-batch DeepMaxent loss (paper equation 4).
 
+    Softmax is over **sites in the mini-batch**. With optional balanced
+    sampling (``balanced_batches``), oversampled presence rows for one output
+    also sit in every other output's partition as non-presences; eq. 4 already
+    treats them as background in those denominators — no further correction.
+
     Parameters
     ----------
     logits :

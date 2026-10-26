@@ -23,6 +23,10 @@ class DeepMaxentParams:
     n_seeds: int = 10
     epsilon: float = 1e-6
     use_species_weights: bool = False
+    # When True, each train batch includes ``presences_per_output`` rows for every
+    # output (with replacement if rare), remainder background. Off by default.
+    balanced_batches: bool = False
+    presences_per_output: int = 4
     transform: str = "cloglog"
     early_stopping_patience: Optional[int] = None
     seed: int = 42
@@ -54,6 +58,8 @@ def resolve_deepmaxent_params(
         n_seeds=section.n_seeds,
         epsilon=section.epsilon,
         use_species_weights=section.use_species_weights,
+        balanced_batches=section.balanced_batches,
+        presences_per_output=section.presences_per_output,
         transform=section.transform,
         early_stopping_patience=section.early_stopping_patience,
         seed=seed,

@@ -28,6 +28,10 @@ from sdm.models.deepmaxent.manual_fit import (
     predict_logits_from_state,
 )
 from sdm.models.deepmaxent.network import build_residual_mlp
+from sdm.models.deepmaxent.sampling import (
+    BalancedPresenceBatchSampler,
+    build_train_dataloader,
+)
 from sdm.models.deepmaxent.training import (
     _fit_one_seed_lightning,
     fit_ensemble,
@@ -147,6 +151,10 @@ def test_species_weights_change_loss_and_config_default():
     assert cfg.deepmaxent.use_species_weights is False
     params = resolve_deepmaxent_params(cfg)
     assert params.use_species_weights is False
+    assert params.balanced_batches is False
+    assert params.presences_per_output == 4
+    assert cfg.deepmaxent.balanced_batches is False
+    assert cfg.deepmaxent.presences_per_output == 4
 
     logits = torch.randn(10, 2, dtype=torch.float32)
     targets = torch.zeros(10, 2)
@@ -161,6 +169,117 @@ def test_species_weights_change_loss_and_config_default():
     )
     assert torch.isfinite(weighted)
     assert not torch.allclose(base, weighted)
+
+
+def _synthetic_multi_output_Y(
+    *,
+    n_rows: int,
+    n_outputs: int,
+    presence_counts: list[int],
+) -> np.ndarray:
+    """Build a Y matrix with known presence counts and shared background rows."""
+    if len(presence_counts) != n_outputs:
+        raise ValueError("presence_counts length must match n_outputs")
+    Y = np.zeros((n_rows, n_outputs), dtype=np.float64)
+    cursor = 0
+    for j, count in enumerate(presence_counts):
+        if cursor + count > n_rows:
+            raise ValueError("presence rows exceed n_rows")
+        Y[cursor : cursor + count, j] = 1.0
+        cursor += count
+    # Remaining rows stay background (all-zero).
+    return Y
+
+
+def test_balanced_batches_contain_k_presences_per_output():
+    """Every balanced batch has at least k presence rows for each output."""
+    n_outputs = 5
+    k = 4
+    batch_size = 40
+    Y = _synthetic_multi_output_Y(
+        n_rows=200,
+        n_outputs=n_outputs,
+        # One rare output (2 < k → with-replacement), others common.
+        presence_counts=[2, 20, 15, 12, 10],
+    )
+    X = np.random.default_rng(1).normal(size=(Y.shape[0], 3)).astype(np.float64)
+    loader = build_train_dataloader(
+        X,
+        Y,
+        batch_size=batch_size,
+        seed=0,
+        balanced_batches=True,
+        presences_per_output=k,
+    )
+    assert len(loader) == int(np.ceil(Y.shape[0] / batch_size))
+    for xb, yb in loader:
+        assert xb.shape[0] == batch_size
+        assert yb.shape == (batch_size, n_outputs)
+        counts = (yb > 0).sum(dim=0)
+        assert torch.all(counts >= k), f"presence counts {counts.tolist()} < k={k}"
+
+
+def test_balanced_sampler_length_matches_default_steps():
+    """Balanced path keeps the same number of batches per epoch as shuffle."""
+    Y = _synthetic_multi_output_Y(
+        n_rows=115, n_outputs=3, presence_counts=[3, 8, 12]
+    )
+    sampler = BalancedPresenceBatchSampler(
+        Y, batch_size=25, presences_per_output=2, seed=0
+    )
+    from torch.utils.data import DataLoader, TensorDataset
+
+    ds = TensorDataset(
+        torch.zeros(Y.shape[0], 1),
+        torch.as_tensor(Y, dtype=torch.float32),
+    )
+    default = DataLoader(ds, batch_size=25, shuffle=True, drop_last=False)
+    assert len(sampler) == len(default)
+
+
+def test_default_off_dataloader_matches_historical_shuffle_and_loss():
+    """balanced_batches=False keeps historical shuffle batches and loss values."""
+    rng = np.random.default_rng(3)
+    n, p, k_out = 80, 4, 3
+    X = rng.normal(size=(n, p)).astype(np.float64)
+    Y = np.zeros((n, k_out), dtype=np.float64)
+    Y[:10, 0] = 1
+    Y[10:25, 1] = 1
+    Y[25:40, 2] = 1
+    seed = 17
+    batch_size = 16
+
+    # Historical construction (pre–balanced_batches path).
+    from torch.utils.data import DataLoader, TensorDataset
+
+    ds = TensorDataset(
+        torch.as_tensor(X, dtype=torch.float32),
+        torch.as_tensor(Y, dtype=torch.float32),
+    )
+    gen = torch.Generator()
+    gen.manual_seed(seed)
+    historical = DataLoader(
+        ds, batch_size=batch_size, shuffle=True, generator=gen, drop_last=False
+    )
+    current = build_train_dataloader(
+        X,
+        Y,
+        batch_size=batch_size,
+        seed=seed,
+        balanced_batches=False,
+    )
+    assert len(historical) == len(current)
+
+    net = build_residual_mlp(p, k_out, hidden_size=8, n_hidden_layers=2, dropout=0.0)
+    net.eval()
+    for (xh, yh), (xc, yc) in zip(historical, current):
+        assert torch.equal(xh, xc)
+        assert torch.equal(yh, yc)
+        with torch.no_grad():
+            logits = net(xh)
+        loss_h = deepmaxent_loss(logits, yh)
+        loss_c = deepmaxent_loss(logits, yc)
+        assert torch.equal(loss_h, loss_c)
 
 
 def test_dropout_default_off_and_forward_runs():

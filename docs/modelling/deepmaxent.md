@@ -31,7 +31,10 @@ model:
     epochs: 100
     n_seeds: 10
     use_species_weights: false
+    balanced_batches: false          # guarantee k presences per output / batch
+    presences_per_output: 4          # only used when balanced_batches is true
 ```
+
 
 
 Then the usual train / predict / publish commands:
@@ -75,6 +78,11 @@ is Lightning `accelerator="auto"` (CPU here; MPS on Apple Silicon when available
   per-model MaxEnt subsets — required for one joint representation.
 - `use_species_weights` (inverse-frequency) is **off by default** (rare→common
   pull risk); multiplies each species term in the count-weighted loss when on.
+- `balanced_batches` (**off by default**): each train batch includes
+  `presences_per_output` (default 4) presence rows for every output (with
+  replacement if rare), remainder background. Keeps batch size and steps/epoch
+  unchanged. Oversampled presence sites also enter other outputs' softmax
+  denominators as non-presences — eq. 4 already handles that; no extra correction.
 
 ## Helper scripts (real data; not CI)
 

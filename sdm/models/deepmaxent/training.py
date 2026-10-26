@@ -75,24 +75,35 @@ def _numpy_dataloader(
     batch_size: int,
     shuffle: bool,
     seed: int,
+    balanced_batches: bool = False,
+    presences_per_output: int = 4,
 ):
     """TensorDataset + DataLoader (torch only; no Lightning import needed)."""
     torch, _nn = require_torch()
     from torch.utils.data import DataLoader, TensorDataset
 
+    from sdm.models.deepmaxent.sampling import build_train_dataloader
+
+    if shuffle:
+        return build_train_dataloader(
+            X,
+            Y,
+            batch_size=batch_size,
+            seed=seed,
+            balanced_batches=balanced_batches,
+            presences_per_output=presences_per_output,
+        )
+
     ds = TensorDataset(
         torch.as_tensor(X, dtype=torch.float32),
         torch.as_tensor(Y, dtype=torch.float32),
     )
-    generator = torch.Generator()
-    generator.manual_seed(int(seed))
     n = X.shape[0]
-    bs = max(2, min(int(batch_size), n))
+    bs = max(2, min(int(batch_size), max(n, 2)))
     return DataLoader(
         ds,
         batch_size=bs,
-        shuffle=shuffle,
-        generator=generator if shuffle else None,
+        shuffle=False,
         drop_last=False,
     )
 
@@ -159,12 +170,22 @@ def _fit_one_seed_lightning(
         species_weights=species_weights,
     )
     train_loader = _numpy_dataloader(
-        X, Y, batch_size=params.batch_size, shuffle=True, seed=seed
+        X,
+        Y,
+        batch_size=params.batch_size,
+        shuffle=True,
+        seed=seed,
+        balanced_batches=params.balanced_batches,
+        presences_per_output=params.presences_per_output,
     )
     val_loader = None
     if X_val is not None and Y_val is not None and len(X_val) >= 2:
         val_loader = _numpy_dataloader(
-            X_val, Y_val, batch_size=params.batch_size, shuffle=False, seed=seed
+            X_val,
+            Y_val,
+            batch_size=params.batch_size,
+            shuffle=False,
+            seed=seed,
         )
 
     if log_root is None:
