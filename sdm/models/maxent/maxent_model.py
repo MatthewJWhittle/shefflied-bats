@@ -33,7 +33,12 @@ from elapid.utils import (
 )
 from elapid.geo import apply_model_to_array # Core raster prediction function from elapid
 from elapid.models import MaxentConfig
-from sdm.models.maxent.folds import FoldMethod, FoldParams, iter_fold_splits
+from sdm.models.maxent.folds import (
+    FoldMethod,
+    FoldParams,
+    iter_fold_splits,
+    splits_from_labels,
+)
 from sdm.types import VariablesConfig, ModelConfig
 
 
@@ -251,12 +256,7 @@ def cross_validate_maxent_model(
     validation_rows: List[Dict[str, Any]] = []
 
     if fold_labels is not None:
-        labels = np.asarray(fold_labels)
-        indices = np.arange(len(occurrence_gdf))
-        splits = [
-            (int(f), indices[labels != f], indices[labels == f])
-            for f in np.unique(labels[labels >= 0])
-        ]
+        splits = list(splits_from_labels(fold_labels))
     else:
         splits = list(iter_fold_splits(occurrence_gdf, params))
     n_splits = len(splits)

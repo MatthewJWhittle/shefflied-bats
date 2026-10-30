@@ -941,10 +941,6 @@ def tune(
         help="Optuna storage URL for distributed tuning (optional).",
     ),
     verbose: bool = False,
-    n_cv_folds: int = typer.Option(
-        3,
-        help="Number of CV folds for evaluation (reduced from 3 for faster tuning).",
-    ),
     n_jobs: int = typer.Option(
         -1,
         help="Number of parallel trials (None = sequential, >1 = parallel).",
@@ -958,31 +954,30 @@ def tune(
             "and default MaxEnt settings. Off by default."
         ),
     ),
-    rescore_top_k: int = typer.Option(
-        0,
-        "--rescore-top-k",
-        help=(
-            "Re-score the top N trials on the training pipeline's CV folds "
-            "(model config cv; 10 km blocks, 5 folds by default) and write "
-            "block_rescore.csv next to the tuned configs. 0 = off."
-        ),
+    top_candidates: int = typer.Option(
+        10,
+        "--top-candidates",
+        help="Write top_candidates.csv per model with the best N trials (0 = off).",
     ),
-    tune_cv_method: str = typer.Option(
-        "blocks",
-        "--tune-cv-method",
-        help=(
-            "Folds used to score trials: 'blocks' (same 10 km block folds as "
-            "training, from model config cv) or 'kmeans' (old elapid "
-            "GeographicKFold with --n-cv-folds)."
-        ),
+    tune_presence_fraction: float = typer.Option(
+        1.0,
+        "--tune-presence-fraction",
+        help="Share of presences used for tuning (models with few records keep all; see --tune-min-presence).",
     ),
     tune_background_fraction: float = typer.Option(
         1.0,
         "--tune-background-fraction",
-        help=(
-            "Share of background points kept for tuning (all presences kept). "
-            "Drawn once per model with the config seed, within each fold."
-        ),
+        help="Share of background points used for tuning (see --tune-min-background).",
+    ),
+    tune_min_presence: int = typer.Option(
+        100,
+        "--tune-min-presence",
+        help="Never subsample presences below this count.",
+    ),
+    tune_min_background: int = typer.Option(
+        1000,
+        "--tune-min-background",
+        help="Never subsample background points below this count.",
     ),
     tune_prune_folds: bool = typer.Option(
         False,
@@ -1013,12 +1008,13 @@ def tune(
         study_name=study_name,
         storage=storage,
         verbose=verbose,
-        n_cv_folds=n_cv_folds,
         n_jobs=n_jobs,
         seed_features_path=seed_features,
-        rescore_top_k=rescore_top_k,
-        tune_cv_method=tune_cv_method,
+        top_candidates=top_candidates,
+        tune_presence_fraction=tune_presence_fraction,
         tune_background_fraction=tune_background_fraction,
+        tune_min_presence=tune_min_presence,
+        tune_min_background=tune_min_background,
         tune_prune_folds=tune_prune_folds,
     )
     

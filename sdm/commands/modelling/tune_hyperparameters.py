@@ -65,9 +65,10 @@ from sdm.commands.modelling.utils import get_model_id
 from sdm.models.maxent.folds import (
     FoldMethod,
     FoldParams,
-    assign_spatial_block_folds,
+    fold_assignments_frame,
     resolve_fold_params,
 )
+from sdm.occurrence.subsample import stratified_subsample
 from sklearn.metrics import roc_auc_score
 
 logger = logging.getLogger(__name__)
@@ -263,51 +264,40 @@ def trial_params_to_config(
     return maxent_params, selected
 
 
-def rescore_top_trials(
+def top_candidates_table(
     study: optuna.Study,
-    species_training_gdf: gpd.GeoDataFrame,
     base_model_config: ModelConfig,
-    available_features: List[str],
-    latin_name: str,
-    activity_type: str,
-    top_k: int,
-    fold_params: Optional[FoldParams] = None,
+    roster: List[str],
+    top_n: int = 10,
 ) -> pd.DataFrame:
-    """Re-score the top ``top_k`` complete trials on the training pipeline's CV folds.
-
-    Uses ``resolve_fold_params(base_model_config.cv)`` (10 km blocks, 5 folds by
-    default) so scores match ``sdm train``.
-    """
-    folds = fold_params or resolve_fold_params(
-        base_model_config.cv, model_seed=base_model_config.seed
-    )
+    """Top ``top_n`` complete trials with score, fold spread, layers and settings."""
     complete = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
-    top = sorted(complete, key=lambda t: t.value, reverse=True)[:top_k]
     rows = []
-    for trial in top:
-        maxent_params, features = trial_params_to_config(
-            trial.params, base_model_config, available_features
-        )
-        data = TrainingData(
-            latin_name=latin_name,
-            activity_type=ActivityType(activity_type),
-            occurrence=species_training_gdf,
-            maxent_config=DefaultMaxentConfig(**maxent_params),
-            model_features=features,
-        )
-        block_mean, block_std = eval_model(
-            data, n_cv_folds=folds.n_folds, seed=base_model_config.seed, fold_params=folds
-        )
+    for rank, trial in enumerate(
+        sorted(complete, key=lambda t: t.value, reverse=True)[:top_n], 1
+    ):
+        maxent, features = trial_params_to_config(trial.params, base_model_config, roster)
         rows.append(
             {
+                "rank": rank,
                 "trial_number": trial.number,
                 "objective": trial.value,
-                "tuning_mean_auc": trial.user_attrs.get("mean_auc"),
-                "tuning_std_auc": trial.user_attrs.get("std_auc"),
-                "block_mean_auc": block_mean,
-                "block_std_auc": block_std,
-                "block_cv": str(folds.to_metadata()),
+                "mean_auc": trial.user_attrs.get("mean_auc"),
+                "std_auc": trial.user_attrs.get("std_auc"),
                 "n_features": len(features),
+                "layers": ";".join(features),
+                "feature_types": ";".join(maxent["feature_types"]),
+                **{
+                    k: maxent[k]
+                    for k in [
+                        "beta_multiplier",
+                        "beta_lqp",
+                        "beta_hinge",
+                        "beta_threshold",
+                        "beta_categorical",
+                        "n_hinge_features",
+                    ]
+                },
             }
         )
     return pd.DataFrame(rows)
@@ -317,47 +307,32 @@ def prepare_tuning_folds(
     training_gdf: gpd.GeoDataFrame,
     base_model_config: ModelConfig,
     *,
-    cv_method: str = "blocks",
+    presence_fraction: float = 1.0,
     background_fraction: float = 1.0,
-) -> Tuple[gpd.GeoDataFrame, Optional[np.ndarray]]:
-    """Fix the tuning data and folds once per model, before any trial runs.
+    min_presence: int = 0,
+    min_background: int = 0,
+) -> Tuple[gpd.GeoDataFrame, np.ndarray, FoldParams]:
+    """Fix tuning rows and folds once per model, before any trial runs.
 
-    ``blocks``: fold labels come from ``assign_spatial_block_folds`` on the full
-    data with the training pipeline's settings (model config ``cv``), so tuning
-    folds match ``sdm train``. ``kmeans``: returns ``None`` labels (old path).
-
-    ``background_fraction`` < 1 keeps every presence and a seeded random share
-    of background points, drawn within each fold so fold balance is kept.
+    Folds come from the training pipeline's own settings (model config ``cv``;
+    10 km blocks, 5 folds by default) via ``fold_assignments_frame`` on the full
+    data, so tuning and ``sdm train`` share one fold assignment. Rows are then
+    subsampled with ``stratified_subsample`` within each fold.
     """
-    if not 0 < background_fraction <= 1:
-        raise ValueError("background_fraction must be in (0, 1]")
-    labels: Optional[np.ndarray] = None
-    if FoldMethod(cv_method) is FoldMethod.BLOCKS:
-        folds = resolve_fold_params(
-            base_model_config.cv, model_seed=base_model_config.seed, method_override="blocks"
-        )
-        labels = assign_spatial_block_folds(
-            training_gdf,
-            n_folds=folds.n_folds,
-            block_size_m=folds.block_size_m,
-            n_tries=folds.block_n_tries,
-            random_state=folds.random_state,
-        )
-    elif FoldMethod(cv_method) is not FoldMethod.KMEANS:
-        raise ValueError(f"Unsupported tuning cv method: {cv_method}")
-    if background_fraction >= 1:
-        return training_gdf, labels
-    strata = pd.Series(labels if labels is not None else 0, index=training_gdf.index)
-    is_bg = training_gdf["class"].to_numpy() == 0
-    keep_bg = (
-        strata[is_bg]
-        .groupby(strata[is_bg])
-        .sample(frac=background_fraction, random_state=base_model_config.seed)
-        .index
+    folds = resolve_fold_params(base_model_config.cv, model_seed=base_model_config.seed)
+    if folds.method is FoldMethod.BUFFERED_LOO:
+        raise ValueError("Tuning needs one fold per point; buffered_loo is not supported")
+    labels = fold_assignments_frame(training_gdf, folds)["fold"].to_numpy()
+    keep = stratified_subsample(
+        training_gdf,
+        labels,
+        presence_fraction=presence_fraction,
+        background_fraction=background_fraction,
+        min_presence=min_presence,
+        min_background=min_background,
+        random_state=base_model_config.seed,
     )
-    mask = ~is_bg | training_gdf.index.isin(keep_bg)
-    subset = training_gdf.loc[mask]
-    return subset, (labels[mask] if labels is not None else None)
+    return training_gdf.iloc[keep], labels[keep], folds
 
 
 def precompute_correlation_matrix(
@@ -516,17 +491,12 @@ def pick_features(
 def eval_model(
     data: TrainingData,
     max_threads_per_model: int = 1,
-    n_cv_folds: int = 3,
     *,
     seed: int,
-    fold_params: Optional[FoldParams] = None,
-    fold_labels: Optional[np.ndarray] = None,
+    fold_labels: np.ndarray,
     on_fold=None,
 ) -> Tuple[float, float]:
-    """Evaluate a model and return CV scores and stability for tuning.
-
-    ``fold_params`` defaults to None (elapid KMeans folds, the tuning baseline).
-    """
+    """CV mean and std AUC on fixed fold labels (from ``prepare_tuning_folds``)."""
     apply_training_seed(seed)
     # Create model
     model = create_maxent_pipeline(
@@ -552,20 +522,9 @@ def eval_model(
     _cv_models, cv_scores, _ = cross_validate_maxent_model(
         model=model,
         occurrence_gdf=data.occurrence,
-        n_folds=n_cv_folds,
         metric_fn=roc_auc_score,
         feature_columns=data.model_features,  # Explicitly pass feature columns
-        random_state=fold_params.random_state if fold_params else seed,
-        **(
-            {
-                "fold_method": fold_params.method,
-                "block_size_m": fold_params.block_size_m,
-                "block_n_tries": fold_params.block_n_tries,
-                "buffer_m": fold_params.buffer_m,
-            }
-            if fold_params
-            else {}
-        ),
+        random_state=seed,
         fold_labels=fold_labels,
         on_fold=on_fold,
     )
@@ -584,7 +543,6 @@ def objective_train_model(
     latin_name: str,
     activity_type: str,
     min_presence: int,
-    n_cv_folds: int = 3,
     stability_penalty: float = 0.05,
     feature_penalty: float = 0.0005,
     target_features : int = 15,
@@ -604,7 +562,7 @@ def objective_train_model(
         latin_name: Species latin name.
         activity_type: Activity type.
         min_presence: Minimum presence records required.
-        n_cv_folds: Number of CV folds.
+        fold_labels: Fixed fold id per row (``prepare_tuning_folds``).
         stability_penalty: Penalty for high standard deviation.
         feature_penalty: Penalty for high number of features.
         correlation_penalty: Penalty multiplier for feature correlation.
@@ -676,7 +634,6 @@ def objective_train_model(
     mean_auc, std_auc = eval_model(
         data=training_data,
         max_threads_per_model=1,  # Use 1 thread per model for tuning
-        n_cv_folds=n_cv_folds,
         seed=base_model_config.seed,
         fold_labels=fold_labels,
         on_fold=report_fold if prune_per_fold else None,
@@ -714,7 +671,7 @@ def objective_train_model(
     trial.set_user_attr("mean_auc", mean_auc)
     trial.set_user_attr("std_auc", std_auc)
     trial.set_user_attr("n_features", n_features)
-    trial.set_user_attr("n_cv_folds", n_cv_folds)
+    trial.set_user_attr("n_cv_folds", int(len(np.unique(fold_labels[fold_labels >= 0]))))
     trial.set_user_attr("mean_abs_correlation", mean_abs_correlation)
     trial.set_user_attr("correlation_penalty_score", correlation_penalty_score)
     
@@ -1142,7 +1099,6 @@ def tune_hyperparameters(
     study_name: Optional[str] = None,
     storage: Optional[str] = None,
     n_jobs: int = -1,
-    n_cv_folds: int = 3,
     verbose: bool = False,
     # Background point generation parameters (fixed, not tuned)
     n_background_points: int = 4000,
@@ -1156,9 +1112,11 @@ def tune_hyperparameters(
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,
     seed_features_path: Optional[Path] = None,
-    rescore_top_k: int = 0,
-    tune_cv_method: str = "blocks",
+    top_candidates: int = 10,
+    tune_presence_fraction: float = 1.0,
     tune_background_fraction: float = 1.0,
+    tune_min_presence: int = 100,
+    tune_min_background: int = 1000,
     tune_prune_folds: bool = False,
 ) -> Optional[optuna.Study]:
     """Run hyperparameter tuning using Optuna with the new modular approach.
@@ -1185,7 +1143,6 @@ def tune_hyperparameters(
         study_name: Name for Optuna study (optional)
         storage: Optuna storage URL (optional, for distributed tuning)
         n_jobs: Number of parallel jobs for running trials (default: 1, sequential)
-        n_cv_folds: Number of CV folds for tuning (default: 2, faster than 3)
         verbose: Enable verbose logging
         n_background_points: Number of background points per activity (fixed)
         background_method: Background generation method (fixed)
@@ -1196,7 +1153,6 @@ def tune_hyperparameters(
         d_min: Minimum distance for background filtering (fixed)
         d_max: Maximum distance for background filtering (fixed)
         sample_weight_n_neighbors: Number of neighbors for sample weighting (fixed)
-        n_cv_folds: Number of CV folds for evaluation (aligned with training)
         n_jobs: Number of parallel trials (None = sequential, 1 = sequential, >1 = parallel)
         
     Returns:
@@ -1412,11 +1368,17 @@ def tune_hyperparameters(
             )
             
             # Fix tuning folds and background subset once so every trial sees the same data.
-            tuning_gdf, tuning_fold_labels = prepare_tuning_folds(
+            tuning_gdf, tuning_fold_labels, tuning_folds = prepare_tuning_folds(
                 species_training_gdf,
                 base_model_config,
-                cv_method=tune_cv_method,
+                presence_fraction=tune_presence_fraction,
                 background_fraction=tune_background_fraction,
+                min_presence=tune_min_presence,
+                min_background=tune_min_background,
+            )
+            logger.info(
+                f"Tuning rows: {int((tuning_gdf['class'] == 1).sum())} presence, "
+                f"{int((tuning_gdf['class'] == 0).sum())} background"
             )
 
             # Precompute correlation matrix once for this species-activity combination
@@ -1438,7 +1400,6 @@ def tune_hyperparameters(
                     latin_name=latin_name,
                     activity_type=activity_type,
                     min_presence=base_model_config.sampling.min_presence,
-                    n_cv_folds=n_cv_folds,
                     stability_penalty=stability_penalty,
                     feature_penalty=feature_penalty,
                     target_features=target_features,
@@ -1462,7 +1423,7 @@ def tune_hyperparameters(
 
             # Run optimization (Optuna will handle initialization with random trials)
             n_jobs_optuna = n_jobs if n_jobs is not None else 1
-            logger.info(f"Starting optimization with {n_trials} trials (n_jobs={n_jobs_optuna}, n_cv_folds={n_cv_folds})...")
+            logger.info(f"Starting optimization with {n_trials} trials (n_jobs={n_jobs_optuna}, folds={tuning_folds.to_metadata()})...")
             study.optimize(
                 objective_fn,
                 n_trials=n_trials,
@@ -1515,17 +1476,10 @@ def tune_hyperparameters(
                     target_features=target_features,
                     correlation_penalty=correlation_penalty,
                 )
-                if rescore_top_k > 0:
-                    rescore_df = rescore_top_trials(
-                        study,
-                        species_training_gdf,
-                        base_model_config,
-                        available_features,
-                        latin_name,
-                        activity_type,
-                        top_k=rescore_top_k,
-                    )
-                    rescore_df.to_csv(combination_dir / "block_rescore.csv", index=False)
+                if top_candidates > 0:
+                    top_candidates_table(
+                        study, base_model_config, available_features, top_n=top_candidates
+                    ).to_csv(combination_dir / "top_candidates.csv", index=False)
                 # Store results for this study
                 best_trial = study.best_trial
                 mean_cv_auc = best_trial.user_attrs.get("mean_auc")
@@ -1552,7 +1506,7 @@ def tune_hyperparameters(
                         feature_penalty=feature_penalty,
                         correlation_penalty=correlation_penalty,
                         min_presence=base_model_config.sampling.min_presence,
-                        n_cv_folds=n_cv_folds,
+                        n_cv_folds=tuning_folds.n_folds,
                         grid_size_m=grid_size_m,
                         n_background_points=n_background_points,
                         background_method=background_method.value,
