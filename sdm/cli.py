@@ -941,13 +941,48 @@ def tune(
         help="Optuna storage URL for distributed tuning (optional).",
     ),
     verbose: bool = False,
-    n_cv_folds: int = typer.Option(
-        3,
-        help="Number of CV folds for evaluation (reduced from 3 for faster tuning).",
-    ),
     n_jobs: int = typer.Option(
         -1,
         help="Number of parallel trials (None = sequential, >1 = parallel).",
+    ),
+    seed_features: Optional[Path] = typer.Option(
+        None,
+        "--seed-features",
+        help=(
+            "YAML/JSON file mapping model id (species_activity) to a list of layer "
+            "names. Enqueues one starting trial per model with only those layers on "
+            "and default MaxEnt settings. Off by default."
+        ),
+    ),
+    top_candidates: int = typer.Option(
+        10,
+        "--top-candidates",
+        help="Write top_candidates.csv per model with the best N trials (0 = off).",
+    ),
+    tune_presence_fraction: float = typer.Option(
+        1.0,
+        "--tune-presence-fraction",
+        help="Share of presences used for tuning (models with few records keep all; see --tune-min-presence).",
+    ),
+    tune_background_fraction: float = typer.Option(
+        1.0,
+        "--tune-background-fraction",
+        help="Share of background points used for tuning (see --tune-min-background).",
+    ),
+    tune_min_presence: int = typer.Option(
+        100,
+        "--tune-min-presence",
+        help="Never subsample presences below this count.",
+    ),
+    tune_min_background: int = typer.Option(
+        1000,
+        "--tune-min-background",
+        help="Never subsample background points below this count.",
+    ),
+    tune_prune_folds: bool = typer.Option(
+        False,
+        "--tune-prune-folds/--no-tune-prune-folds",
+        help="Report AUC after each fold so Optuna's MedianPruner can stop weak trials early.",
     ),
 ) -> None:
     """Tune hyperparameters for SDM models using Optuna.
@@ -973,8 +1008,14 @@ def tune(
         study_name=study_name,
         storage=storage,
         verbose=verbose,
-        n_cv_folds=n_cv_folds,
         n_jobs=n_jobs,
+        seed_features_path=seed_features,
+        top_candidates=top_candidates,
+        tune_presence_fraction=tune_presence_fraction,
+        tune_background_fraction=tune_background_fraction,
+        tune_min_presence=tune_min_presence,
+        tune_min_background=tune_min_background,
+        tune_prune_folds=tune_prune_folds,
     )
     
     logging.info(f"Tuning complete! Best configs written to {output_dir}")
