@@ -89,6 +89,10 @@ package.json   # schema_version 1, ordered feature_names, metrics, …
 sdm config
 ```
 
+Default trainer is elapid MaxEnt (`model.type: maxent`). Experimental joint
+DeepMaxent needs PyTorch: `uv sync --extra dl`, then `model.type: deepmaxent`
+(see [docs/modelling/deepmaxent.md](docs/modelling/deepmaxent.md)).
+
 ## MLflow run tracking
 
 Training and tuning can log parameters, held-out scores, cut-offs, plots, and
