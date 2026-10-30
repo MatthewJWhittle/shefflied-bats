@@ -46,6 +46,7 @@ def build_deepmaxent_module(
                     "hidden_size": params.hidden_size,
                     "n_hidden_layers": params.n_hidden_layers,
                     "dropout": params.dropout,
+                    "input_dropout": params.input_dropout,
                     "learning_rate": params.learning_rate,
                     "weight_decay": params.weight_decay,
                     "epsilon": params.epsilon,
@@ -63,6 +64,7 @@ def build_deepmaxent_module(
                 hidden_size=params.hidden_size,
                 n_hidden_layers=params.n_hidden_layers,
                 dropout=params.dropout,
+                input_dropout=params.input_dropout,
             )
             self._species_weights = None
             if species_weights is not None:

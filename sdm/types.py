@@ -84,7 +84,9 @@ class DeepMaxentConfigModel(BaseModel):
     device: str = "auto"  # auto | mps | cuda | cpu
     hidden_size: int = 250
     n_hidden_layers: int = 2
-    dropout: float = 0.0  # 0 = off
+    dropout: float = 0.0  # 0 = off (hidden activations)
+    # Drop input feature channels during training only; 0 = off (default).
+    input_dropout: float = 0.0
     learning_rate: float = 2e-4
     batch_size: int = 250
     weight_decay: float = 3e-4

@@ -36,6 +36,7 @@ def fit_one_seed_manual(
         hidden_size=params.hidden_size,
         n_hidden_layers=params.n_hidden_layers,
         dropout=params.dropout,
+        input_dropout=params.input_dropout,
     ).to(device)
     optimiser = torch.optim.Adam(
         model.parameters(),
@@ -95,6 +96,7 @@ def predict_logits_from_state(
         hidden_size=params.hidden_size,
         n_hidden_layers=params.n_hidden_layers,
         dropout=params.dropout,
+        input_dropout=params.input_dropout,
     )
     model.load_state_dict(state)
     model.to(device)

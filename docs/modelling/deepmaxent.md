@@ -24,7 +24,8 @@ model:
     device: auto   # MPS → CUDA → CPU; or mps / cuda / cpu
     hidden_size: 250   # e.g. 512
     n_hidden_layers: 2 # e.g. 4 (residual skips between hidden layers)
-    dropout: 0.0       # 0 = off
+    dropout: 0.0       # hidden activations; 0 = off
+    input_dropout: 0.0 # input feature channels in train mode only; 0 = off
     learning_rate: 0.0002
     batch_size: 250
     weight_decay: 0.0003
@@ -66,7 +67,8 @@ is Lightning `accelerator="auto"` (CPU here; MPS on Apple Silicon when available
 ## Design sketch
 
 - One shared MLP (2×250 ReLU by default, residual skips, BatchNorm over sites,
-  optional dropout) with **one logit per model** (roost and in-flight as separate
+  optional hidden `dropout` and optional `input_dropout` on feature channels in
+  train mode only) with **one logit per model** (roost and in-flight as separate
   outputs). Larger nets (e.g. 512 units × 4 layers) are config-only.
 - Loss: batched DeepMaxent (paper eq. 4) — per-species softmax over sites in the
   mini-batch, occurrence-normalised weights, epsilon when a species is absent.
@@ -83,10 +85,28 @@ is Lightning `accelerator="auto"` (CPU here; MPS on Apple Silicon when available
   replacement if rare), remainder background. Keeps batch size and steps/epoch
   unchanged. Oversampled presence sites also enter other outputs' softmax
   denominators as non-presences — eq. 4 already handles that; no extra correction.
+- `input_dropout` (**default 0 / off**): drops input feature channels during
+  training only (`nn.Dropout`; inactive at predict / eval).
+- After each DeepMaxent train, response curves (sklearn average PD) are written
+  under `{run}/{model_id}/partial_dependence/` as `pd__{feature}.csv` + `.png`
+  for every output model. Artifacts stay in the run folder — never commit them
+  (licensed site data).
 
 ## Helper scripts (real data; not CI)
 
 - `scripts/deepmaxent_compare_scores.py` — MaxEnt vs DeepMaxent AUC; flags five rarest
-- `scripts/deepmaxent_partial_dependence.py` — response / PD curves per feature
+- `scripts/deepmaxent_partial_dependence.py` — re-run PD for one model (train already writes them)
 - `scripts/deepmaxent_seed_spread.py` — seed-spread workflow notes
 - `scripts/deepmaxent_plot_history.py` — loss / AUC vs epoch from history CSV
+
+### Three-seed comparison (real data; Matt)
+
+```bash
+uv sync --extra dl
+# model_config.yml: model.type: deepmaxent  and  deepmaxent.n_seeds: 3
+uv run sdm train
+uv run python scripts/deepmaxent_compare_scores.py \
+  --maxent-run data/sdm_models/runs/<maxent-run-id> \
+  --deepmaxent-run data/sdm_models/runs/<deepmaxent-run-id> \
+  --out deepmaxent_vs_maxent_scores.csv
+```

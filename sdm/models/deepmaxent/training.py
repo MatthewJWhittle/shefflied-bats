@@ -320,6 +320,7 @@ def fit_ensemble(
         hidden_size=params.hidden_size,
         n_hidden_layers=params.n_hidden_layers,
         dropout=params.dropout,
+        input_dropout=params.input_dropout,
         transform=params.transform,
         device="cpu" if str(device).startswith("cpu") else str(device).split(":")[0],
         scaler_mean=np.asarray(scaler.mean_, dtype=float),

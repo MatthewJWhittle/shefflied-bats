@@ -16,6 +16,8 @@ class DeepMaxentParams:
     hidden_size: int = 250
     n_hidden_layers: int = 2
     dropout: float = 0.0
+    # Feature-channel dropout on inputs during train() only; 0 = off.
+    input_dropout: float = 0.0
     learning_rate: float = 2e-4
     batch_size: int = 250
     weight_decay: float = 3e-4
@@ -51,6 +53,7 @@ def resolve_deepmaxent_params(
         hidden_size=section.hidden_size,
         n_hidden_layers=section.n_hidden_layers,
         dropout=section.dropout,
+        input_dropout=section.input_dropout,
         learning_rate=section.learning_rate,
         batch_size=section.batch_size,
         weight_decay=section.weight_decay,

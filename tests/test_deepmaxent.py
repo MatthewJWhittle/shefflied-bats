@@ -28,6 +28,10 @@ from sdm.models.deepmaxent.manual_fit import (
     predict_logits_from_state,
 )
 from sdm.models.deepmaxent.network import build_residual_mlp
+from sdm.models.deepmaxent.partial_dependence import (
+    PD_SUBDIR,
+    write_run_partial_dependence,
+)
 from sdm.models.deepmaxent.sampling import (
     BalancedPresenceBatchSampler,
     build_train_dataloader,
@@ -37,6 +41,7 @@ from sdm.models.deepmaxent.training import (
     fit_ensemble,
     train_deepmaxent_joint,
 )
+from sdm.commands.modelling.utils import get_model_id
 from sdm.models.maxent.folds import FoldMethod, FoldParams
 from sdm.models.maxent.maxent_model import (
     DefaultMaxentConfig,
@@ -294,6 +299,41 @@ def test_dropout_default_off_and_forward_runs():
     assert y_d.shape == (5, 2)
     assert model0.dropout.p == 0.0
     assert model_d.dropout.p == 0.3
+    assert model0.input_dropout.p == 0.0
+
+
+def test_input_dropout_default_off_active_when_set():
+    """input_dropout is off by default; when set, trains only (eval is deterministic)."""
+    cfg = load_model_config()
+    assert cfg.deepmaxent is not None
+    assert cfg.deepmaxent.input_dropout == 0.0
+    params = resolve_deepmaxent_params(cfg)
+    assert params.input_dropout == 0.0
+
+    torch.manual_seed(0)
+    x = torch.randn(32, 4)
+    model_off = build_residual_mlp(
+        4, 2, hidden_size=8, n_hidden_layers=2, dropout=0.0, input_dropout=0.0
+    )
+    model_on = build_residual_mlp(
+        4, 2, hidden_size=8, n_hidden_layers=2, dropout=0.0, input_dropout=0.5
+    )
+    assert model_off.input_dropout.p == 0.0
+    assert model_on.input_dropout.p == 0.5
+
+    model_on.train()
+    torch.manual_seed(1)
+    y_a = model_on(x).detach()
+    torch.manual_seed(2)
+    y_b = model_on(x).detach()
+    assert not torch.allclose(y_a, y_b), "train-mode input dropout should randomise"
+
+    model_on.eval()
+    torch.manual_seed(1)
+    y_e1 = model_on(x).detach()
+    torch.manual_seed(2)
+    y_e2 = model_on(x).detach()
+    assert torch.allclose(y_e1, y_e2), "eval-mode input dropout must be inactive"
 
 
 def test_large_network_512x4_fits_end_to_end(two_species_training_data):
@@ -475,3 +515,46 @@ def test_joint_cv_threshold_history_and_predict(
         )
     )
     assert json.loads(path.read_text())["device"] == "cpu"
+
+
+def test_run_writes_partial_dependence_csv_and_png(
+    two_species_training_data, tmp_path: Path
+):
+    """Every output model gets PD CSV+PNG under the run package folder."""
+    params = _tiny_params(epochs=4, n_seeds=1, batch_size=64)
+    fold_params = FoldParams(
+        method=FoldMethod.BLOCKS,
+        n_folds=2,
+        random_state=0,
+        block_size_m=500.0,
+        block_n_tries=50,
+    )
+    result = train_deepmaxent_joint(
+        two_species_training_data,
+        params,
+        fold_params=fold_params,
+        log_root=tmp_path / "lightning_logs",
+    )
+    run_dir = tmp_path / "run"
+    written = write_run_partial_dependence(
+        run_dir,
+        result.results,
+        result.joint_table.features,
+        feature_names=result.feature_names,
+        grid_resolution=11,
+    )
+    assert len(written) == len(result.output_names)
+    for tr in result.results:
+        mid = get_model_id([tr.latin_name, tr.activity_type])
+        pd_dir = run_dir / mid / PD_SUBDIR
+        assert pd_dir.is_dir()
+        for feat in result.feature_names:
+            csv_path = pd_dir / f"pd__{feat}.csv"
+            png_path = pd_dir / f"pd__{feat}.png"
+            assert csv_path.is_file(), csv_path
+            assert png_path.is_file(), png_path
+            table = pd.read_csv(csv_path)
+            assert feat in table.columns
+            assert "suitability" in table.columns
+            assert len(table) == 11
+            assert png_path.stat().st_size > 0

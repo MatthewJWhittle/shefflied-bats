@@ -33,6 +33,7 @@ class DeepMaxentEnsemble(BaseEstimator, ClassifierMixin):
         hidden_size: int = 250,
         n_hidden_layers: int = 2,
         dropout: float = 0.0,
+        input_dropout: float = 0.0,
         transform: str = "cloglog",
         device: str = "cpu",
         scaler_mean: Optional[np.ndarray] = None,
@@ -44,6 +45,7 @@ class DeepMaxentEnsemble(BaseEstimator, ClassifierMixin):
         self.hidden_size = hidden_size
         self.n_hidden_layers = n_hidden_layers
         self.dropout = float(dropout)
+        self.input_dropout = float(input_dropout)
         self.transform = transform
         self.device = device
         self.scaler_mean = scaler_mean
@@ -88,6 +90,7 @@ class DeepMaxentEnsemble(BaseEstimator, ClassifierMixin):
                 hidden_size=self.hidden_size,
                 n_hidden_layers=self.n_hidden_layers,
                 dropout=self.dropout,
+                input_dropout=self.input_dropout,
             )
             model.load_state_dict(state)
             model.to(self.device)
@@ -124,6 +127,9 @@ class DeepMaxentEnsemble(BaseEstimator, ClassifierMixin):
                 f"have {self.output_names}"
             ) from exc
 
+    def __sklearn_is_fitted__(self) -> bool:
+        return bool(self.state_dicts)
+
 
 class DeepMaxentOutputEstimator(BaseEstimator, ClassifierMixin):
     """Single-output view of a joint DeepMaxent ensemble for model packages."""
@@ -139,6 +145,21 @@ class DeepMaxentOutputEstimator(BaseEstimator, ClassifierMixin):
     @property
     def feature_names(self) -> List[str]:
         return list(self.ensemble.feature_names)
+
+    def __sklearn_is_fitted__(self) -> bool:
+        # Weights live on the shared ensemble; no separate fit() on this head.
+        return bool(getattr(self.ensemble, "state_dicts", None))
+
+    def fit(self, X, y=None):
+        """No-op fit for sklearn estimators that require ``fit`` (e.g. PD)."""
+        if not self.__sklearn_is_fitted__():
+            raise RuntimeError(
+                "DeepMaxentOutputEstimator has no ensemble weights; "
+                "train via train_deepmaxent_joint before predict/PD"
+            )
+        if not hasattr(self, "classes_"):
+            self.classes_ = np.array([0, 1])
+        return self
 
     def predict_proba(self, X) -> np.ndarray:
         idx = self.ensemble.output_index(self.output_name)

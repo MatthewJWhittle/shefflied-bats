@@ -1779,6 +1779,8 @@ def train_sdm_models(
     run_device: Optional[str] = None
 
     dm_history: Optional[Any] = None
+    dm_pd_background: Optional[Any] = None
+    dm_pd_feature_names: Optional[List[str]] = None
     if trainer == "deepmaxent":
         from sdm.models.deepmaxent.config import resolve_deepmaxent_params
         from sdm.models.deepmaxent.data import shared_feature_names
@@ -1814,6 +1816,8 @@ def train_sdm_models(
         models = dm_result.results
         run_device = dm_result.device
         dm_history = dm_result.training_history
+        dm_pd_background = dm_result.joint_table.features
+        dm_pd_feature_names = list(dm_result.feature_names)
         deepmaxent_meta = {
             **dm_params.to_metadata(),
             "device_resolved": dm_result.device,
@@ -1878,6 +1882,28 @@ def train_sdm_models(
             from sdm.models.deepmaxent.history import save_training_history
 
             save_training_history(dm_history, models_output_dir)
+        if (
+            trainer == "deepmaxent"
+            and deepmaxent_meta is not None
+            and dm_pd_background is not None
+            and dm_pd_feature_names is not None
+        ):
+            from sdm.models.deepmaxent.partial_dependence import (
+                pd_artifacts_relative,
+                write_run_partial_dependence,
+            )
+
+            # Response curves for every output into the run package (not git).
+            write_run_partial_dependence(
+                models_output_dir,
+                models,
+                dm_pd_background,
+                feature_names=dm_pd_feature_names,
+            )
+            deepmaxent_meta = {
+                **deepmaxent_meta,
+                **pd_artifacts_relative(dm_pd_feature_names),
+            }
         save_run_metadata(
             models_output_dir,
             seed=training_seed,
