@@ -110,3 +110,58 @@ def test_rescore_uses_training_block_folds():
     assert list(df["tuning_mean_auc"]) == [0.9, 0.5]
     assert np.isfinite(df["block_mean_auc"]).all()
     assert "blocks" in df["block_cv"].iloc[0]
+
+
+def test_prepare_tuning_folds_matches_training_blocks_and_thins_background():
+    from sdm.models.maxent.folds import assign_spatial_block_folds
+
+    gdf = _clustered_occurrence(n_clusters=6, background_per_cluster=40, seed=2)
+    cfg = _model_config()
+    full, labels = th.prepare_tuning_folds(gdf, cfg)
+    folds = resolve_fold_params(CvConfig(), model_seed=42)
+    expected = assign_spatial_block_folds(
+        gdf,
+        n_folds=folds.n_folds,
+        block_size_m=folds.block_size_m,
+        n_tries=folds.block_n_tries,
+        random_state=folds.random_state,
+    )
+    assert len(full) == len(gdf)
+    np.testing.assert_array_equal(labels, expected)
+
+    sub, sub_labels = th.prepare_tuning_folds(gdf, cfg, background_fraction=0.25)
+    again, _ = th.prepare_tuning_folds(gdf, cfg, background_fraction=0.25)
+    assert list(sub.index) == list(again.index)  # same subset every call
+    assert (sub["class"] == 1).sum() == (gdf["class"] == 1).sum()
+    for f in np.unique(expected):
+        n_bg_full = ((expected == f) & (gdf["class"].to_numpy() == 0)).sum()
+        n_bg_sub = ((sub_labels == f) & (sub["class"].to_numpy() == 0)).sum()
+        assert n_bg_sub == round(n_bg_full * 0.25)
+
+    old, old_labels = th.prepare_tuning_folds(gdf, cfg, cv_method="kmeans")
+    assert old_labels is None and len(old) == len(gdf)
+
+
+def test_per_fold_pruning_stops_weak_trial():
+    gdf = _clustered_occurrence(n_clusters=6, seed=3)
+    cfg = _model_config()
+    _, labels = th.prepare_tuning_folds(gdf, cfg)
+    seen = []
+    params = th.build_seed_trial_params(FEATURES, FEATURES)
+    params["feature_type_product"] = False
+    trial = optuna.trial.FixedTrial(params)
+    trial.report = lambda value, step: seen.append(step)
+    trial.should_prune = lambda: len(seen) >= 1
+    with pytest.raises(optuna.TrialPruned):
+        th.objective_train_model(
+            trial,
+            species_training_gdf=gdf,
+            base_model_config=cfg,
+            available_features=FEATURES,
+            latin_name="Myotis test",
+            activity_type="Roost",
+            min_presence=1,
+            fold_labels=labels,
+            prune_per_fold=True,
+        )
+    assert seen == [0]

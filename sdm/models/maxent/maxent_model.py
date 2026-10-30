@@ -204,6 +204,8 @@ def cross_validate_maxent_model(
     block_size_m: float = 10_000.0,
     block_n_tries: int = 500,
     buffer_m: float = 10_000.0,
+    fold_labels: Optional[np.ndarray] = None,
+    on_fold: Optional[Callable[[int, List[float]], None]] = None,
 ) -> Tuple[List[BaseEstimator], np.ndarray, Optional[pd.DataFrame]]:
     """
     Performs geographic cross-validation for a MaxEnt-like (scikit-learn compatible) model.
@@ -222,6 +224,11 @@ def cross_validate_maxent_model(
         block_size_m: Square block edge length in metres (blocks method).
         block_n_tries: Random block-to-fold assignment attempts (blocks method).
         buffer_m: Exclusion buffer in metres around each held-out presence (buffered_loo).
+        fold_labels: Optional precomputed fold id per row (e.g. block folds assigned
+            on a larger dataset). When given, splits come from these labels and
+            ``fold_method`` is not used to build folds.
+        on_fold: Optional callback ``(fold_id, scores_so_far)`` after each fold;
+            may raise (e.g. ``optuna.TrialPruned``) to stop early.
 
     Returns:
         Tuple of (trained_models_per_fold, metric_scores_per_fold, validation_scores).
@@ -243,7 +250,15 @@ def cross_validate_maxent_model(
     trained_models: List[Optional[BaseEstimator]] = []
     validation_rows: List[Dict[str, Any]] = []
 
-    splits = list(iter_fold_splits(occurrence_gdf, params))
+    if fold_labels is not None:
+        labels = np.asarray(fold_labels)
+        indices = np.arange(len(occurrence_gdf))
+        splits = [
+            (int(f), indices[labels != f], indices[labels == f])
+            for f in np.unique(labels[labels >= 0])
+        ]
+    else:
+        splits = list(iter_fold_splits(occurrence_gdf, params))
     n_splits = len(splits)
     logger.debug(
         "Starting %s cross-validation (%d fold(s))...",
@@ -343,6 +358,8 @@ def cross_validate_maxent_model(
             )
             fold_metrics.append(np.nan)
             trained_models.append(None)
+        if on_fold is not None:
+            on_fold(fold_id, list(fold_metrics))
 
     validation_scores: Optional[pd.DataFrame] = None
     if collect_validation_scores and validation_rows:

@@ -62,7 +62,12 @@ from sdm.utils.io import (
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import ModelConfig, VariablesConfig, TrainingData, BackgroundConfig
 from sdm.commands.modelling.utils import get_model_id
-from sdm.models.maxent.folds import FoldParams, resolve_fold_params
+from sdm.models.maxent.folds import (
+    FoldMethod,
+    FoldParams,
+    assign_spatial_block_folds,
+    resolve_fold_params,
+)
 from sklearn.metrics import roc_auc_score
 
 logger = logging.getLogger(__name__)
@@ -308,6 +313,53 @@ def rescore_top_trials(
     return pd.DataFrame(rows)
 
 
+def prepare_tuning_folds(
+    training_gdf: gpd.GeoDataFrame,
+    base_model_config: ModelConfig,
+    *,
+    cv_method: str = "blocks",
+    background_fraction: float = 1.0,
+) -> Tuple[gpd.GeoDataFrame, Optional[np.ndarray]]:
+    """Fix the tuning data and folds once per model, before any trial runs.
+
+    ``blocks``: fold labels come from ``assign_spatial_block_folds`` on the full
+    data with the training pipeline's settings (model config ``cv``), so tuning
+    folds match ``sdm train``. ``kmeans``: returns ``None`` labels (old path).
+
+    ``background_fraction`` < 1 keeps every presence and a seeded random share
+    of background points, drawn within each fold so fold balance is kept.
+    """
+    if not 0 < background_fraction <= 1:
+        raise ValueError("background_fraction must be in (0, 1]")
+    labels: Optional[np.ndarray] = None
+    if FoldMethod(cv_method) is FoldMethod.BLOCKS:
+        folds = resolve_fold_params(
+            base_model_config.cv, model_seed=base_model_config.seed, method_override="blocks"
+        )
+        labels = assign_spatial_block_folds(
+            training_gdf,
+            n_folds=folds.n_folds,
+            block_size_m=folds.block_size_m,
+            n_tries=folds.block_n_tries,
+            random_state=folds.random_state,
+        )
+    elif FoldMethod(cv_method) is not FoldMethod.KMEANS:
+        raise ValueError(f"Unsupported tuning cv method: {cv_method}")
+    if background_fraction >= 1:
+        return training_gdf, labels
+    strata = pd.Series(labels if labels is not None else 0, index=training_gdf.index)
+    is_bg = training_gdf["class"].to_numpy() == 0
+    keep_bg = (
+        strata[is_bg]
+        .groupby(strata[is_bg])
+        .sample(frac=background_fraction, random_state=base_model_config.seed)
+        .index
+    )
+    mask = ~is_bg | training_gdf.index.isin(keep_bg)
+    subset = training_gdf.loc[mask]
+    return subset, (labels[mask] if labels is not None else None)
+
+
 def precompute_correlation_matrix(
     training_gdf: gpd.GeoDataFrame,
     available_features: List[str],
@@ -468,6 +520,8 @@ def eval_model(
     *,
     seed: int,
     fold_params: Optional[FoldParams] = None,
+    fold_labels: Optional[np.ndarray] = None,
+    on_fold=None,
 ) -> Tuple[float, float]:
     """Evaluate a model and return CV scores and stability for tuning.
 
@@ -512,6 +566,8 @@ def eval_model(
             if fold_params
             else {}
         ),
+        fold_labels=fold_labels,
+        on_fold=on_fold,
     )
     
     # Get mean and std CV scores
@@ -534,6 +590,8 @@ def objective_train_model(
     target_features : int = 15,
     correlation_penalty: float = 0.02,
     precomputed_corr_matrix: Optional[pd.DataFrame] = None,
+    fold_labels: Optional[np.ndarray] = None,
+    prune_per_fold: bool = False,
 ) -> float:
     """Optuna objective for a single species–activity combination.
     
@@ -606,12 +664,22 @@ def objective_train_model(
         model_features=selected_features,
     )
     
+    def report_fold(fold_id: int, scores: List[float]) -> None:
+        # Optuna pruning: report running mean AUC after each fold.
+        if np.all(np.isnan(scores)):
+            return
+        trial.report(float(np.nanmean(scores)), step=fold_id)
+        if trial.should_prune():
+            raise optuna.TrialPruned(f"Pruned after fold {fold_id + 1}")
+
     # Train model and get scores
     mean_auc, std_auc = eval_model(
         data=training_data,
         max_threads_per_model=1,  # Use 1 thread per model for tuning
         n_cv_folds=n_cv_folds,
         seed=base_model_config.seed,
+        fold_labels=fold_labels,
+        on_fold=report_fold if prune_per_fold else None,
     )
     
     # If all CV folds failed (NaN scores), prune this trial
@@ -650,12 +718,11 @@ def objective_train_model(
     trial.set_user_attr("mean_abs_correlation", mean_abs_correlation)
     trial.set_user_attr("correlation_penalty_score", correlation_penalty_score)
     
-    # Report intermediate value for pruning
-    trial.report(objective_value, step=trial.number)
-    
-    # Handle pruning
-    if trial.should_prune():
-        raise optuna.TrialPruned()
+    if not prune_per_fold:
+        # Legacy behaviour: report the objective once and let the pruner decide.
+        trial.report(objective_value, step=trial.number)
+        if trial.should_prune():
+            raise optuna.TrialPruned()
     
     return objective_value
 
@@ -1090,6 +1157,9 @@ def tune_hyperparameters(
     sample_weight_n_neighbors: int = 10,
     seed_features_path: Optional[Path] = None,
     rescore_top_k: int = 0,
+    tune_cv_method: str = "blocks",
+    tune_background_fraction: float = 1.0,
+    tune_prune_folds: bool = False,
 ) -> Optional[optuna.Study]:
     """Run hyperparameter tuning using Optuna with the new modular approach.
     
@@ -1326,7 +1396,11 @@ def tune_hyperparameters(
             # Create study name for this combination
             study_name_combination = f"{study_name or 'sdm_tuning'}_{latin_name}_{activity_type}".replace(" ", "_")
             sampler = TPESampler(seed=base_model_config.seed)
-            pruner = MedianPruner(n_startup_trials=10, n_warmup_steps=10)
+            if tune_prune_folds:
+                # Per-fold reports: allow pruning from the first fold onward.
+                pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=0)
+            else:
+                pruner = MedianPruner(n_startup_trials=10, n_warmup_steps=10)
             
             study = optuna.create_study(
                 study_name=study_name_combination,
@@ -1337,6 +1411,14 @@ def tune_hyperparameters(
                 load_if_exists=True,
             )
             
+            # Fix tuning folds and background subset once so every trial sees the same data.
+            tuning_gdf, tuning_fold_labels = prepare_tuning_folds(
+                species_training_gdf,
+                base_model_config,
+                cv_method=tune_cv_method,
+                background_fraction=tune_background_fraction,
+            )
+
             # Precompute correlation matrix once for this species-activity combination
             logger.debug(f"Precomputing correlation matrix for {latin_name} - {activity_type}...")
             precomputed_corr_matrix = precompute_correlation_matrix(
@@ -1350,7 +1432,7 @@ def tune_hyperparameters(
             def objective_fn(trial: optuna.Trial):
                 return objective_train_model(
                     trial,
-                    species_training_gdf=species_training_gdf,
+                    species_training_gdf=tuning_gdf,
                     base_model_config=base_model_config,
                     available_features=available_features,
                     latin_name=latin_name,
@@ -1362,6 +1444,8 @@ def tune_hyperparameters(
                     target_features=target_features,
                     correlation_penalty=correlation_penalty,
                     precomputed_corr_matrix=precomputed_corr_matrix,
+                    fold_labels=tuning_fold_labels,
+                    prune_per_fold=tune_prune_folds,
                 )
             
             if seed_features_path is not None:

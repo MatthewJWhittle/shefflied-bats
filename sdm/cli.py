@@ -967,6 +967,28 @@ def tune(
             "block_rescore.csv next to the tuned configs. 0 = off."
         ),
     ),
+    tune_cv_method: str = typer.Option(
+        "blocks",
+        "--tune-cv-method",
+        help=(
+            "Folds used to score trials: 'blocks' (same 10 km block folds as "
+            "training, from model config cv) or 'kmeans' (old elapid "
+            "GeographicKFold with --n-cv-folds)."
+        ),
+    ),
+    tune_background_fraction: float = typer.Option(
+        1.0,
+        "--tune-background-fraction",
+        help=(
+            "Share of background points kept for tuning (all presences kept). "
+            "Drawn once per model with the config seed, within each fold."
+        ),
+    ),
+    tune_prune_folds: bool = typer.Option(
+        False,
+        "--tune-prune-folds/--no-tune-prune-folds",
+        help="Report AUC after each fold so Optuna's MedianPruner can stop weak trials early.",
+    ),
 ) -> None:
     """Tune hyperparameters for SDM models using Optuna.
     
@@ -995,6 +1017,9 @@ def tune(
         n_jobs=n_jobs,
         seed_features_path=seed_features,
         rescore_top_k=rescore_top_k,
+        tune_cv_method=tune_cv_method,
+        tune_background_fraction=tune_background_fraction,
+        tune_prune_folds=tune_prune_folds,
     )
     
     logging.info(f"Tuning complete! Best configs written to {output_dir}")
