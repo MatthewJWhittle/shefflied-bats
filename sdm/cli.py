@@ -949,6 +949,24 @@ def tune(
         -1,
         help="Number of parallel trials (None = sequential, >1 = parallel).",
     ),
+    seed_features: Optional[Path] = typer.Option(
+        None,
+        "--seed-features",
+        help=(
+            "YAML/JSON file mapping model id (species_activity) to a list of layer "
+            "names. Enqueues one starting trial per model with only those layers on "
+            "and default MaxEnt settings. Off by default."
+        ),
+    ),
+    rescore_top_k: int = typer.Option(
+        0,
+        "--rescore-top-k",
+        help=(
+            "Re-score the top N trials on the training pipeline's CV folds "
+            "(model config cv; 10 km blocks, 5 folds by default) and write "
+            "block_rescore.csv next to the tuned configs. 0 = off."
+        ),
+    ),
 ) -> None:
     """Tune hyperparameters for SDM models using Optuna.
     
@@ -975,6 +993,8 @@ def tune(
         verbose=verbose,
         n_cv_folds=n_cv_folds,
         n_jobs=n_jobs,
+        seed_features_path=seed_features,
+        rescore_top_k=rescore_top_k,
     )
     
     logging.info(f"Tuning complete! Best configs written to {output_dir}")

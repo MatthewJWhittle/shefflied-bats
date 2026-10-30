@@ -62,6 +62,7 @@ from sdm.utils.io import (
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import ModelConfig, VariablesConfig, TrainingData, BackgroundConfig
 from sdm.commands.modelling.utils import get_model_id
+from sdm.models.maxent.folds import FoldParams, resolve_fold_params
 from sklearn.metrics import roc_auc_score
 
 logger = logging.getLogger(__name__)
@@ -195,6 +196,116 @@ def get_default_trial_params(features: List[str]) -> Dict[str, Any]:
     params["n_hinge_features"] = 10
     params["n_threshold_features"] = 0
     return params
+
+
+def load_seed_features(path: Path) -> Dict[str, List[str]]:
+    """Load a YAML or JSON mapping of model id (``species_activity``) to layer names."""
+    with open(path) as f:
+        data = yaml.safe_load(f)  # JSON is valid YAML
+    if not isinstance(data, dict) or not all(
+        isinstance(v, list) and all(isinstance(x, str) for x in v) for v in data.values()
+    ):
+        raise ValueError(f"Seed features file {path} must map model ids to lists of layer names")
+    return {str(k): list(v) for k, v in data.items()}
+
+
+def build_seed_trial_params(
+    seed_features: List[str], available_features: List[str]
+) -> Dict[str, Any]:
+    """Default MaxEnt trial params with only ``seed_features`` switched on."""
+    unknown = sorted(set(seed_features) - set(available_features))
+    if unknown:
+        raise ValueError(f"Seed features not in available layers: {unknown}")
+    params = get_default_trial_params(available_features)
+    for name in available_features:
+        params[f"feature_{name}"] = name in seed_features
+    return params
+
+
+def trial_params_to_config(
+    params: Dict[str, Any],
+    base_model_config: ModelConfig,
+    roster: List[str],
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Turn Optuna trial params into (maxent config dict, selected features)."""
+    feature_types = sorted(
+        {"linear"}
+        | {
+            ft
+            for ft in ["linear", "hinge", "product", "quadratic"]
+            if params.get(f"feature_type_{ft}", False)
+        }
+    )
+    n_hinge_features = params.get("n_hinge_features", 10) if "hinge" in feature_types else 0
+    maxent_params = {
+        "feature_types": feature_types,
+        "beta_multiplier": params["beta_multiplier"],
+        "beta_lqp": params["beta_lqp"],
+        "beta_hinge": params["beta_hinge"],
+        "beta_threshold": params["beta_threshold"],
+        "beta_categorical": params["beta_categorical"],
+        "n_hinge_features": n_hinge_features,
+        "n_threshold_features": 0,
+        "clamp": True,
+        "tau": 0.5,
+        "transform": "cloglog",
+        "convergence_tolerance": base_model_config.maxent.convergence_tolerance,
+        "use_lambdas": base_model_config.maxent.use_lambdas,
+        "n_lambdas": base_model_config.maxent.n_lambdas,
+        "class_weights": base_model_config.maxent.class_weights,
+    }
+    selected = [f for f in roster if params.get(f"feature_{f}", False)]
+    return maxent_params, selected
+
+
+def rescore_top_trials(
+    study: optuna.Study,
+    species_training_gdf: gpd.GeoDataFrame,
+    base_model_config: ModelConfig,
+    available_features: List[str],
+    latin_name: str,
+    activity_type: str,
+    top_k: int,
+    fold_params: Optional[FoldParams] = None,
+) -> pd.DataFrame:
+    """Re-score the top ``top_k`` complete trials on the training pipeline's CV folds.
+
+    Uses ``resolve_fold_params(base_model_config.cv)`` (10 km blocks, 5 folds by
+    default) so scores match ``sdm train``.
+    """
+    folds = fold_params or resolve_fold_params(
+        base_model_config.cv, model_seed=base_model_config.seed
+    )
+    complete = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    top = sorted(complete, key=lambda t: t.value, reverse=True)[:top_k]
+    rows = []
+    for trial in top:
+        maxent_params, features = trial_params_to_config(
+            trial.params, base_model_config, available_features
+        )
+        data = TrainingData(
+            latin_name=latin_name,
+            activity_type=ActivityType(activity_type),
+            occurrence=species_training_gdf,
+            maxent_config=DefaultMaxentConfig(**maxent_params),
+            model_features=features,
+        )
+        block_mean, block_std = eval_model(
+            data, n_cv_folds=folds.n_folds, seed=base_model_config.seed, fold_params=folds
+        )
+        rows.append(
+            {
+                "trial_number": trial.number,
+                "objective": trial.value,
+                "tuning_mean_auc": trial.user_attrs.get("mean_auc"),
+                "tuning_std_auc": trial.user_attrs.get("std_auc"),
+                "block_mean_auc": block_mean,
+                "block_std_auc": block_std,
+                "block_cv": str(folds.to_metadata()),
+                "n_features": len(features),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def precompute_correlation_matrix(
@@ -356,8 +467,12 @@ def eval_model(
     n_cv_folds: int = 3,
     *,
     seed: int,
+    fold_params: Optional[FoldParams] = None,
 ) -> Tuple[float, float]:
-    """Evaluate a model and return CV scores and stability for tuning."""
+    """Evaluate a model and return CV scores and stability for tuning.
+
+    ``fold_params`` defaults to None (elapid KMeans folds, the tuning baseline).
+    """
     apply_training_seed(seed)
     # Create model
     model = create_maxent_pipeline(
@@ -386,7 +501,17 @@ def eval_model(
         n_folds=n_cv_folds,
         metric_fn=roc_auc_score,
         feature_columns=data.model_features,  # Explicitly pass feature columns
-        random_state=seed,
+        random_state=fold_params.random_state if fold_params else seed,
+        **(
+            {
+                "fold_method": fold_params.method,
+                "block_size_m": fold_params.block_size_m,
+                "block_n_tries": fold_params.block_n_tries,
+                "buffer_m": fold_params.buffer_m,
+            }
+            if fold_params
+            else {}
+        ),
     )
     
     # Get mean and std CV scores
@@ -568,57 +693,10 @@ def write_best_config(
     if mean_auc is not None:
         logger.info(f"Corresponding mean CV AUC: {mean_auc:.4f}")
     
-    # Extract feature types from trial parameters
-    available_feature_types = ["linear", "hinge", "product", "quadratic"]
-    selected_feature_types = []
-    
-    for feature_type in available_feature_types:
-        param_name = f"feature_type_{feature_type}"
-        if best_trial.params.get(param_name, False):
-            selected_feature_types.append(feature_type)
-    
-    # Ensure at least linear is included (should always be True, but handle edge case)
-    if "linear" not in selected_feature_types:
-        selected_feature_types.append("linear")
-    
-    feature_types = sorted(selected_feature_types)  # Sort for consistency
-    
-    # Get n_hinge_features (only if hinge was selected)
-    has_hinge = "hinge" in feature_types
-    if has_hinge:
-        n_hinge_features = best_trial.params.get("n_hinge_features", 10)
-    else:
-        n_hinge_features = 0
-    
-    # Threshold not in available feature types
-    n_threshold_features = 0
-    
-    # Fixed parameters (not tuned, consistent across all models)
-    clamp = True
-    tau = 0.5
-    transform = "cloglog"
-    
-    best_maxent_params = {
-        "feature_types": feature_types,
-        "beta_multiplier": best_trial.params["beta_multiplier"],
-        "beta_lqp": best_trial.params["beta_lqp"],
-        "beta_hinge": best_trial.params["beta_hinge"],
-        "beta_threshold": best_trial.params["beta_threshold"],
-        "beta_categorical": best_trial.params["beta_categorical"],
-        "n_hinge_features": n_hinge_features,
-        "n_threshold_features": n_threshold_features,
-        "clamp": clamp,
-        "tau": tau,
-        "transform": transform,
-    }
-    
-    # Reconstruct selected features from binary decisions
+    maxent_params, selected_features = trial_params_to_config(
+        best_trial.params, base_model_config, base_variables_config.variables
+    )
     roster = base_variables_config.variables
-    selected_features = []
-    for feature in roster:
-        param_name = f"feature_{feature}"
-        if param_name in best_trial.params and best_trial.params[param_name]:
-            selected_features.append(feature)
     
     # If no features were selected (shouldn't happen, but handle gracefully)
     if len(selected_features) == 0:
@@ -626,17 +704,7 @@ def write_best_config(
         selected_features = roster.copy()
     
     # Create model config - only include maxent section (what we're tuning)
-    model_config_dict = {
-        "model": {
-            "maxent": {
-                **best_maxent_params,
-                "convergence_tolerance": base_model_config.maxent.convergence_tolerance,
-                "use_lambdas": base_model_config.maxent.use_lambdas,
-                "n_lambdas": base_model_config.maxent.n_lambdas,
-                "class_weights": base_model_config.maxent.class_weights,
-            },
-        }
-    }
+    model_config_dict = {"model": {"maxent": maxent_params}}
     
     # Create variables config with just the selected features list
     # Simple structure: just a list of variables
@@ -1020,6 +1088,8 @@ def tune_hyperparameters(
     d_min: float = 500,
     d_max: float = np.inf,
     sample_weight_n_neighbors: int = 10,
+    seed_features_path: Optional[Path] = None,
+    rescore_top_k: int = 0,
 ) -> Optional[optuna.Study]:
     """Run hyperparameter tuning using Optuna with the new modular approach.
     
@@ -1294,6 +1364,18 @@ def tune_hyperparameters(
                     precomputed_corr_matrix=precomputed_corr_matrix,
                 )
             
+            if seed_features_path is not None:
+                model_id = get_model_id([latin_name, activity_type])
+                seed_map = load_seed_features(Path(seed_features_path))
+                if model_id in seed_map:
+                    logger.info(f"Enqueuing seed trial for {model_id}")
+                    study.enqueue_trial(
+                        build_seed_trial_params(seed_map[model_id], available_features),
+                        skip_if_exists=True,
+                    )
+                else:
+                    logger.info(f"No seed features for {model_id}")
+
             # Run optimization (Optuna will handle initialization with random trials)
             n_jobs_optuna = n_jobs if n_jobs is not None else 1
             logger.info(f"Starting optimization with {n_trials} trials (n_jobs={n_jobs_optuna}, n_cv_folds={n_cv_folds})...")
@@ -1349,6 +1431,17 @@ def tune_hyperparameters(
                     target_features=target_features,
                     correlation_penalty=correlation_penalty,
                 )
+                if rescore_top_k > 0:
+                    rescore_df = rescore_top_trials(
+                        study,
+                        species_training_gdf,
+                        base_model_config,
+                        available_features,
+                        latin_name,
+                        activity_type,
+                        top_k=rescore_top_k,
+                    )
+                    rescore_df.to_csv(combination_dir / "block_rescore.csv", index=False)
                 # Store results for this study
                 best_trial = study.best_trial
                 mean_cv_auc = best_trial.user_attrs.get("mean_auc")
