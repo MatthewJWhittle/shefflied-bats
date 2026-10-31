@@ -18,13 +18,14 @@ import geopandas as gpd
 from rasterio.crs import CRS
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.utils.io import load_boundary, load_pickled_model, load_project_config
+from sdm.utils.io import load_boundary, load_project_config
 from sdm.utils.model_runs import resolve_predict_models_dir
 from sdm.utils.prediction_publish import (
     publish_predictions_from_output_dir,
     resolve_prediction_publish_root,
 )
 from sdm.raster.io import cogify_geotiff_inplace, export_geotiff, load_environmental_variables
+from sdm.models.adapters import ModelAdapter, get_adapter, resolve_run_trainer
 from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.pipeline_features import pipeline_selected_feature_names
 from sdm.commands.data_preparation.raster.split_raster_by_band import split_raster_by_band
@@ -56,10 +57,15 @@ def filter_models(
         
     return filtered
 
-def load_model(model_path: Path) -> Any:
-    """Load a pickled model from disk (supports ``model_results.csv`` package paths)."""
+def load_model(
+    model_path: Path,
+    *,
+    adapter: Optional[ModelAdapter] = None,
+) -> Any:
+    """Load a model via the resolved adapter (default: MaxEnt pickle path)."""
+    resolved = adapter or get_adapter("maxent")
     try:
-        return load_pickled_model(model_path)
+        return resolved.load_predictor(model_path)
     except Exception as e:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise
@@ -167,6 +173,7 @@ def make_predictions(
     publish_root: Optional[str] = None,
     publish_label: Optional[str] = None,
     rebuild_metrics_path: Optional[Path] = None,
+    adapter: Optional[ModelAdapter] = None,
 ) -> Optional[List[str]]:
     """Apply trained models to make predictions.
 
@@ -179,6 +186,7 @@ def make_predictions(
     version). Requires ``split_files=True``.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_adapter = adapter or get_adapter(resolve_run_trainer(models_dir))
 
     with rio.open(ev_raster) as ev_ds:
         ev_crs = ev_ds.crs
@@ -192,7 +200,7 @@ def make_predictions(
         )
 
     # Load all models
-    logger.debug("Loading models...")
+    logger.debug("Loading models via adapter %s...", resolved_adapter.name)
     models: Dict[str, Any] = {}
     feature_names = None
 
@@ -203,7 +211,7 @@ def make_predictions(
         model_id = get_model_id([latin_name, activity_type])
 
         try:
-            model = load_model(model_path)
+            model = load_model(model_path, adapter=resolved_adapter)
 
             if feature_names is None and hasattr(model, "named_steps"):
                 if "feature_selection" in model.named_steps:

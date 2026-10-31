@@ -69,6 +69,7 @@ from sdm.types import (
     CvConfig,
 )
 from sdm.commands.modelling.utils import get_model_id
+from sdm.models.adapters import get_adapter
 from sdm.models.core.threshold import write_run_thresholds
 from sdm.models.maxent.folds import (
     DEFAULT_BUFFERED_LOO_WARN_ABOVE,
@@ -1006,6 +1007,8 @@ def save_models(
     models: List[TrainingResults],
     training_data: List[TrainingData],
     output_dir: Path,
+    *,
+    trainer: str = "maxent",
 ) -> Dict[str, Path]:
     """
     Save each successful model as a small on-disk package for training outputs and API upload.
@@ -1019,6 +1022,7 @@ def save_models(
         models: Training results (only entries with ``final_model`` are written).
         training_data: Parallel list of training data (matched by ``identifier()``).
         output_dir: Root directory for all model packages.
+        trainer: Adapter name written into ``package.json`` (default ``maxent``).
 
     Returns:
         Map from ``TrainingResults.identifier()`` to path of ``model.pkl`` inside the package
@@ -1053,6 +1057,7 @@ def save_models(
             "model_id": get_model_id([model.latin_name, model.activity_type]),
             "latin_name": model.latin_name,
             "activity_type": model.activity_type,
+            "trainer": trainer,
             "model_limited": bool(data.model_limited),
             "feature_names": list(data.model_features),
             "maxent_config": _maxent_config_to_dict(data.maxent_config),
@@ -1162,12 +1167,14 @@ def save_run_metadata(
     seed: int,
     model_config_path: str,
     fold_params: Optional[FoldParams] = None,
+    trainer: str = "maxent",
 ) -> Path:
     """Write run-level metadata (including the training seed) into the run folder."""
     metadata: Dict[str, Any] = {
         "schema_version": 1,
         "seed": seed,
         "model_config_path": model_config_path,
+        "trainer": trainer,
     }
     if fold_params is not None:
         metadata["cv"] = fold_params.to_metadata()
@@ -1421,15 +1428,16 @@ def train_models_with_setup(
     )
 
     logger.debug("Training %d models...", len(training_data))
-    models = train_models_parallel(
+    adapter = get_adapter("maxent")
+    bundle = adapter.train(
         training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
         seed=seed,
         fold_params=fold_params,
     )
-    
-    return models, training_data
+
+    return bundle.results, bundle.training_data
 
 
 def train_sdm_models(
@@ -1754,17 +1762,23 @@ def train_sdm_models(
         f"Generated training data for {len(training_data)} species-activity combinations"
     )
     
-    # Train models
-    logger.info(f"Training {len(training_data)} models...")
-    
-    models = train_models_parallel(
-        training_data=training_data,
+    # Train models via adapter registry (default maxent).
+    adapter = get_adapter(base_model_cfg.type)
+    logger.info(
+        "Training %d models with adapter %s...",
+        len(training_data),
+        adapter.name,
+    )
+
+    bundle = adapter.train(
+        training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
         seed=training_seed,
         fold_params=fold_params,
     )
-    
+    models = bundle.results
+
     # Prepare and save results
     logger.info("Saving results...")
     results_df = prepare_results_dataframe(models, training_data)
@@ -1772,7 +1786,12 @@ def train_sdm_models(
     logger.info("Writing model run to %s", run_uri)
 
     with model_run_write_context(run_uri) as (models_output_dir, written_uri):
-        model_paths = save_models(models, training_data, models_output_dir)
+        model_paths = save_models(
+            models,
+            training_data,
+            models_output_dir,
+            trainer=adapter.name,
+        )
 
         published_paths = {
             identifier: join_run_artifact(
@@ -1798,6 +1817,7 @@ def train_sdm_models(
             seed=training_seed,
             model_config_path=repo_relative_config_path(model_config_path),
             fold_params=fold_params,
+            trainer=adapter.name,
         )
 
     logger.info("Model run outputs: %s", written_uri)

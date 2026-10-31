@@ -98,7 +98,7 @@ def test_make_predictions_finalize_emits_cogs(
         }
     )
 
-    def fake_load_model(model_path: Path) -> SimpleNamespace:
+    def fake_load_model(model_path: Path, **_kwargs) -> SimpleNamespace:  # noqa: ARG001
         return SimpleNamespace(named_steps={})
 
     def fake_apply(models, raster_path, output_path, window_size=128):  # noqa: ARG001
@@ -157,7 +157,7 @@ def test_make_predictions_logs_crs_mismatch_warning(
         }
     )
 
-    def fake_load_model(model_path: Path) -> SimpleNamespace:  # noqa: ARG001
+    def fake_load_model(model_path: Path, **_kwargs) -> SimpleNamespace:  # noqa: ARG001
         return SimpleNamespace(named_steps={})
 
     def fake_apply(models, raster_path, output_path, window_size=128):  # noqa: ARG001

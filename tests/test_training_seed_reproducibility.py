@@ -163,6 +163,7 @@ def test_run_metadata_records_seed(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["seed"] == 42
     assert payload["model_config_path"] == "model_config.yml"
+    assert payload["trainer"] == "maxent"
 
 
 def test_run_metadata_records_fold_method(tmp_path: Path) -> None:
