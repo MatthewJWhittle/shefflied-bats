@@ -148,12 +148,22 @@ class CvConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     seed: int
+    # Modelling method key → ``sdm.models.adapters.ADAPTERS`` (default maxent).
+    type: str = "maxent"
     maxent: MaxentConfigModel
     sampling: Optional[SamplingConfig] = None
     background: Optional[BackgroundConfig] = None
     cv: Optional[CvConfig] = None
     # When true, publish no cut-off (no threshold value / thresholded map).
     model_limited: bool = False
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_model_type(cls, v: Any) -> str:
+        if v is None:
+            return "maxent"
+        name = str(v).strip().lower()
+        return name or "maxent"
 
 
 class SDMModel(BaseModel):
