@@ -90,6 +90,7 @@ Written by `sdm train`. Key columns:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `trainer` | string | Modelling method / adapter id (e.g. `maxent`). Written by `sdm train`; predict defaults missing values to `maxent` for pre-adapter packages. See [modelling/adapters.md](modelling/adapters.md). |
 | `maxent_config` | object | Serialised MaxEnt / elapid hyperparameters |
 | `metrics` | object | e.g. `mean_cv_auc`, `std_cv_auc`, `n_presence`, `n_background`, `training_success` → hsm-app **`metadata.card`** via adapter |
 | `model_limited` | boolean | When `true`, publish no suitability cut-off (`thresholds.json` has `threshold: null` and `no_cutoff_reason`) |
@@ -103,6 +104,7 @@ Written by `sdm train`. Key columns:
   "model_id": "nyctalus_noctula_roost",
   "latin_name": "Nyctalus noctula",
   "activity_type": "Roost",
+  "trainer": "maxent",
   "feature_names": ["terrain_dtm", "terrain_slope", "ceh_broadleaved_500m"],
   "metrics": { "mean_cv_auc": 0.82, "std_cv_auc": 0.04, "n_presence": 120, "n_background": 4000 },
   "artifacts": { "model_pickle": "model.pkl" }
