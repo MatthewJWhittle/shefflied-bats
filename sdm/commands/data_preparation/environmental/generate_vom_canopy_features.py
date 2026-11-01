@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -18,7 +19,7 @@ import dask
 import numpy as np
 import rioxarray  # noqa: F401  # registers .rio on xarray
 import xarray as xr
-from dask.array.overlap import overlap
+from dask.array.overlap import ensure_minimum_chunksize, overlap
 from rasterio.transform import from_origin
 
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
@@ -256,6 +257,43 @@ def _num_workers_for_lazy(lazy_height: xr.DataArray) -> int:
     return 8
 
 
+def _rechunk_for_overlap_halo(data: Any, halo_px: int) -> tuple[Any, tuple[int, ...], tuple[int, ...]]:
+    """Match ``overlap``'s ``ensure_minimum_chunksize`` so block grids agree.
+
+    Dask merges trailing slivers thinner than ``halo_px`` before building
+    overlapped blocks; iterating the pre-overlap chunk grid then IndexErrors.
+    """
+    halo = int(halo_px)
+    chunks0 = tuple(int(c) for c in data.chunks[0])
+    chunks1 = tuple(int(c) for c in data.chunks[1])
+    ensured0 = ensure_minimum_chunksize(halo, chunks0)
+    ensured1 = ensure_minimum_chunksize(halo, chunks1)
+    if (ensured0, ensured1) != (chunks0, chunks1):
+        logging.info(
+            "VOM canopy rechunk for halo=%d: y %s → %s; x %s → %s",
+            halo,
+            chunks0,
+            ensured0,
+            chunks1,
+            ensured1,
+        )
+        data = data.rechunk((ensured0, ensured1))
+    return data, ensured0, ensured1
+
+
+def _compute_chunk_task(task: Any) -> tuple[
+    dict[tuple[int, int], dict[str, float]], int, Optional[dict[str, Any]]
+]:
+    """Compute one chunk task; catch fetch/process failures as a failed chunk."""
+    try:
+        return dask.compute(task, scheduler="threads", num_workers=1)[0]
+    except Exception:
+        logging.exception(
+            "VOM canopy chunk fetch/compute failed; writing NaNs for chunk"
+        )
+        return {}, 1, None
+
+
 def _process_lazy_canopy_map_overlap(
     lazy_height: xr.DataArray,
     mosaic: dict[str, np.ndarray],
@@ -271,8 +309,8 @@ def _process_lazy_canopy_map_overlap(
 
     Each source tile is still fetched once (shared overlap graph). Fine-resolution
     height/masks never materialise for the whole AOI — only float32 100 m
-    summaries are accumulated. Per-chunk exceptions become NaN cells + a failure
-    count (abort threshold applied by the caller).
+    summaries are accumulated. Per-chunk fetch/process exceptions become NaN
+    cells + a failure count (abort threshold applied by the caller).
 
     Returns ``(n_chunks, n_failed, compare_stats)``.
     """
@@ -308,19 +346,25 @@ def _process_lazy_canopy_map_overlap(
             )
         return 1, 0, compare_stats
 
-    chy = tuple(int(c) for c in data.chunks[0])
-    chx = tuple(int(c) for c in data.chunks[1])
-    n_chunks = len(chy) * len(chx)
     y_coords = np.asarray(lazy_height.y.values)
     x_coords = np.asarray(lazy_height.x.values)
 
-    # float32 source + halo so neighbouring chunks share tile downloads.
+    # float32 source; rechunk so overlap's merged sliver grid matches our loop.
     if getattr(data, "dtype", None) != np.float32:
         data = data.astype(np.float32)
+    data, chy, chx = _rechunk_for_overlap_halo(data, int(halo_px))
+    n_chunks = len(chy) * len(chx)
+
     overlapped = overlap(
         data, depth={0: int(halo_px), 1: int(halo_px)}, boundary=0
     )
     delayed_blocks = overlapped.to_delayed()
+    if delayed_blocks.shape != (len(chy), len(chx)):
+        raise RuntimeError(
+            "VOM canopy overlap block grid mismatch: delayed "
+            f"{delayed_blocks.shape} vs chunks ({len(chy)}, {len(chx)})"
+        )
+
     tasks = []
     y0 = 0
     for iy, chy_i in enumerate(chy):
@@ -344,18 +388,24 @@ def _process_lazy_canopy_map_overlap(
         y0 += chy_i
 
     num_workers = _num_workers_for_lazy(lazy_height)
-    # Delayed list: threaded pool sized like tilearray's recommended fetch workers.
-    try:
-        results = list(
-            dask.compute(
-                *tasks, scheduler="threads", num_workers=num_workers
-            )
-        )
-    except Exception:
-        logging.exception(
-            "VOM canopy overlap compute failed for all chunks"
-        )
-        return n_chunks, n_chunks, None
+    # Per-task compute so one failed fetch/process does not abort siblings.
+    results: list[
+        tuple[dict[tuple[int, int], dict[str, float]], int, Optional[dict[str, Any]]]
+    ] = [({}, 1, None)] * len(tasks)
+    with ThreadPoolExecutor(max_workers=num_workers) as pool:
+        future_map = {
+            pool.submit(_compute_chunk_task, task): i
+            for i, task in enumerate(tasks)
+        }
+        for fut in as_completed(future_map):
+            idx = future_map[fut]
+            try:
+                results[idx] = fut.result()
+            except Exception:
+                logging.exception(
+                    "VOM canopy chunk worker crashed; writing NaNs for chunk"
+                )
+                results[idx] = ({}, 1, None)
 
     n_failed = 0
     compare_stats: Optional[dict[str, Any]] = None
@@ -411,12 +461,20 @@ async def fetch_and_process_vom_canopy(
     mosaic = _empty_summary_arrays(len(mosaic_y), len(mosaic_x))
     del miny_s
 
+    # Disk tile cache: per-chunk compute isolates fetch failures without
+    # re-downloading shared halo tiles (tilearray aborts sibling fetches in-session).
+    wcs_cache_dir = output_dir / ".wcs_tile_cache"
+    wcs_cache_dir.mkdir(parents=True, exist_ok=True)
+
     logging.info(
-        "VOM canopy: tilearray lazy fetch at %.0f m chunks=%s halo=%d px over %s",
+        "VOM canopy: tilearray lazy fetch at %.0f m chunks=%s halo=%d px "
+        "concurrency=%d over %s (cache=%s)",
         fine_res,
         wcs_tile_pixels,
         halo_px,
+        max_concurrent_downloads,
         grid_bounds,
+        wcs_cache_dir,
     )
     lazy = await asyncio.to_thread(
         fetch_wcs_dataarray,
@@ -426,6 +484,7 @@ async def fetch_and_process_vom_canopy(
         resolution_m=fine_res,
         chunk_size=wcs_tile_pixels,
         max_concurrent=max_concurrent_downloads,
+        cache_dir=wcs_cache_dir,
         compute=False,
     )
 

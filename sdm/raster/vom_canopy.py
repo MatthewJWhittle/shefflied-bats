@@ -424,11 +424,36 @@ def summarise_masks_by_coordinates(
             f"height shape {h.shape} != canopy shape {expected_shape}{where}"
         )
 
-    col = np.floor(xs[None, :] / res).astype(np.int64)
-    row = np.floor(ys[:, None] / res).astype(np.int64)
-    # Broadcast (ny, 1) × (1, nx) to (ny, nx) before flatten — otherwise
-    # keys/inv have ny (or nx) entries and bincount weights fail on real tiles.
-    row, col = np.broadcast_arrays(row, col)
+    if xs.ndim != 1 or ys.ndim != 1:
+        where = f" (tile {tile_id})" if tile_id else ""
+        raise ValueError(
+            f"x_coords/y_coords must be 1-D; got {xs.shape}, {ys.shape}{where}"
+        )
+    if (ys.size, xs.size) != expected_shape:
+        where = f" (tile {tile_id})" if tile_id else ""
+        raise ValueError(
+            f"coord lengths ({ys.size}, {xs.size}) != canopy shape "
+            f"{expected_shape}{where}"
+        )
+
+    # 1-D floor → cartesian cell index (avoids np.unique on Ny×Nx×2 keys).
+    row_1d = np.floor(ys / res).astype(np.int64)
+    col_1d = np.floor(xs / res).astype(np.int64)
+    urow, row_inv = np.unique(row_1d, return_inverse=True)
+    ucol, col_inv = np.unique(col_1d, return_inverse=True)
+    n_ucol = int(ucol.size)
+    n_cells = int(urow.size * n_ucol)
+    inv = (row_inv[:, None] * n_ucol + col_inv[None, :]).ravel()
+    uniq = np.column_stack(
+        (np.repeat(urow, n_ucol), np.tile(ucol, int(urow.size)))
+    )
+    n_pixels = int(np.prod(expected_shape))
+    if inv.size != n_pixels:
+        where = f" (tile {tile_id})" if tile_id else ""
+        raise ValueError(
+            "summarise_masks_by_coordinates: bincount index length "
+            f"{inv.size} != fine-grid size {n_pixels}{where}"
+        )
 
     linear_skel = skeletonize(np.asarray(masks.linear, dtype=bool))
     woodland = np.asarray(masks.woodland, dtype=bool)
@@ -442,8 +467,6 @@ def summarise_masks_by_coordinates(
     h_filled = np.where(np.isfinite(canopy_vals), canopy_vals, 0.0)
 
     shape_sources: dict[str, tuple[int, ...]] = {
-        "row": row.shape,
-        "col": col.shape,
         "height": h.shape,
         "canopy": canopy.shape,
         "woodland": woodland.shape,
@@ -464,35 +487,8 @@ def summarise_masks_by_coordinates(
     if mismatched:
         where = f" (tile {tile_id})" if tile_id else ""
         raise ValueError(
-            "summarise_masks_by_coordinates: after broadcast, row/col and all "
-            f"mask/weights arrays must share shape {expected_shape}; "
-            f"mismatched: {mismatched}{where}"
-        )
-
-    keys = np.stack([row.ravel(), col.ravel()], axis=1)
-    n_pixels = int(np.prod(expected_shape))
-    if keys.shape[0] != n_pixels:
-        where = f" (tile {tile_id})" if tile_id else ""
-        raise ValueError(
-            "summarise_masks_by_coordinates: flattened index length "
-            f"{keys.shape[0]} != fine-grid size {n_pixels} "
-            f"(shape {expected_shape}){where}"
-        )
-
-    uniq, inv = np.unique(keys, axis=0, return_inverse=True)
-    n_cells = uniq.shape[0]
-    if inv.size != n_pixels:
-        where = f" (tile {tile_id})" if tile_id else ""
-        raise ValueError(
-            "summarise_masks_by_coordinates: bincount index length "
-            f"{inv.size} != fine-grid size {n_pixels}{where}"
-        )
-    if inv.size and (int(inv.min()) < 0 or int(inv.max()) >= n_cells):
-        where = f" (tile {tile_id})" if tile_id else ""
-        raise ValueError(
-            "summarise_masks_by_coordinates: bincount indices outside "
-            f"[0, {n_cells}) (min={int(inv.min())}, max={int(inv.max())})"
-            f"{where}"
+            "summarise_masks_by_coordinates: all mask/weights arrays must "
+            f"share shape {expected_shape}; mismatched: {mismatched}{where}"
         )
 
     def _sum(mask: np.ndarray) -> np.ndarray:

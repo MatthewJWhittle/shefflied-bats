@@ -302,7 +302,7 @@ def test_summarise_masks_by_coordinates_mismatched_shapes_raise() -> None:
     masks = build_canopy_masks(height, resolution_m=1.0)
     x_coords = np.arange(16, dtype=np.float64) + 0.5
     y_coords = np.arange(8, dtype=np.float64) + 0.5
-    with pytest.raises(ValueError, match=r"mismatched:.*row.*\(8, 16\)") as exc:
+    with pytest.raises(ValueError, match=r"coord lengths \(8, 16\)") as exc:
         summarise_masks_by_coordinates(
             masks,
             height,
@@ -568,3 +568,104 @@ def test_per_chunk_failure_counted_without_aborting_siblings() -> None:
     assert np.isfinite(mosaic["vom_canopy_share"]).any()
     # Failed chunk leaves some cells NaN; successes fill others.
     assert np.isnan(mosaic["vom_canopy_share"]).any()
+
+
+def test_uneven_box_thin_edge_chunk_under_halo() -> None:
+    """Trailing sliver thinner than halo must not IndexError on overlap grid."""
+    import dask.array as da
+    import xarray as xr
+    from dask.array.overlap import ensure_minimum_chunksize
+
+    from sdm.commands.data_preparation.environmental.generate_vom_canopy_features import (
+        _empty_summary_arrays,
+        _process_lazy_canopy_map_overlap,
+        _summary_grid_coords,
+    )
+
+    halo = mask_overlap_halo_px(resolution_m=1.0)
+    assert halo == 33
+    # Two full chunks + thin remainders that overlap() merges (nblocks drops).
+    chunks = (100, 100, 20, 10)
+    ensured = ensure_minimum_chunksize(halo, chunks)
+    assert len(ensured) < len(chunks)
+    size = sum(chunks)
+    rng = np.random.default_rng(1)
+    height = (rng.random((size, size)) * 8.0).astype(np.float32)
+    height[50:150, 50:150] = 16.0
+    y = np.arange(size, dtype=np.float64) + 0.5
+    x = np.arange(size, dtype=np.float64) + 0.5
+    lazy = xr.DataArray(
+        da.from_array(height, chunks=(chunks, chunks)),
+        dims=("y", "x"),
+        coords={"y": y, "x": x},
+        attrs={"tilearray_recommended_num_workers": 2},
+    )
+    mosaic_y, mosaic_x, _, minx_s, _ = _summary_grid_coords(
+        (0.0, 0.0, float(size), float(size)), 100
+    )
+    mosaic = _empty_summary_arrays(len(mosaic_y), len(mosaic_x))
+    n_chunks, n_failed, _ = _process_lazy_canopy_map_overlap(
+        lazy,
+        mosaic,
+        fine_resolution_m=1.0,
+        summary_resolution_m=100,
+        minx_s=minx_s,
+        maxy_s=float(mosaic_y[0] + 50.0),
+        halo_px=halo,
+        write_resolution_compare=False,
+    )
+    assert n_failed == 0
+    assert n_chunks == len(ensured) * len(ensured)
+    assert np.isfinite(mosaic["vom_canopy_share"]).any()
+
+
+def test_chunk_fetch_failure_isolated_from_siblings(monkeypatch) -> None:
+    """A raised fetch/compute error on one task counts as failed, others proceed."""
+    import dask.array as da
+    import xarray as xr
+
+    import sdm.commands.data_preparation.environmental.generate_vom_canopy_features as mod
+    from sdm.commands.data_preparation.environmental.generate_vom_canopy_features import (
+        _empty_summary_arrays,
+        _process_lazy_canopy_map_overlap,
+        _summary_grid_coords,
+    )
+
+    size = 200
+    height = np.full((size, size), 6.0, dtype=np.float32)
+    y = np.arange(size, dtype=np.float64) + 0.5
+    x = np.arange(size, dtype=np.float64) + 0.5
+    lazy = xr.DataArray(
+        da.from_array(height, chunks=(100, 100)),
+        dims=("y", "x"),
+        coords={"y": y, "x": x},
+        attrs={"tilearray_recommended_num_workers": 2},
+    )
+    mosaic_y, mosaic_x, _, minx_s, _ = _summary_grid_coords(
+        (0.0, 0.0, float(size), float(size)), 100
+    )
+    mosaic = _empty_summary_arrays(len(mosaic_y), len(mosaic_x))
+
+    real_compute = mod._compute_chunk_task
+    state = {"n": 0}
+
+    def _flaky_compute(task):
+        state["n"] += 1
+        if state["n"] == 2:
+            raise RuntimeError("synthetic fetch failure")
+        return real_compute(task)
+
+    monkeypatch.setattr(mod, "_compute_chunk_task", _flaky_compute)
+    n_chunks, n_failed, _ = _process_lazy_canopy_map_overlap(
+        lazy,
+        mosaic,
+        fine_resolution_m=1.0,
+        summary_resolution_m=100,
+        minx_s=minx_s,
+        maxy_s=float(mosaic_y[0] + 50.0),
+        halo_px=mask_overlap_halo_px(resolution_m=1.0),
+        write_resolution_compare=False,
+    )
+    assert n_chunks == 4
+    assert n_failed == 1
+    assert np.isfinite(mosaic["vom_canopy_share"]).any()
