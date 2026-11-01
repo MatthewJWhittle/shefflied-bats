@@ -2,37 +2,134 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+import rasterio
 import xarray as xr
+from rasterio.transform import from_origin
+from tilearray import WCSConfig, compute_with_policy
+from tilearray.fetch import AdaptiveConcurrencyGate, reset_adaptive_gates
+from tilearray.types import TileResponse
 
 from sdm.data.wcs_tilearray import (
     EA_DTM_COVERAGE_ID,
     EA_DTM_WCS_ENDPOINT,
+    _clamp_concurrency,
     ea_wcs_config,
     fetch_wcs_dataarray,
     fetch_wcs_dataset,
 )
 
 
-def test_ea_wcs_config_uses_ea_dsp_preset() -> None:
-    with patch("sdm.data.wcs_tilearray.WCSConfig.for_ea_dsp") as mock_for_ea:
-        mock_for_ea.return_value = MagicMock(name="cfg")
-        cfg = ea_wcs_config(
-            EA_DTM_WCS_ENDPOINT,
-            EA_DTM_COVERAGE_ID,
-            chunk_size=(512, 512),
-            resolution_m=10.0,
-            max_concurrent=4,
+def _geotiff_bytes(
+    *,
+    width: int,
+    height: int,
+    value: float = 12.5,
+    transform=None,
+) -> bytes:
+    """Minimal in-memory GeoTIFF for stubbed WCS tile responses."""
+    if transform is None:
+        transform = from_origin(0.0, float(height), 1.0, 1.0)
+    buf = BytesIO()
+    data = np.full((height, width), value, dtype=np.float32)
+    with rasterio.open(
+        buf,
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=1,
+        dtype="float32",
+        crs="EPSG:27700",
+        transform=transform,
+    ) as dst:
+        dst.write(data, 1)
+    return buf.getvalue()
+
+
+def test_clamp_concurrency_keeps_aimd_ordered() -> None:
+    clamped = _clamp_concurrency(4)
+    assert clamped["max_concurrent_requests"] == 4
+    assert (
+        clamped["min_concurrent_requests"]
+        <= clamped["initial_concurrent_requests"]
+        <= clamped["max_concurrent_requests"]
+    )
+    # Gate construction must succeed (this is what live max=4 crashed on).
+    AdaptiveConcurrencyGate(
+        initial=clamped["initial_concurrent_requests"],
+        minimum=clamped["min_concurrent_requests"],
+        maximum=clamped["max_concurrent_requests"],
+        additive_increase=1,
+        multiplicative_decrease=0.75,
+    )
+
+
+def test_ea_wcs_config_builds_real_config_resolution_tuple() -> None:
+    """Unmocked WCSConfig: resolution is (x, y); max=4 does not trip AIMD."""
+    reset_adaptive_gates()
+    cfg = ea_wcs_config(
+        EA_DTM_WCS_ENDPOINT,
+        EA_DTM_COVERAGE_ID,
+        chunk_size=(64, 64),
+        resolution_m=10.0,
+        max_concurrent=4,
+    )
+    assert isinstance(cfg, WCSConfig)
+    assert cfg.resolution == (10.0, 10.0)
+    assert cfg.max_concurrent_requests == 4
+    assert cfg.initial_concurrent_requests <= 4
+    assert cfg.min_concurrent_requests <= cfg.initial_concurrent_requests
+
+
+def test_create_array_compute_with_policy_one_chunk_stubbed_http() -> None:
+    """Real config + create_array path; HTTP stubbed so CI catches gate/schema bugs."""
+    reset_adaptive_gates()
+    cfg = ea_wcs_config(
+        EA_DTM_WCS_ENDPOINT,
+        EA_DTM_COVERAGE_ID,
+        chunk_size=(32, 32),
+        resolution_m=10.0,
+        max_concurrent=4,
+    )
+    # One chunk: 32×32 @ 10 m → 320 m box.
+    bbox = (400000.0, 300000.0, 400320.0, 300320.0)
+    tiff = _geotiff_bytes(
+        width=32,
+        height=32,
+        value=42.0,
+        transform=from_origin(400000.0, 300320.0, 10.0, 10.0),
+    )
+
+    def _fake_fetch(request, policy=None, progress=None):
+        return TileResponse(
+            data=tiff,
+            content_type="image/tiff",
+            status_code=200,
+            headers={},
+            url=request.url,
+            success=True,
         )
-        assert cfg is mock_for_ea.return_value
-        kwargs = mock_for_ea.call_args.kwargs
-        assert kwargs["coverage_id"] == EA_DTM_COVERAGE_ID
-        assert kwargs["chunk_size"] == (512, 512)
-        assert kwargs["resolution"] == 10.0
-        assert kwargs["max_concurrent_requests"] == 4
+
+    with patch("tilearray.array.fetch_tile", side_effect=_fake_fetch):
+        from tilearray import create_array
+        from tilearray.types import CRS
+
+        lazy = create_array(
+            cfg,
+            bbox=bbox,
+            crs=CRS.EPSG_27700,
+            compute=False,
+            dtype="float32",
+        )
+        out = compute_with_policy(lazy)
+
+    assert out.ndim >= 2
+    assert float(np.nanmean(np.asarray(out.values))) == pytest.approx(42.0, abs=0.1)
 
 
 def test_fetch_wcs_dataset_names_coverage_and_computes() -> None:

@@ -5,8 +5,8 @@ downloads. Prefer :func:`compute_with_policy` so AIMD concurrency and the
 403 circuit breaker stay aligned with Dask workers.
 
 Per-tile walkers that still need ``tile_bboxes_for_coverage`` /
-``_download_tile`` (e.g. opt-in 1 m canopy tiling) keep using
-``WCSDownloader`` until those paths move to ``map_overlap``.
+``_download_tile`` keep using ``WCSDownloader`` until those paths move to
+``map_overlap``.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from typing import Optional, Sequence, Tuple
 
 import xarray as xr
 from tilearray import WCSConfig, compute_with_policy, create_array
+from tilearray.fetch_presets import ea_dsp_fetch_defaults
 from tilearray.types import CRS, Format
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,24 @@ EA_VOM_COVERAGE_ID = (
 BBox = Tuple[float, float, float, float]
 
 
+def _clamp_concurrency(max_concurrent: int) -> dict[str, int]:
+    """Keep AIMD ``min ≤ initial ≤ max`` when the caller caps concurrency.
+
+    EA DSP presets start at initial=8 / min=4 / max=10. Passing
+    ``max_concurrent_requests=4`` alone trips tilearray's adaptive gate
+    (``initial cannot exceed maximum``).
+    """
+    maximum = max(1, int(max_concurrent))
+    defaults = ea_dsp_fetch_defaults()
+    initial = min(int(defaults["initial_concurrent_requests"]), maximum)
+    minimum = min(int(defaults["min_concurrent_requests"]), initial)
+    return {
+        "max_concurrent_requests": maximum,
+        "initial_concurrent_requests": initial,
+        "min_concurrent_requests": minimum,
+    }
+
+
 def ea_wcs_config(
     endpoint: str,
     coverage_id: str,
@@ -55,16 +74,21 @@ def ea_wcs_config(
     max_concurrent: Optional[int] = None,
     cache_dir: Optional[Path] = None,
 ) -> WCSConfig:
-    """``WCSConfig.for_ea_dsp`` with chunk/resolution overrides for this repo."""
+    """``WCSConfig.for_ea_dsp`` with chunk/resolution overrides for this repo.
+
+    ``resolution`` is always a ``(x, y)`` metres-per-pixel tuple (tilearray
+    pydantic schema). Concurrent caps are clamped so AIMD stays valid.
+    """
     kwargs: dict = {
         "crs": CRS.EPSG_27700,
         "output_format": Format.GEOTIFF,
         "chunk_size": chunk_size,
     }
     if resolution_m is not None:
-        kwargs["resolution"] = float(resolution_m)
+        res = float(resolution_m)
+        kwargs["resolution"] = (res, res)
     if max_concurrent is not None:
-        kwargs["max_concurrent_requests"] = int(max_concurrent)
+        kwargs.update(_clamp_concurrency(max_concurrent))
     if cache_dir is not None:
         kwargs["cache_dir"] = str(cache_dir)
     return WCSConfig.for_ea_dsp(endpoint, coverage_id=coverage_id, **kwargs)
