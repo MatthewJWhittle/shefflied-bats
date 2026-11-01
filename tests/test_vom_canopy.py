@@ -505,3 +505,66 @@ def test_max_failed_chunk_fraction_constant() -> None:
     )
 
     assert 0.0 < MAX_FAILED_CHUNK_FRACTION <= 0.1
+
+
+def test_per_chunk_failure_counted_without_aborting_siblings() -> None:
+    """One bad chunk → NaNs + fail count; other chunks still summarise."""
+    import dask.array as da
+    import xarray as xr
+
+    from sdm.commands.data_preparation.environmental.generate_vom_canopy_features import (
+        _empty_summary_arrays,
+        _process_lazy_canopy_map_overlap,
+        _summary_grid_coords,
+    )
+    from sdm.raster.vom_canopy import build_canopy_masks as real_build
+
+    size = 200
+    chunk = 100
+    rng = np.random.default_rng(0)
+    height = (rng.random((size, size)) * 12.0).astype(np.float32)
+    height[20:80, 20:80] = 18.0
+    y = np.arange(size, dtype=np.float64) + 0.5
+    x = np.arange(size, dtype=np.float64) + 0.5
+    lazy = xr.DataArray(
+        da.from_array(height, chunks=(chunk, chunk)),
+        dims=("y", "x"),
+        coords={"y": y, "x": x},
+        attrs={"tilearray_recommended_num_workers": 2},
+    )
+    grid_bounds = (0.0, 0.0, float(size), float(size))
+    mosaic_y, mosaic_x, _, minx_s, _ = _summary_grid_coords(grid_bounds, 100)
+    maxy_s = float(mosaic_y[0] + 50.0)
+    mosaic = _empty_summary_arrays(len(mosaic_y), len(mosaic_x))
+
+    call_count = {"n": 0}
+
+    def _flaky_build(h, *, resolution_m=1.0):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("synthetic chunk failure")
+        return real_build(h, resolution_m=resolution_m)
+
+    import sdm.commands.data_preparation.environmental.generate_vom_canopy_features as mod
+
+    original = mod.build_canopy_masks
+    mod.build_canopy_masks = _flaky_build
+    try:
+        n_chunks, n_failed, _ = _process_lazy_canopy_map_overlap(
+            lazy,
+            mosaic,
+            fine_resolution_m=1.0,
+            summary_resolution_m=100,
+            minx_s=minx_s,
+            maxy_s=maxy_s,
+            halo_px=mask_overlap_halo_px(resolution_m=1.0),
+            write_resolution_compare=False,
+        )
+    finally:
+        mod.build_canopy_masks = original
+
+    assert n_chunks == 4
+    assert n_failed == 1
+    assert np.isfinite(mosaic["vom_canopy_share"]).any()
+    # Failed chunk leaves some cells NaN; successes fill others.
+    assert np.isnan(mosaic["vom_canopy_share"]).any()
