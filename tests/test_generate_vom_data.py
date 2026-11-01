@@ -17,6 +17,7 @@ from sdm.commands.data_preparation.environmental.generate_vom_data import (
     generate_vom_data,
 )
 from sdm.data import WCSDownloader
+from sdm.data.wcs_tilearray import EA_VOM_COVERAGE_ID
 
 
 class TestCapVegetationHeights:
@@ -57,10 +58,8 @@ class TestCapVegetationHeights:
         )
 
         with patch(
-            "sdm.commands.data_preparation.environmental.generate_vom_data.WCSDownloader"
-        ) as mock_wcs_class:
-            mock_wcs_downloader = mock_wcs_class.return_value
-            mock_wcs_downloader.get_coverage = AsyncMock()
+            "sdm.commands.data_preparation.environmental.generate_vom_data.fetch_wcs_dataset"
+        ) as mock_fetch:
 
             test_data = np.full((80, 80), 15.0, dtype=np.float32)
             test_data[30, 30] = 61.5  # mast / pylon outlier
@@ -76,7 +75,7 @@ class TestCapVegetationHeights:
                 name=vom_coverage_id,
             ).rio.write_crs("EPSG:27700")
 
-            mock_wcs_downloader.get_coverage.return_value = xr.Dataset(
+            mock_fetch.return_value = xr.Dataset(
                 {vom_coverage_id: vom_data}
             )
 
@@ -129,10 +128,8 @@ class TestVomDataWorkflow:
         output_dir = tmp_path / "nonexistent" / "output"
         
         # Only mock the WCS downloader to avoid external network calls
-        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.WCSDownloader') as mock_wcs_class:
+        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.fetch_wcs_dataset') as mock_fetch:
             # Create a mock WCS downloader that returns realistic VOM data
-            mock_wcs_downloader = mock_wcs_class.return_value
-            mock_wcs_downloader.get_coverage = AsyncMock()
             
             # Create realistic VOM data structure
             vom_coverage_id = "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
@@ -152,7 +149,7 @@ class TestVomDataWorkflow:
             ).rio.write_crs("EPSG:27700")
             
             mock_vom_dataset = xr.Dataset({vom_coverage_id: vom_data})
-            mock_wcs_downloader.get_coverage.return_value = mock_vom_dataset
+            mock_fetch.return_value = mock_vom_dataset
             
             # Run the function
             result = generate_vom_data(
@@ -182,9 +179,7 @@ class TestVomDataWorkflow:
         output_dir = tmp_path / "output"
         
         # Only mock the WCS downloader
-        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.WCSDownloader') as mock_wcs_class:
-            mock_wcs_downloader = mock_wcs_class.return_value
-            mock_wcs_downloader.get_coverage = AsyncMock()
+        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.fetch_wcs_dataset') as mock_fetch:
             
             # Create test VOM data
             vom_coverage_id = "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
@@ -201,7 +196,7 @@ class TestVomDataWorkflow:
             ).rio.write_crs("EPSG:27700")
             
             mock_vom_dataset = xr.Dataset({vom_coverage_id: vom_data})
-            mock_wcs_downloader.get_coverage.return_value = mock_vom_dataset
+            mock_fetch.return_value = mock_vom_dataset
             
             # Run with custom parameters
             result = generate_vom_data(
@@ -221,16 +216,12 @@ class TestVomDataWorkflow:
             assert result.exists()
             assert result.name == "vom_summary_metrics_50m.tif"
             
-            # Verify WCS downloader was called with correct parameters
-            mock_wcs_class.assert_called_once()
-            wcs_call_args = mock_wcs_class.call_args[1]
-            assert wcs_call_args['request_tile_pixels'] == (512, 512)
-            assert wcs_call_args['use_temp_storage'] is False
-            
-            # Verify get_coverage was called with correct parameters
-            get_coverage_call = mock_wcs_downloader.get_coverage.call_args[1]
-            assert get_coverage_call['resolution'] == 5.0
-            assert get_coverage_call['max_concurrent'] == 2
+            mock_fetch.assert_called()
+            fetch_kwargs = mock_fetch.call_args.kwargs
+            assert fetch_kwargs["resolution_m"] == 5.0
+            assert fetch_kwargs["max_concurrent"] == 2
+            assert fetch_kwargs["chunk_size"] == (512, 512)
+            assert fetch_kwargs["coverage_id"] == EA_VOM_COVERAGE_ID
     
     def test_generate_vom_data_file_not_found(self, tmp_path):
         """Test error handling when boundary file doesn't exist."""
@@ -245,9 +236,7 @@ class TestVomDataWorkflow:
         output_dir = tmp_path / "output"
         
         # Only mock the WCS downloader to avoid external calls
-        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.WCSDownloader') as mock_wcs_class:
-            mock_wcs_downloader = mock_wcs_class.return_value
-            mock_wcs_downloader.get_coverage = AsyncMock()
+        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.fetch_wcs_dataset') as mock_fetch:
             
             # Create realistic VOM data with known characteristics
             vom_coverage_id = "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
@@ -269,7 +258,7 @@ class TestVomDataWorkflow:
             ).rio.write_crs("EPSG:27700")
             
             mock_vom_dataset = xr.Dataset({vom_coverage_id: vom_data})
-            mock_wcs_downloader.get_coverage.return_value = mock_vom_dataset
+            mock_fetch.return_value = mock_vom_dataset
             
             # Run the processing pipeline
             result = generate_vom_data(
