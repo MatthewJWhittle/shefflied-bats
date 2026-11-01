@@ -88,15 +88,25 @@ def resolve_vom_fetch_concurrency(max_concurrent_downloads: int) -> int:
 
 
 @contextmanager
-def tilearray_soft_fail_tiles() -> Iterator[None]:
-    """Failed tiles become NaN; do not abort sibling fetches.
+def tilearray_soft_fail_tiles() -> Iterator[list[str]]:
+    """Install soft-fail tile loader before tilearray plans the Dask graph.
 
-    Patches tilearray's shared ``FetchProgress.abort`` (no hard abort) and
-    ``_load_tile_array`` (exceptions → NaN block) for the duration of the
-    fused ``compute_with_policy`` call.
+    ``create_array`` binds ``_load_tile_array`` into each delayed tile at plan
+    time. Installing this wrapper only around ``compute_with_policy`` leaves
+    the hard-fail loader in the graph (first error aborts siblings). Wrap
+    **plan + compute** together.
+
+    Yields a list that collects failure messages (one entry per soft-failed
+    tile). Use ``len(failed)`` for the failed-chunk report — rechunk can dilute
+    all-NaN summary tiles so output-based counting under-reports.
+
+    Prefer a first-class tilearray soft-fail / ``on_tile_error`` once it
+    exists; this is the interim plan-time loader install (related tilearray
+    issues #50, #64).
     """
     original_abort = FetchProgress.abort
     original_load = tilearray_array._load_tile_array
+    failed: list[str] = []
 
     def soft_abort(self: FetchProgress, reason: str) -> None:
         with self._lock:
@@ -120,6 +130,8 @@ def tilearray_soft_fail_tiles() -> Iterator[None]:
             width = int(request.width or 0)
             if height <= 0 or width <= 0:
                 raise
+            msg = f"{type(exc).__name__}: {exc}"
+            failed.append(msg)
             logging.warning(
                 "VOM tile soft-fail → NaN block %sx%s: %s", height, width, exc
             )
@@ -128,7 +140,7 @@ def tilearray_soft_fail_tiles() -> Iterator[None]:
     FetchProgress.abort = soft_abort  # type: ignore[method-assign]
     tilearray_array._load_tile_array = soft_load  # type: ignore[assignment]
     try:
-        yield
+        yield failed
     finally:
         FetchProgress.abort = original_abort  # type: ignore[method-assign]
         tilearray_array._load_tile_array = original_load  # type: ignore[assignment]
@@ -566,60 +578,90 @@ async def fetch_and_process_vom_height_bands(
     cache_dir: Optional[Path] = None,
     fetch_chunk: Optional[FetchChunkFn] = None,
 ) -> Path:
-    """Fetch 1 m VOM once-per-tile and write height-band / woody-cover GeoTIFF."""
+    """Fetch 1 m VOM once-per-tile and write height-band / woody-cover GeoTIFF.
+
+    Persistent WCS disk cache is off by default (full-area would otherwise
+    write tens of GB under the output dir). Pass ``cache_dir`` explicitly to
+    enable a bounded external cache.
+    """
     boundary_gdf, _model_transform, grid_bounds, _spatial = load_boundary_and_transform(
         boundary_path, buffer_distance=buffer_distance
     )
     model_crs = boundary_gdf.crs
-    cache = Path(cache_dir) if cache_dir is not None else output_dir / "wcs-cache"
-    cache.mkdir(parents=True, exist_ok=True)
+    # Default: no persistent tile cache (None). Only mkdir when caller opts in.
+    cache: Optional[Path] = Path(cache_dir) if cache_dir is not None else None
+    if cache is not None:
+        cache.mkdir(parents=True, exist_ok=True)
     concurrency = resolve_vom_fetch_concurrency(max_concurrent_downloads)
 
     logging.info(
-        "Downloading VOM height bands via tilearray at %sm (concurrency=%s)...",
+        "Downloading VOM height bands via tilearray at %sm (concurrency=%s, "
+        "cache=%s)...",
         wcs_download_resolution_m,
         concurrency,
+        cache if cache is not None else "off",
     )
     t0 = time.perf_counter()
-    t_plan = time.perf_counter()
-    lazy_height = await asyncio.to_thread(
-        fetch_wcs_dataarray,
-        endpoint=EA_VOM_WCS_ENDPOINT,
-        coverage_id=EA_VOM_COVERAGE_ID,
-        bbox=grid_bounds,
-        resolution_m=float(wcs_download_resolution_m),
-        chunk_size=wcs_tile_pixels,
-        max_concurrent=concurrency,
-        cache_dir=cache,
-        compute=False,
-    )
-    lazy_height = cap_vegetation_heights(lazy_height)
-    plan_s = time.perf_counter() - t_plan
-
     y_coords, x_coords, transform, _out_h, _out_w = _summary_grid_coords(
         grid_bounds, summary_target_resolution_m
     )
 
-    # Injected-failure tests supply fetch_chunk; live path uses fused soft-fail.
-    def _run_summaries() -> tuple[xr.DataArray, int, int, dict[str, float]]:
+    def _plan_and_summarise() -> tuple[
+        xr.DataArray, int, int, dict[str, float], float
+    ]:
+        """Plan mosaic + summarise. Soft-fail must wrap plan (bind) and compute."""
+        t_plan = time.perf_counter()
         if fetch_chunk is not None:
-            return _map_blocks_summaries(
+            lazy_height = fetch_wcs_dataarray(
+                endpoint=EA_VOM_WCS_ENDPOINT,
+                coverage_id=EA_VOM_COVERAGE_ID,
+                bbox=grid_bounds,
+                resolution_m=float(wcs_download_resolution_m),
+                chunk_size=wcs_tile_pixels,
+                max_concurrent=concurrency,
+                cache_dir=cache,
+                compute=False,
+            )
+            lazy_height = cap_vegetation_heights(lazy_height)
+            plan_s = time.perf_counter() - t_plan
+            stacked, n_chunks, n_failed, stages = _map_blocks_summaries(
                 lazy_height,
                 fine_resolution_m=float(wcs_download_resolution_m),
                 summary_resolution_m=summary_target_resolution_m,
                 fetch_chunk=fetch_chunk,
                 max_workers=concurrency,
             )
-        with tilearray_soft_fail_tiles():
-            return _map_blocks_summaries(
+            return stacked, n_chunks, n_failed, stages, plan_s
+
+        # Live path: install soft-fail loader BEFORE create_array plans delayed
+        # tiles, and keep it through compute_with_policy.
+        with tilearray_soft_fail_tiles() as soft_failed:
+            lazy_height = fetch_wcs_dataarray(
+                endpoint=EA_VOM_WCS_ENDPOINT,
+                coverage_id=EA_VOM_COVERAGE_ID,
+                bbox=grid_bounds,
+                resolution_m=float(wcs_download_resolution_m),
+                chunk_size=wcs_tile_pixels,
+                max_concurrent=concurrency,
+                cache_dir=cache,
+                compute=False,
+            )
+            lazy_height = cap_vegetation_heights(lazy_height)
+            plan_s = time.perf_counter() - t_plan
+            stacked, n_chunks, _n_failed_summary, stages = _map_blocks_summaries(
                 lazy_height,
                 fine_resolution_m=float(wcs_download_resolution_m),
                 summary_resolution_m=summary_target_resolution_m,
                 fetch_chunk=None,
                 max_workers=concurrency,
             )
+            # Prefer loader-tracked failures (survives rechunk dilution).
+            n_failed = max(len(soft_failed), int(_n_failed_summary))
+            return stacked, n_chunks, n_failed, stages, plan_s
 
-    stacked, n_chunks, n_failed, stages = await asyncio.to_thread(_run_summaries)
+    stacked, n_chunks, n_failed, stages, plan_s = await asyncio.to_thread(
+        _plan_and_summarise
+    )
     wall_s = time.perf_counter() - t0
 
     fail_frac = (n_failed / n_chunks) if n_chunks else 1.0
@@ -683,10 +725,12 @@ async def fetch_and_process_vom_height_bands(
         "pairwise_pearson": corr,
         "max_failed_chunk_fraction": max_failed_chunk_fraction,
         "max_concurrent_downloads": concurrency,
+        "wcs_cache_dir": None if cache is None else str(cache),
+        "wcs_cache": "off" if cache is None else "on",
         "fetch": (
             "per-chunk fetch_wcs_dataarray (soft-fail → NaN)"
             if fetch_chunk is not None
-            else "fused mosaic + tilearray_soft_fail_tiles + map_blocks"
+            else "fused mosaic + tilearray_soft_fail_tiles (plan+compute) + map_blocks"
         ),
         "summary": "xarray.coarsen mean/std",
         "stage_seconds": {
@@ -755,6 +799,7 @@ __all__ = [
     "MAX_FAILED_CHUNK_FRACTION",
     "VomHeightBandsChunkFailureError",
     "_bbox_from_centres",
+    "_map_blocks_summaries_fused",
     "fetch_and_process_vom_height_bands",
     "generate_vom_height_bands",
     "process_height_array_block_aligned",
