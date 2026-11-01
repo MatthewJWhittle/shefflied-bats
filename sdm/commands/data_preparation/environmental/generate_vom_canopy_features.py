@@ -11,9 +11,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Iterator, Optional, Sequence
 
 import dask
 import numpy as np
@@ -57,6 +58,10 @@ DEFAULT_MULTISCALE_GROUPS: tuple[str, ...] = ("vom_",)
 # Abort before writing outputs when this fraction of chunks fail (e.g. 403s).
 MAX_FAILED_CHUNK_FRACTION = 0.05
 
+# Transient WCS/HTTP failures: bounded retries before soft-fail (NaN tile).
+TILE_FETCH_MAX_ATTEMPTS = 2
+TILE_FETCH_RETRY_BACKOFF_S = 0.5
+
 # Back-compat aliases for notes / callers.
 VOM_WCS_ENDPOINT = EA_VOM_WCS_ENDPOINT
 VOM_COVERAGE_ID = EA_VOM_COVERAGE_ID
@@ -64,6 +69,77 @@ VOM_COVERAGE_ID = EA_VOM_COVERAGE_ID
 
 class VomCanopyChunkFailureError(RuntimeError):
     """Raised when too many canopy chunks fail (no output written)."""
+
+
+@contextmanager
+def resilient_tile_loader(
+    *,
+    max_attempts: int = TILE_FETCH_MAX_ATTEMPTS,
+    backoff_s: float = TILE_FETCH_RETRY_BACKOFF_S,
+) -> Iterator[None]:
+    """Patch tilearray tile loads: retry, then NaN tile (no sibling abort).
+
+    Must be entered **before** ``create_array`` / ``fetch_wcs_dataarray`` so the
+    delayed graph captures the resilient loader. Shared-graph compute then
+    still fetches each source tile once; transient 5xx are retried; persistent
+    failures become NaN tiles so neighbouring chunks can continue.
+    """
+    import tilearray.array as ta_array
+
+    original = ta_array._load_tile_array
+    attempts = max(1, int(max_attempts))
+    backoff = float(backoff_s)
+
+    def _resilient_load(
+        request: Any,
+        cache_dir: Any,
+        decoder: Any,
+        dtype: Any,
+        fetch_policy: Any = None,
+        progress: Any = None,
+    ) -> np.ndarray:
+        last_message = "unknown tile fetch error"
+        for attempt in range(attempts):
+            try:
+                response = ta_array._fetch_with_cache(
+                    request, cache_dir, fetch_policy, progress
+                )
+                if progress is not None:
+                    progress.tick(request, response)
+                if response.success:
+                    array = decoder(response, request)
+                    if array.ndim not in (2, 3):
+                        raise ValueError(
+                            "tile_decoder must return a 2D or 3D (y, x[, band]) array"
+                        )
+                    target_height = request.height or array.shape[0]
+                    target_width = request.width or array.shape[1]
+                    array = ta_array._resize_tile_array(
+                        array, target_height, target_width
+                    )
+                    return np.asarray(array, dtype=dtype)
+                last_message = (
+                    response.error_message or f"HTTP {response.status_code}"
+                )
+            except Exception as exc:
+                last_message = str(exc)
+            # Soft-fail path: never progress.abort() — siblings keep fetching.
+            if attempt + 1 < attempts:
+                time.sleep(backoff * (attempt + 1))
+        logging.warning(
+            "VOM tile fetch failed after %d attempt(s) (%s); emitting NaN tile",
+            attempts,
+            last_message,
+        )
+        height = int(request.height or 1)
+        width = int(request.width or 1)
+        return np.full((height, width), np.nan, dtype=dtype)
+
+    ta_array._load_tile_array = _resilient_load  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        ta_array._load_tile_array = original  # type: ignore[assignment]
 
 
 def _summary_grid_coords(
@@ -205,14 +281,23 @@ def _process_halo_chunk(
     """
     try:
         capped = _cap_height_block(block)
-        masks = build_canopy_masks(capped, resolution_m=fine_resolution_m)
-        interior_masks = _trim_masks_to_interior(masks, halo_px)
         interior_h = capped[halo_px:-halo_px, halo_px:-halo_px]
         if interior_h.shape != (len(y_interior), len(x_interior)):
             raise ValueError(
                 f"halo interior shape {interior_h.shape} != coords "
                 f"({len(y_interior)}, {len(x_interior)})"
             )
+        # Soft-failed WCS tiles arrive as all-NaN; count the chunk as failed.
+        if not np.isfinite(interior_h).any():
+            logging.warning(
+                "VOM canopy chunk interior has no finite heights "
+                "(y=%d x=%d); writing NaNs",
+                len(y_interior),
+                len(x_interior),
+            )
+            return {}, 1, None
+        masks = build_canopy_masks(capped, resolution_m=fine_resolution_m)
+        interior_masks = _trim_masks_to_interior(masks, halo_px)
         cells = summarise_masks_by_coordinates(
             interior_masks,
             interior_h,
@@ -281,19 +366,6 @@ def _rechunk_for_overlap_halo(data: Any, halo_px: int) -> tuple[Any, tuple[int, 
     return data, ensured0, ensured1
 
 
-def _compute_chunk_task(task: Any) -> tuple[
-    dict[tuple[int, int], dict[str, float]], int, Optional[dict[str, Any]]
-]:
-    """Compute one chunk task; catch fetch/process failures as a failed chunk."""
-    try:
-        return dask.compute(task, scheduler="threads", num_workers=1)[0]
-    except Exception:
-        logging.exception(
-            "VOM canopy chunk fetch/compute failed; writing NaNs for chunk"
-        )
-        return {}, 1, None
-
-
 def _process_lazy_canopy_map_overlap(
     lazy_height: xr.DataArray,
     mosaic: dict[str, np.ndarray],
@@ -307,10 +379,11 @@ def _process_lazy_canopy_map_overlap(
 ) -> tuple[int, int, Optional[dict[str, Any]]]:
     """Per-chunk overlap → masks → 100 m reduce; gather only summary cells.
 
-    Each source tile is still fetched once (shared overlap graph). Fine-resolution
-    height/masks never materialise for the whole AOI — only float32 100 m
-    summaries are accumulated. Per-chunk fetch/process exceptions become NaN
-    cells + a failure count (abort threshold applied by the caller).
+    One shared ``dask.compute`` over overlapped delayed tasks so each source
+    tile is fetched once (halos reuse neighbours already in memory). Fine
+    arrays never materialise for the whole AOI — only float32 100 m summaries
+    accumulate. Soft-failed tiles (NaN) and per-chunk process exceptions become
+    NaN cells + a failure count (abort threshold applied by the caller).
 
     Returns ``(n_chunks, n_failed, compare_stats)``.
     """
@@ -388,24 +461,26 @@ def _process_lazy_canopy_map_overlap(
         y0 += chy_i
 
     num_workers = _num_workers_for_lazy(lazy_height)
-    # Per-task compute so one failed fetch/process does not abort siblings.
-    results: list[
-        tuple[dict[tuple[int, int], dict[str, float]], int, Optional[dict[str, Any]]]
-    ] = [({}, 1, None)] * len(tasks)
-    with ThreadPoolExecutor(max_workers=num_workers) as pool:
-        future_map = {
-            pool.submit(_compute_chunk_task, task): i
-            for i, task in enumerate(tasks)
-        }
-        for fut in as_completed(future_map):
-            idx = future_map[fut]
-            try:
-                results[idx] = fut.result()
-            except Exception:
-                logging.exception(
-                    "VOM canopy chunk worker crashed; writing NaNs for chunk"
-                )
-                results[idx] = ({}, 1, None)
+    t0 = time.perf_counter()
+    try:
+        # Single shared compute: once-fetch (halo tiles shared in-graph).
+        results = list(
+            dask.compute(
+                *tasks, scheduler="threads", num_workers=num_workers
+            )
+        )
+    except Exception:
+        logging.exception(
+            "VOM canopy overlap compute failed for all chunks"
+        )
+        return n_chunks, n_chunks, None
+    wall_s = time.perf_counter() - t0
+    logging.info(
+        "VOM canopy overlap compute wall %.2fs (%d chunks, %.2f tiles/s)",
+        wall_s,
+        n_chunks,
+        (n_chunks / wall_s) if wall_s > 0 else float("nan"),
+    )
 
     n_failed = 0
     compare_stats: Optional[dict[str, Any]] = None
@@ -461,44 +536,43 @@ async def fetch_and_process_vom_canopy(
     mosaic = _empty_summary_arrays(len(mosaic_y), len(mosaic_x))
     del miny_s
 
-    # Disk tile cache: per-chunk compute isolates fetch failures without
-    # re-downloading shared halo tiles (tilearray aborts sibling fetches in-session).
-    wcs_cache_dir = output_dir / ".wcs_tile_cache"
-    wcs_cache_dir.mkdir(parents=True, exist_ok=True)
-
     logging.info(
         "VOM canopy: tilearray lazy fetch at %.0f m chunks=%s halo=%d px "
-        "concurrency=%d over %s (cache=%s)",
+        "concurrency=%d over %s",
         fine_res,
         wcs_tile_pixels,
         halo_px,
         max_concurrent_downloads,
         grid_bounds,
-        wcs_cache_dir,
     )
-    lazy = await asyncio.to_thread(
-        fetch_wcs_dataarray,
-        endpoint=EA_VOM_WCS_ENDPOINT,
-        coverage_id=EA_VOM_COVERAGE_ID,
-        bbox=grid_bounds,
-        resolution_m=fine_res,
-        chunk_size=wcs_tile_pixels,
-        max_concurrent=max_concurrent_downloads,
-        cache_dir=wcs_cache_dir,
-        compute=False,
-    )
-
-    n_chunks, n_failed, compare_stats = await asyncio.to_thread(
-        _process_lazy_canopy_map_overlap,
-        lazy,
-        mosaic,
-        fine_resolution_m=fine_res,
-        summary_resolution_m=summary_res,
-        minx_s=minx_s,
-        maxy_s=maxy_s,
-        halo_px=halo_px,
-        write_resolution_compare=write_resolution_compare,
-    )
+    # Resilient loader must wrap create_array so delayed tasks capture it.
+    t_fetch0 = time.perf_counter()
+    with resilient_tile_loader():
+        lazy = await asyncio.to_thread(
+            fetch_wcs_dataarray,
+            endpoint=EA_VOM_WCS_ENDPOINT,
+            coverage_id=EA_VOM_COVERAGE_ID,
+            bbox=grid_bounds,
+            resolution_m=fine_res,
+            chunk_size=wcs_tile_pixels,
+            max_concurrent=max_concurrent_downloads,
+            compute=False,
+        )
+        logging.info(
+            "VOM canopy lazy array ready in %.2fs; starting overlap compute",
+            time.perf_counter() - t_fetch0,
+        )
+        n_chunks, n_failed, compare_stats = await asyncio.to_thread(
+            _process_lazy_canopy_map_overlap,
+            lazy,
+            mosaic,
+            fine_resolution_m=fine_res,
+            summary_resolution_m=summary_res,
+            minx_s=minx_s,
+            maxy_s=maxy_s,
+            halo_px=halo_px,
+            write_resolution_compare=write_resolution_compare,
+        )
 
     n_ok = n_chunks - n_failed
     fail_frac = (n_failed / n_chunks) if n_chunks else 1.0
@@ -553,9 +627,11 @@ async def fetch_and_process_vom_canopy(
     notes = {
         "source": "EA Lidar Vegetation Object Model (VOM) only",
         "fetch": (
-            "tilearray.create_array + dask overlap per-chunk "
-            "mask+100m-reduce (once-fetch shared tiles)"
+            "tilearray.create_array + shared dask.compute over overlap "
+            "tasks (1 WCS fetch/source tile; halo from in-memory neighbours)"
         ),
+        "tile_fetch_max_attempts": TILE_FETCH_MAX_ATTEMPTS,
+        "tile_fetch_retry_backoff_s": TILE_FETCH_RETRY_BACKOFF_S,
         "wcs_endpoint": EA_VOM_WCS_ENDPOINT,
         "coverage_id": EA_VOM_COVERAGE_ID,
         "download_resolution_m": fine_res,
@@ -629,6 +705,8 @@ __all__ = [
     "DEFAULT_MULTISCALE_GROUPS",
     "DEFAULT_MULTISCALE_WINDOWS_CELLS",
     "MAX_FAILED_CHUNK_FRACTION",
+    "TILE_FETCH_MAX_ATTEMPTS",
+    "TILE_FETCH_RETRY_BACKOFF_S",
     "VOM_COVERAGE_ID",
     "VOM_WCS_ENDPOINT",
     "VomCanopyChunkFailureError",
@@ -636,4 +714,5 @@ __all__ = [
     "generate_vom_canopy_features",
     "process_height_array_block_aligned",
     "process_height_tile",
+    "resilient_tile_loader",
 ]

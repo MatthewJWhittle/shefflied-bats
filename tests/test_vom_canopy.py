@@ -619,8 +619,9 @@ def test_uneven_box_thin_edge_chunk_under_halo() -> None:
     assert np.isfinite(mosaic["vom_canopy_share"]).any()
 
 
-def test_chunk_fetch_failure_isolated_from_siblings(monkeypatch) -> None:
-    """A raised fetch/compute error on one task counts as failed, others proceed."""
+def test_shared_compute_runs_all_chunk_tasks_in_one_call(monkeypatch) -> None:
+    """Regression: per-task compute re-fetched halo tiles (>1 fetch/chunk)."""
+    import dask
     import dask.array as da
     import xarray as xr
 
@@ -633,6 +634,7 @@ def test_chunk_fetch_failure_isolated_from_siblings(monkeypatch) -> None:
 
     size = 200
     height = np.full((size, size), 6.0, dtype=np.float32)
+    height[40:160, 40:160] = 12.0
     y = np.arange(size, dtype=np.float64) + 0.5
     x = np.arange(size, dtype=np.float64) + 0.5
     lazy = xr.DataArray(
@@ -646,16 +648,14 @@ def test_chunk_fetch_failure_isolated_from_siblings(monkeypatch) -> None:
     )
     mosaic = _empty_summary_arrays(len(mosaic_y), len(mosaic_x))
 
-    real_compute = mod._compute_chunk_task
-    state = {"n": 0}
+    compute_calls: list[int] = []
+    real_compute = dask.compute
 
-    def _flaky_compute(task):
-        state["n"] += 1
-        if state["n"] == 2:
-            raise RuntimeError("synthetic fetch failure")
-        return real_compute(task)
+    def _spy_compute(*args, **kwargs):
+        compute_calls.append(len(args))
+        return real_compute(*args, **kwargs)
 
-    monkeypatch.setattr(mod, "_compute_chunk_task", _flaky_compute)
+    monkeypatch.setattr(mod.dask, "compute", _spy_compute)
     n_chunks, n_failed, _ = _process_lazy_canopy_map_overlap(
         lazy,
         mosaic,
@@ -667,5 +667,86 @@ def test_chunk_fetch_failure_isolated_from_siblings(monkeypatch) -> None:
         write_resolution_compare=False,
     )
     assert n_chunks == 4
-    assert n_failed == 1
+    assert n_failed == 0
+    assert compute_calls == [4], (
+        f"expected one shared dask.compute of 4 tasks; got {compute_calls}"
+    )
     assert np.isfinite(mosaic["vom_canopy_share"]).any()
+
+
+def test_all_nan_interior_counts_as_chunk_failure() -> None:
+    """Soft-failed WCS tiles (NaN) → failed chunk; siblings still summarise."""
+    import dask.array as da
+    import xarray as xr
+
+    from sdm.commands.data_preparation.environmental.generate_vom_canopy_features import (
+        _empty_summary_arrays,
+        _process_lazy_canopy_map_overlap,
+        _summary_grid_coords,
+    )
+
+    size = 200
+    height = np.full((size, size), 6.0, dtype=np.float32)
+    height[0:100, 0:100] = np.nan  # one source chunk all NaN
+    y = np.arange(size, dtype=np.float64) + 0.5
+    x = np.arange(size, dtype=np.float64) + 0.5
+    lazy = xr.DataArray(
+        da.from_array(height, chunks=(100, 100)),
+        dims=("y", "x"),
+        coords={"y": y, "x": x},
+        attrs={"tilearray_recommended_num_workers": 2},
+    )
+    mosaic_y, mosaic_x, _, minx_s, _ = _summary_grid_coords(
+        (0.0, 0.0, float(size), float(size)), 100
+    )
+    mosaic = _empty_summary_arrays(len(mosaic_y), len(mosaic_x))
+    n_chunks, n_failed, _ = _process_lazy_canopy_map_overlap(
+        lazy,
+        mosaic,
+        fine_resolution_m=1.0,
+        summary_resolution_m=100,
+        minx_s=minx_s,
+        maxy_s=float(mosaic_y[0] + 50.0),
+        halo_px=mask_overlap_halo_px(resolution_m=1.0),
+        write_resolution_compare=False,
+    )
+    assert n_chunks == 4
+    assert n_failed >= 1
+    assert np.isfinite(mosaic["vom_canopy_share"]).any()
+
+
+def test_resilient_tile_loader_retries_then_nan(monkeypatch) -> None:
+    """Two attempts with backoff; persistent failure → NaN tile, no abort."""
+    import tilearray.array as ta_array
+
+    from sdm.commands.data_preparation.environmental.generate_vom_canopy_features import (
+        TILE_FETCH_MAX_ATTEMPTS,
+        resilient_tile_loader,
+    )
+
+    class _Req:
+        url = "https://example.invalid/wcs"
+        height = 4
+        width = 4
+
+    class _Resp:
+        success = False
+        error_message = "HTTP 503"
+        status_code = 503
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "sdm.commands.data_preparation.environmental.generate_vom_canopy_features.time.sleep",
+        lambda s: sleeps.append(s),
+    )
+    monkeypatch.setattr(
+        ta_array, "_fetch_with_cache", lambda *a, **k: _Resp()
+    )
+
+    with resilient_tile_loader(max_attempts=TILE_FETCH_MAX_ATTEMPTS, backoff_s=0.5):
+        out = ta_array._load_tile_array(_Req(), None, None, np.float32)
+
+    assert out.shape == (4, 4)
+    assert np.isnan(out).all()
+    assert len(sleeps) == TILE_FETCH_MAX_ATTEMPTS - 1
+    assert sleeps[0] == pytest.approx(0.5)
