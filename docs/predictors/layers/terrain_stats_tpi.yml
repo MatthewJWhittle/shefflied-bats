@@ -1,0 +1,26 @@
+id: terrain_stats_tpi
+title: Topographic position index
+kind: derived
+family: terrain_stats
+selection: included
+summary: Elevation minus neighbourhood mean elevation (local high/low).
+shows:
+- Whether the cell sits above or below its local neighbourhood
+does_not_show:
+- Absolute elevation (see terrain_dtm)
+units: metres
+model_resolution_m: 100.0
+crs: EPSG:27700
+pipeline:
+  rebuild_step: terrain_stats
+  code: sdm/commands/data_preparation/environmental/generate_terrain_stats.py
+derived_from:
+- terrain_dtm
+processing:
+- Computed from the model-grid DTM in process_dem_to_terrain_attributes
+caveats:
+- Inherits DTM gaps and coastal / estuary artefacts from terrain_dtm — see parent doc
+references:
+- title: Predictor docs — terrain_dtm
+  url: terrain_dtm.md
+markdown: terrain_stats_tpi.md

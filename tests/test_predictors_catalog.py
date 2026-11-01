@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import xarray as xr
+import yaml
 from pydantic import ValidationError
 
 from sdm.predictors import (
@@ -36,6 +37,17 @@ def test_catalog_loads_and_matches_layer_files() -> None:
         md = resolve_layer_markdown(doc, docs_root=root)
         assert md.is_file()
         assert md.read_text(encoding="utf-8").strip()
+
+
+def test_all_model_feature_layers_are_documented() -> None:
+    """Every variable in data/sdm_config/*/variables_config.yml has a layer doc."""
+    needed: set[str] = set()
+    for path in Path("data/sdm_config").glob("*/variables_config.yml"):
+        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        needed.update(payload.get("variables") or [])
+    documented = set(load_catalog().layers)
+    missing = sorted(needed - documented)
+    assert not missing, f"Undocumented model layers: {missing}"
 
 
 def test_derived_layers_reference_existing_parents() -> None:

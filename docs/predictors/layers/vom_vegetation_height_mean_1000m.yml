@@ -1,0 +1,26 @@
+id: vom_vegetation_height_mean_1000m
+title: Vegetation canopy height (mean, 1000 m neighbourhood)
+kind: derived
+family: vegetation
+selection: included
+summary: Focal mean of vom_vegetation_height_mean over a 20-cell (1000 m) neighbourhood.
+shows:
+- Neighbourhood-average vegetation height mean around each cell
+does_not_show:
+- Anything the parent VOM summary does not show
+units: metres
+model_resolution_m: 100.0
+crs: EPSG:27700
+pipeline:
+  rebuild_step: build_model_ev_stack
+  code: sdm/commands/data_preparation/processing/build_model_ev_stack.py
+derived_from:
+- vom_vegetation_height_mean
+processing:
+- Focal mean at window 20 cells (1000 m)
+caveats:
+- Inherits VOM 2.5 m / canopy-top / leaf-off limits from the parent — see parent doc
+references:
+- title: Predictor docs — vom_vegetation_height_mean
+  url: vom_vegetation_height_mean.md
+markdown: vom_vegetation_height_mean_1000m.md

@@ -1,0 +1,41 @@
+id: climate_stats_temp_mat_avg
+title: April–June mean temperature
+kind: source
+family: climate
+selection: included
+summary: Mean of WorldClim monthly average temperature for April–June (indices 3:6 in code).
+shows:
+- Mean of WorldClim monthly average temperature for April–June (indices 3:6 in code).
+does_not_show:
+- Year-matched weather
+- Microclimate
+units: degrees_C
+native_resolution_m: 1000.0
+model_resolution_m: 100.0
+crs: EPSG:27700
+temporal:
+  label: WorldClim 2.1 1970–2000 normals
+source:
+  provider: WorldClim
+  product: WorldClim 2.1
+  licence: WorldClim-noncommercial
+  licence_url: https://worldclim.org/about.html
+  access_url: https://geodata.ucdavis.edu/climate/worldclim/2_1/tiles/iso/
+  citation: Fick, S.E. and R.J. Hijmans, 2017. WorldClim 2. International Journal of Climatology.
+  version: '2.1'
+  notes: Academic / non-commercial; redistribution or commercial use needs prior permission.
+    Do not commit WorldClim rasters to git.
+pipeline:
+  rebuild_step: climate
+  code: sdm/commands/data_preparation/environmental/generate_climate_data.py
+processing:
+- Monthly WorldClim surfaces downloaded and reprojected
+- Mean of months April–June from monthly tavg
+caveats:
+- Temporal mismatch with occurrence years
+- Coarse native grid upsampled to 100 m
+- Coastal / edge missing ring possible
+references:
+- title: WorldClim about / licence
+  url: https://worldclim.org/about.html
+markdown: climate_stats_temp_mat_avg.md

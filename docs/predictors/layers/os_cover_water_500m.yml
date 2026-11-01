@@ -1,0 +1,26 @@
+id: os_cover_water_500m
+title: Water feature cover (500 m neighbourhood)
+kind: derived
+family: os
+selection: included
+summary: Focal mean of os_cover_water over a 10-cell (500 m) neighbourhood.
+shows:
+- Neighbourhood-average water cover around each cell
+does_not_show:
+- Anything the parent does not show
+units: percent
+model_resolution_m: 100.0
+crs: EPSG:27700
+pipeline:
+  rebuild_step: build_model_ev_stack
+  code: sdm/commands/data_preparation/processing/build_model_ev_stack.py
+derived_from:
+- os_cover_water
+processing:
+- Focal mean at window 10 cells (500 m)
+caveats:
+- Inherits OS VMD mapping limits from the parent — see parent doc
+references:
+- title: Predictor docs — os_cover_water
+  url: os_cover_water.md
+markdown: os_cover_water_500m.md

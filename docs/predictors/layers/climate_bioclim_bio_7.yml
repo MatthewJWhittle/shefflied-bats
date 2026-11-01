@@ -1,0 +1,41 @@
+id: climate_bioclim_bio_7
+title: Temperature annual range (BIO7)
+kind: source
+family: climate
+selection: included
+summary: 'WorldClim bioclimatic variable BIO7 on the model grid: Maximum temperature of warmest
+  month minus minimum of coldest month.'
+shows:
+- Maximum temperature of warmest month minus minimum of coldest month
+does_not_show:
+- Year-matched weather for occurrence records
+- Microclimate
+units: degrees_C
+native_resolution_m: 1000.0
+model_resolution_m: 100.0
+crs: EPSG:27700
+temporal:
+  label: WorldClim 2.1 1970–2000 normals
+source:
+  provider: WorldClim
+  product: WorldClim 2.1 bioclimatic variables (BIO7)
+  licence: WorldClim-noncommercial
+  licence_url: https://worldclim.org/about.html
+  access_url: https://geodata.ucdavis.edu/climate/worldclim/2_1/tiles/iso/
+  citation: Fick, S.E. and R.J. Hijmans, 2017. WorldClim 2. International Journal of Climatology.
+  version: '2.1'
+  notes: Academic / non-commercial; redistribution or commercial use needs prior permission.
+    Do not commit WorldClim rasters to git.
+pipeline:
+  rebuild_step: climate
+  code: sdm/commands/data_preparation/environmental/generate_climate_data.py
+processing:
+- BIO stack downloaded and reprojected to the model grid
+- Band renamed to climate_bioclim_bio_7 at merge / canonicalize
+caveats:
+- Same licence and temporal limits as other WorldClim layers
+- Upsampled from ~30 arc-sec; cell-to-cell detail at 100 m is not native
+references:
+- title: WorldClim bioclimatic variables
+  url: https://www.worldclim.org/data/bioclim.html
+markdown: climate_bioclim_bio_7.md

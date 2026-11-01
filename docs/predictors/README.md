@@ -70,6 +70,8 @@ doc = load_layer("terrain_dtm")
 
 ## Implementation notes
 
-**Modeller / data** — first batch covers one representative layer per rebuild
-family plus one multiscale derived example. Further bands land in follow-up PRs
-using the same schema.
+**Modeller / data** — catalog covers every band listed in any
+`data/sdm_config/*/variables_config.yml` on main, plus a few pipeline /
+lineage parents (e.g. `terrain_dtm`, excluded coast distance, ALAN, and
+in-cell parents of multiscale land-cover bands). Follow the `derived_from`
+chain for upstream caveats.

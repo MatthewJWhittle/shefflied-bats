@@ -1,0 +1,27 @@
+id: terrain_stats_twi
+title: Topographic wetness index
+kind: derived
+family: terrain_stats
+selection: included
+summary: TWI from D8 flow accumulation and slope on the model DTM.
+shows:
+- Relative topographic wetness / drainage potential
+does_not_show:
+- Soil moisture measurements
+- Groundwater depth
+units: dimensionless
+model_resolution_m: 100.0
+crs: EPSG:27700
+pipeline:
+  rebuild_step: terrain_stats
+  code: sdm/commands/data_preparation/environmental/generate_terrain_stats.py
+derived_from:
+- terrain_dtm
+processing:
+- Computed from the model-grid DTM in process_dem_to_terrain_attributes
+caveats:
+- Inherits DTM gaps and coastal / estuary artefacts from terrain_dtm — see parent doc
+references:
+- title: Predictor docs — terrain_dtm
+  url: terrain_dtm.md
+markdown: terrain_stats_twi.md
