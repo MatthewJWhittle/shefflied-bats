@@ -2,6 +2,10 @@ model:
   seed: 42
   record_age_years: 20
 
+  # Trainer: maxent (elapid, default) or experimental deepmaxent (joint MLP).
+  # deepmaxent requires: uv sync --extra dl
+  type: maxent
+
   # Cross-validation fold method (default: 10 km spatial blocks into 5 folds).
   # CLI overrides: --cv-method, --cv-n-folds, --cv-block-size-m,
   # --cv-block-n-folds, --cv-buffer-m, --cv-buffered-loo-warn-above.
@@ -15,6 +19,28 @@ model:
     block_n_tries: 500
     buffer_m: 10000
     buffered_loo_warn_above: 25
+
+  # Shared multi-output DeepMaxent (Ryckewaert et al. 2024). Ignored unless
+  # model.type is deepmaxent. Device auto = MPS → CUDA → CPU.
+  deepmaxent:
+    device: auto
+    hidden_size: 250
+    n_hidden_layers: 2
+    dropout: 0.0
+    # Drop input feature channels in train mode only; 0 = off.
+    input_dropout: 0.0
+    learning_rate: 0.0002
+    batch_size: 250
+    weight_decay: 0.0003
+    epochs: 100
+    n_seeds: 10
+    epsilon: 1.0e-6
+    use_species_weights: false
+    # Guarantee k presence rows per output each batch (rare species). Off by default.
+    balanced_batches: false
+    presences_per_output: 4
+    transform: cloglog
+    # early_stopping_patience: null
 
   maxent:
     feature_types:

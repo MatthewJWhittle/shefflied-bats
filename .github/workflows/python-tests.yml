@@ -54,3 +54,20 @@ jobs:
         uvx flake8 sdm tests --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         uvx flake8 sdm tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  # Optional DeepMaxent / PyTorch path — base job above must not require torch.
+  deepmaxent:
+    name: deepmaxent (dl extra)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v3
+      with:
+        python-version: 3.12
+    - name: Setup uv
+      uses: andgineer/uv-venv@v3
+    - name: Install dependencies with dl extra
+      run: uv sync --all-groups --extra dl
+    - name: DeepMaxent synthetic tests (CPU)
+      run: uv run pytest tests/test_deepmaxent.py -m "not integration"
