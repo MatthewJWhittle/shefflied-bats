@@ -10,7 +10,7 @@ dependencies = [
     "geopandas>=1.0.1",
     "ipykernel>=6.29.5",
     "mlflow>=3.1.0",
-    "numpy>=1.26.4",
+    "numpy>=2.0.2",
     "pandas>=2.2.3",
     "pyhere>=1.0.3",
     "pytest-asyncio>=1.2.0",
@@ -39,6 +39,7 @@ dependencies = [
     "psutil>=5.9.0",
     "google-cloud-secret-manager>=2.20.0",
     "psycopg[binary]>=3.1.0",
+    "tilearray",
 ]
 
 [project.scripts]
@@ -53,6 +54,9 @@ packages = ["sdm"]
 
 [tool.uv.workspace]
 members = ["sdm"]
+
+[tool.uv.sources]
+tilearray = { git = "https://github.com/MatthewJWhittle/tilearray.git" }
 
 [tool.pytest.ini_options]
 markers = [

@@ -21,6 +21,16 @@ from .terrain import (
     create_terrain_wcs_downloaders,
     WCSDownloader,
 )
+from .wcs_tilearray import (
+    EA_DSM_COVERAGE_ID,
+    EA_DSM_WCS_ENDPOINT,
+    EA_DTM_COVERAGE_ID,
+    EA_DTM_WCS_ENDPOINT,
+    EA_VOM_COVERAGE_ID,
+    EA_VOM_WCS_ENDPOINT,
+    fetch_wcs_dataarray,
+    fetch_wcs_dataset,
+)
 
 __all__ = [
     # Loaders
@@ -37,7 +47,15 @@ __all__ = [
     'create_boundary',
     'create_study_boundary',
     
-    # Terrain
+    # Terrain / WCS
     'create_terrain_wcs_downloaders',
     'WCSDownloader',
+    'EA_DSM_COVERAGE_ID',
+    'EA_DSM_WCS_ENDPOINT',
+    'EA_DTM_COVERAGE_ID',
+    'EA_DTM_WCS_ENDPOINT',
+    'EA_VOM_COVERAGE_ID',
+    'EA_VOM_WCS_ENDPOINT',
+    'fetch_wcs_dataarray',
+    'fetch_wcs_dataset',
 ]
