@@ -233,7 +233,7 @@ class TestBufferedLooPresenceWarning:
         self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Warning fires per model above threshold; not at/below. Training continues."""
-        from sdm.commands.modelling.train_sdm_models import train_single_model
+        from sdm.models.maxent.training import train_single_model
         from sdm.types import TrainingData
 
         class _StubMaxent:
@@ -243,11 +243,11 @@ class TestBufferedLooPresenceWarning:
             return object(), [], np.array([0.5]), None
 
         monkeypatch.setattr(
-            "sdm.commands.modelling.train_sdm_models.create_maxent_pipeline",
+            "sdm.models.maxent.training.create_maxent_pipeline",
             lambda **_kwargs: object(),
         )
         monkeypatch.setattr(
-            "sdm.commands.modelling.train_sdm_models.evaluate_and_train_maxent_model",
+            "sdm.models.maxent.training.evaluate_and_train_maxent_model",
             _fake_evaluate_and_train,
         )
 

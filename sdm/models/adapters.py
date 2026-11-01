@@ -1,38 +1,48 @@
 """Interoperable model adapters for ``sdm train`` / ``predict`` / ``tune``.
 
 Shared CLI orchestration resolves a ``ModelAdapter`` by ``model.type`` (train/tune)
-or package/run ``trainer`` (predict). MaxEnt is the only registered backend in this
-module; DeepMaxent and later methods add a class + registry entry (see
+or package/run ``trainer`` (predict). MaxEnt is the only registered backend here;
+DeepMaxent and later methods add a class + registry entry (see
 ``docs/modelling/adapters.md``). Do not introduce façade pickles for new trainers.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, runtime_checkable
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
 
+from sklearn.metrics import roc_auc_score
+
+from sdm.models.maxent.maxent_model import (
+    create_maxent_pipeline,
+    cross_validate_maxent_model,
+)
+from sdm.models.maxent.training import summarize_cv_scores, train_models_parallel
 from sdm.types import TrainingData, TrainingResults
+from sdm.utils.io import load_pickled_model
+from sdm.utils.rng import apply_training_seed
 
 DEFAULT_TRAINER = "maxent"
 
 
+def normalize_trainer_id(value: Optional[str]) -> str:
+    """Lowercase / strip a trainer id; empty or None → maxent."""
+    if value is None:
+        return DEFAULT_TRAINER
+    key = str(value).strip().lower()
+    return key or DEFAULT_TRAINER
+
+
 @dataclass
 class TrainBundle:
-    """Adapter train output consumed by shared run-folder writers.
-
-    ``joint_artifact`` is reserved for multi-output trainers (e.g. DeepMaxent);
-    MaxEnt leaves it ``None`` and relies on per-model ``TrainingResults``.
-    """
+    """Adapter train output consumed by shared run-folder writers."""
 
     results: List[TrainingResults]
     training_data: List[TrainingData]
-    joint_artifact: Any = None
-    run_metadata_extra: Dict[str, Any] = field(default_factory=dict)
 
 
-@runtime_checkable
 class Predictor(Protocol):
     """Minimal scoring surface used after package load (sklearn Pipeline today)."""
 
@@ -41,10 +51,9 @@ class Predictor(Protocol):
 
 
 class ModelAdapter(Protocol):
-    """Train / load / optional tune surface for one modelling method."""
+    """Train / load surface for one modelling method."""
 
     name: str
-    supports_tune: bool
 
     def train(
         self,
@@ -59,6 +68,10 @@ class ModelAdapter(Protocol):
 
     def load_predictor(self, model_path: Path) -> Predictor:
         """Load a scorer from a package pickle path (or equivalent)."""
+
+
+class Tunable(Protocol):
+    """Optuna suggest / eval surface; adapters implement this when tune is ready."""
 
     def suggest_hyperparameters(self, trial: Any) -> Dict[str, Any]:
         """Suggest method-specific hyperparameters for one Optuna trial."""
@@ -78,7 +91,6 @@ class MaxEntAdapter:
     """elapid / sklearn Pipeline MaxEnt — current production trainer."""
 
     name = DEFAULT_TRAINER
-    supports_tune = True
 
     def train(
         self,
@@ -89,10 +101,6 @@ class MaxEntAdapter:
         max_threads_per_model: int = 1,
         n_jobs: Optional[int] = None,
     ) -> TrainBundle:
-        # Lazy import: train helpers live in the command module that also
-        # resolves this adapter (avoid import cycle at module load).
-        from sdm.commands.modelling.train_sdm_models import train_models_parallel
-
         results = train_models_parallel(
             list(training_data),
             max_threads_per_model=max_threads_per_model,
@@ -106,8 +114,6 @@ class MaxEntAdapter:
         )
 
     def load_predictor(self, model_path: Path) -> Predictor:
-        from sdm.utils.io import load_pickled_model
-
         return load_pickled_model(model_path)
 
     def suggest_hyperparameters(self, trial: Any) -> Dict[str, Any]:
@@ -166,15 +172,6 @@ class MaxEntAdapter:
         max_threads_per_model: int = 1,
         n_cv_folds: int = 3,
     ) -> Tuple[float, float]:
-        from sklearn.metrics import roc_auc_score
-
-        from sdm.commands.modelling.train_sdm_models import _summarize_cv_scores
-        from sdm.models.maxent.maxent_model import (
-            create_maxent_pipeline,
-            cross_validate_maxent_model,
-        )
-        from sdm.utils.rng import apply_training_seed
-
         apply_training_seed(seed)
         model = create_maxent_pipeline(
             feature_names=data.model_features,
@@ -203,7 +200,7 @@ class MaxEntAdapter:
             feature_columns=data.model_features,
             random_state=seed,
         )
-        cv_mean, cv_std, _, _ = _summarize_cv_scores(cv_scores)
+        cv_mean, cv_std, _, _ = summarize_cv_scores(cv_scores)
         return cv_mean, cv_std
 
 
@@ -214,7 +211,7 @@ ADAPTERS: Dict[str, ModelAdapter] = {
 
 def get_adapter(model_type: Optional[str]) -> ModelAdapter:
     """Return the registered adapter for ``model_type`` (default: maxent)."""
-    key = (model_type or DEFAULT_TRAINER).strip().lower() or DEFAULT_TRAINER
+    key = normalize_trainer_id(model_type)
     adapter = ADAPTERS.get(key)
     if adapter is None:
         known = ", ".join(sorted(ADAPTERS))
@@ -237,9 +234,9 @@ def resolve_trainer(
             continue
         raw = source.get("trainer")
         if raw is not None and str(raw).strip():
-            return str(raw).strip().lower()
+            return normalize_trainer_id(str(raw))
     if model_type is not None and str(model_type).strip():
-        return str(model_type).strip().lower()
+        return normalize_trainer_id(str(model_type))
     return DEFAULT_TRAINER
 
 
@@ -265,11 +262,18 @@ def resolve_run_trainer(models_dir: Path) -> str:
     return DEFAULT_TRAINER
 
 
-def require_tune_support(adapter: ModelAdapter) -> None:
-    """Raise a clear error when the adapter has not implemented Optuna tune."""
-    if not getattr(adapter, "supports_tune", False):
+def _is_tunable(adapter: Any) -> bool:
+    return callable(getattr(adapter, "suggest_hyperparameters", None)) and callable(
+        getattr(adapter, "eval_trial", None)
+    )
+
+
+def require_tune_support(adapter: ModelAdapter) -> Tunable:
+    """Return ``adapter`` as Tunable, or raise when Optuna surfaces are missing."""
+    if not _is_tunable(adapter):
         raise ValueError(
             f"Hyperparameter tuning is not supported for model.type={adapter.name!r} "
             "yet. Use model.type: maxent, or implement suggest_hyperparameters / "
             "eval_trial on that adapter."
         )
+    return adapter  # type: ignore[return-value]

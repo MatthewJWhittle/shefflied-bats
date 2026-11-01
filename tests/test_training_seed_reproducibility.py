@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 from shapely.geometry import Point, box
 
-from sdm.commands.modelling.train_sdm_models import (
-    save_run_metadata,
+from sdm.commands.modelling.train_sdm_models import save_run_metadata
+from sdm.models.maxent.training import (
+    summarize_cv_scores as _summarize_cv_scores,
     train_single_model,
-    _summarize_cv_scores,
 )
 from sdm.models.maxent.maxent_model import DefaultMaxentConfig, cross_validate_maxent_model
 from sdm.occurrence.sampling import BackgroundMethod, generate_background_points_from_data

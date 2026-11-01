@@ -6,12 +6,13 @@
 
 | Piece | Role |
 |-------|------|
-| `ModelAdapter` | Protocol: `train` → `TrainBundle`, `load_predictor`, optional Optuna `suggest_hyperparameters` / `eval_trial` |
-| `TrainBundle` | Per-output `TrainingResults` (+ reserved `joint_artifact` for multi-output methods) |
+| `ModelAdapter` | Protocol: `train` → `TrainBundle`, `load_predictor` |
+| `Tunable` | Optional Optuna surface: `suggest_hyperparameters` / `eval_trial` (implement when tune is ready) |
+| `TrainBundle` | Per-output `TrainingResults` + the `training_data` used to fit |
 | `Predictor` | Scoring surface used after load (`predict_proba` today for MaxEnt) |
 | `ADAPTERS` | Registry keyed by `model.type` / package `trainer` |
 
-Implementation: [`sdm/models/adapters.py`](../../sdm/models/adapters.py).
+Implementation: [`sdm/models/adapters.py`](../../sdm/models/adapters.py). MaxEnt fit helpers live under [`sdm/models/maxent/training.py`](../../sdm/models/maxent/training.py) so adapters do not import the Typer command module.
 
 ## MaxEnt (default)
 
@@ -22,12 +23,12 @@ Implementation: [`sdm/models/adapters.py`](../../sdm/models/adapters.py).
 
 ## Adding a method
 
-1. Implement a class with the `ModelAdapter` surfaces (tune may leave `supports_tune = False` until ready).
+1. Implement `ModelAdapter` (`train`, `load_predictor`). Add `Tunable` methods only when Optuna tune is ready.
 2. Register it: `ADAPTERS["your_type"] = YourAdapter()`.
 3. Document package / joint artifact layout in [model-package-contract.md](../model-package-contract.md).
 
-No new `if trainer ==` ladders in the train/predict/tune commands.
+No new `if trainer ==` ladders in the train/predict/tune commands. Call sites thread the already-resolved adapter rather than re-selecting `"maxent"` by string.
 
 ## DeepMaxent (#111)
 
-[#111](https://github.com/MatthewJWhittle/shefflied-bats/pull/111) should land as a **`DeepMaxentAdapter`** on this seam: joint train + joint predict from one artifact. Do **not** ship façade / fake-Pipeline pickles as the long-term predict path. See the project cleanup plan for sequencing after this foundation merges.
+[#111](https://github.com/MatthewJWhittle/shefflied-bats/pull/111) should land as a **`DeepMaxentAdapter`** on this seam: joint train + joint predict from one artifact. Extra run metadata / joint artifacts belong on that adapter’s `TrainBundle` when they exist — not as empty placeholders on MaxEnt. Do **not** ship façade / fake-Pipeline pickles as the long-term predict path.

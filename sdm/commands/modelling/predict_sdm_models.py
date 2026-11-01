@@ -60,12 +60,11 @@ def filter_models(
 def load_model(
     model_path: Path,
     *,
-    adapter: Optional[ModelAdapter] = None,
+    adapter: ModelAdapter,
 ) -> Any:
-    """Load a model via the resolved adapter (default: MaxEnt pickle path)."""
-    resolved = adapter or get_adapter("maxent")
+    """Load a model via the already-resolved adapter."""
     try:
-        return resolved.load_predictor(model_path)
+        return adapter.load_predictor(model_path)
     except Exception as e:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise

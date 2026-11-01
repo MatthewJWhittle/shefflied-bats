@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence
 
 import pytest
 
@@ -14,11 +14,35 @@ from sdm.models.adapters import (
     MaxEntAdapter,
     TrainBundle,
     get_adapter,
+    normalize_trainer_id,
     require_tune_support,
     resolve_run_trainer,
     resolve_trainer,
 )
 from sdm.types import ModelConfig, TrainingData, TrainingResults
+
+_MIN_MAXENT = {
+    "feature_types": ["linear"],
+    "beta_multiplier": 1.0,
+    "beta_lqp": 1.0,
+    "beta_hinge": 1.0,
+    "beta_threshold": 1.0,
+    "beta_categorical": 1.0,
+    "n_hinge_features": 10,
+    "n_threshold_features": 0,
+    "clamp": True,
+    "convergence_tolerance": 1e-5,
+    "use_lambdas": "best",
+    "n_lambdas": 100,
+    "class_weights": "balanced",
+    "tau": 0.5,
+    "transform": "cloglog",
+}
+
+
+def _model_config(**overrides: Any) -> ModelConfig:
+    payload = {"seed": 1, "maxent": dict(_MIN_MAXENT), **overrides}
+    return ModelConfig.model_validate(payload)
 
 
 def test_get_adapter_default_maxent() -> None:
@@ -33,55 +57,18 @@ def test_get_adapter_unknown_type_clear_error() -> None:
         get_adapter("not-a-real-trainer")
 
 
+def test_normalize_trainer_id() -> None:
+    assert normalize_trainer_id(None) == DEFAULT_TRAINER
+    assert normalize_trainer_id("  MaxEnt ") == "maxent"
+    assert normalize_trainer_id("") == DEFAULT_TRAINER
+
+
 def test_model_config_type_defaults_to_maxent() -> None:
-    cfg = ModelConfig(
-        seed=1,
-        maxent={
-            "feature_types": ["linear"],
-            "beta_multiplier": 1.0,
-            "beta_lqp": 1.0,
-            "beta_hinge": 1.0,
-            "beta_threshold": 1.0,
-            "beta_categorical": 1.0,
-            "n_hinge_features": 10,
-            "n_threshold_features": 0,
-            "clamp": True,
-            "convergence_tolerance": 1e-5,
-            "use_lambdas": "best",
-            "n_lambdas": 100,
-            "class_weights": "balanced",
-            "tau": 0.5,
-            "transform": "cloglog",
-        },
-    )
-    assert cfg.type == "maxent"
+    assert _model_config().type == "maxent"
 
 
 def test_model_config_type_normalizes_case() -> None:
-    cfg = ModelConfig.model_validate(
-        {
-            "seed": 1,
-            "type": " MaxEnt ",
-            "maxent": {
-                "feature_types": ["linear"],
-                "beta_multiplier": 1.0,
-                "beta_lqp": 1.0,
-                "beta_hinge": 1.0,
-                "beta_threshold": 1.0,
-                "beta_categorical": 1.0,
-                "n_hinge_features": 10,
-                "n_threshold_features": 0,
-                "clamp": True,
-                "convergence_tolerance": 1e-5,
-                "use_lambdas": "best",
-                "n_lambdas": 100,
-                "class_weights": "balanced",
-                "tau": 0.5,
-                "transform": "cloglog",
-            },
-        }
-    )
-    assert cfg.type == "maxent"
+    assert _model_config(type=" MaxEnt ").type == "maxent"
 
 
 def test_resolve_trainer_defaults_missing_to_maxent() -> None:
@@ -123,7 +110,6 @@ def test_resolve_run_trainer_prefers_metadata_then_package(tmp_path: Path) -> No
 def test_require_tune_support_refuses_non_tune_adapter() -> None:
     class StubAdapter:
         name = "stub"
-        supports_tune = False
 
         def train(
             self,
@@ -139,19 +125,6 @@ def test_require_tune_support_refuses_non_tune_adapter() -> None:
         def load_predictor(self, model_path: Path) -> Any:
             raise NotImplementedError
 
-        def suggest_hyperparameters(self, trial: Any) -> Dict[str, Any]:
-            raise NotImplementedError
-
-        def eval_trial(
-            self,
-            data: TrainingData,
-            *,
-            seed: int,
-            max_threads_per_model: int = 1,
-            n_cv_folds: int = 3,
-        ) -> Tuple[float, float]:
-            raise NotImplementedError
-
     with pytest.raises(ValueError, match="not supported"):
         require_tune_support(StubAdapter())
 
@@ -161,7 +134,6 @@ def test_stub_second_adapter_registers_without_cli_branch() -> None:
 
     class EchoAdapter:
         name = "echo"
-        supports_tune = False
 
         def train(
             self,
@@ -185,19 +157,6 @@ def test_stub_second_adapter_registers_without_cli_branch() -> None:
         def load_predictor(self, model_path: Path) -> Any:
             return object()
 
-        def suggest_hyperparameters(self, trial: Any) -> Dict[str, Any]:
-            raise NotImplementedError
-
-        def eval_trial(
-            self,
-            data: TrainingData,
-            *,
-            seed: int,
-            max_threads_per_model: int = 1,
-            n_cv_folds: int = 3,
-        ) -> Tuple[float, float]:
-            raise NotImplementedError
-
     previous = ADAPTERS.get("echo")
     try:
         ADAPTERS["echo"] = EchoAdapter()
@@ -212,6 +171,12 @@ def test_stub_second_adapter_registers_without_cli_branch() -> None:
             ADAPTERS.pop("echo", None)
         else:
             ADAPTERS["echo"] = previous
+
+
+def test_maxent_adapter_is_tunable() -> None:
+    adapter = get_adapter("maxent")
+    tunable = require_tune_support(adapter)
+    assert tunable is adapter
 
 
 def test_save_models_writes_trainer_maxent(tmp_path: Path) -> None:
