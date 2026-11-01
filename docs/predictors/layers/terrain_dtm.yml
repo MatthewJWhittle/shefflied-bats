@@ -1,0 +1,43 @@
+id: terrain_dtm
+title: Digital terrain model
+kind: source
+family: terrain
+selection: included
+summary: >
+  Bare-earth elevation on the model grid, from the Environment Agency LiDAR
+  Composite DTM, resampled to 100 m British National Grid cells.
+shows:
+  - Ground elevation in metres (Newlyn / OSGB vertical datum as published by EA)
+does_not_show:
+  - Building or canopy height (use DSM / VOM products for surface objects)
+  - Bathymetry or offshore bed elevation
+units: metres
+native_resolution_m: 1
+model_resolution_m: 100
+crs: EPSG:27700
+temporal:
+  label: EA LiDAR Composite (multi-year merge)
+  notes: >
+    Composite of surveys over many years; newest suitable survey preferred per
+    location in the EA product. Not a single flight date.
+source:
+  provider: Environment Agency
+  product: LiDAR Composite Digital Terrain Model (DTM) 1 m
+  licence: OGL-UK-3.0
+  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+  access_url: https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs
+  citation: Contains Environment Agency information © Environment Agency and/or database right
+pipeline:
+  rebuild_step: terrain
+  code: sdm/commands/data_preparation/environmental/generate_terrain_data.py
+processing:
+  - Downloaded via EA WCS for the study-boundary window
+  - Reprojected / aligned to the model 100 m grid
+caveats:
+  - Negative elevations occur on foreshore, estuary, and some inland low land or artefacts; see layer QA notes
+  - Coverage gaps in the source composite become missing cells after warp
+  - Vertical accuracy of contributing surveys is about ±15 cm RMSE (EA metadata); model cells average many 1 m pixels
+references:
+  - title: LIDAR Composite Digital Terrain Model (DTM) - 1m (Defra DSP)
+    url: https://environment.data.gov.uk/dataset/13787b9a-26a4-4775-8523-806d13af58fc
+markdown: terrain_dtm.md

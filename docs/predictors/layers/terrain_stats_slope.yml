@@ -1,0 +1,32 @@
+id: terrain_stats_slope
+title: Slope
+kind: derived
+family: terrain_stats
+selection: included
+summary: >
+  Terrain slope angle derived from terrain_dtm on the model grid. Stored in
+  radians by default in the rebuild path.
+shows:
+  - Local ground steepness (slope angle β from central differences on the DEM)
+does_not_show:
+  - Aspect / facing direction (see aspect_* bands)
+  - Surface roughness of vegetation or buildings
+units: radians
+model_resolution_m: 100
+crs: EPSG:27700
+pipeline:
+  rebuild_step: terrain_stats
+  code: sdm/commands/data_preparation/environmental/generate_terrain_stats.py
+derived_from:
+  - terrain_dtm
+processing:
+  - Computed from the model-grid DTM via central differences
+  - Default output units are radians (see generate_terrain_stats)
+caveats:
+  - Inherits DTM gaps and coastal / estuary artefacts from terrain_dtm
+  - Values are angles in radians (max ~0.74 ≈ 42° on the current stack) — not degrees or percent unless units are overridden at generation time
+  - Does not restate parent elevation caveats; see terrain_dtm
+references:
+  - title: Predictor docs — terrain_dtm
+    url: terrain_dtm.md
+markdown: terrain_stats_slope.md

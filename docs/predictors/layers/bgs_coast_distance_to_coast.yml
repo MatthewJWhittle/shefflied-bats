@@ -1,0 +1,42 @@
+id: bgs_coast_distance_to_coast
+title: Distance to coast
+kind: source
+family: coastal
+selection: excluded
+summary: >
+  Distance to mean high water / coastline on the model grid. Still produced by
+  the coastal rebuild step for QA, but excluded from evs-to-model selection
+  (include=0).
+shows:
+  - Distance to the configured coastline geometry (metres), clipped to 0–7000 m when present in a clipped stack
+does_not_show:
+  - Exposure, salinity, or foraging quality directly
+  - Variation beyond the 7 km clip used in model-stack clipping
+units: metres
+model_resolution_m: 100
+crs: EPSG:27700
+source:
+  provider: Ordnance Survey
+  product: Boundary-Line mean high water / coastline geometry (pipeline default)
+  licence: OGL-UK-3.0
+  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+  access_url: https://osdatahub.os.uk/downloads/open/BoundaryLine
+  notes: >
+    Optional legacy BGS GeoCoast polygon path exists for like-for-like rebuilds;
+    default public path uses OS Boundary-Line MHW polylines. Band prefix remains
+    bgs_coast_ for historical naming.
+pipeline:
+  rebuild_step: coastal
+  code: sdm/commands/data_preparation/spatial/generate_coastal_distance.py
+processing:
+  - Distance raster on the model grid
+  - Model-stack clipping 0–7000 m when the band is present
+  - Not selected into evs-to-model while include=0
+caveats:
+  - About 85% of study-area cells sat at the 7000 m cap in QA — little inland contrast
+  - Mechanisms once proxied by coast distance are largely covered by wind and vegetation predictors
+  - See docs/modelling/distance-to-coast.md for the exclusion decision
+references:
+  - title: Distance to coast — dropped from model features
+    url: ../modelling/distance-to-coast.md
+markdown: bgs_coast_distance_to_coast.md

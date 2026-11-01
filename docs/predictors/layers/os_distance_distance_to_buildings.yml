@@ -1,0 +1,36 @@
+id: os_distance_distance_to_buildings
+title: Distance to buildings
+kind: source
+family: os
+selection: included
+summary: >
+  Euclidean distance to the nearest OS Vector Map District building feature,
+  clipped to 0–7000 m in the model stack.
+shows:
+  - Distance to nearest mapped building (metres)
+does_not_show:
+  - Building height, age, or roost suitability
+  - Differences among building types
+units: metres
+model_resolution_m: 100
+crs: EPSG:27700
+source:
+  provider: Ordnance Survey
+  product: OS Vector Map District — Building
+  licence: OGL-UK-3.0
+  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+  access_url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
+  citation: Contains OS data © Crown copyright and database right
+pipeline:
+  rebuild_step: os
+  code: sdm/commands/data_preparation/processing/process_os_data.py
+processing:
+  - Distance raster from building polygons/points on the model grid
+  - Clipped to 0–7000 m in build_model_ev_stack
+caveats:
+  - Cap at 7 km flattens remote upland cells (small fraction at cap in QA)
+  - VMD building outline completeness varies; new build may lag
+references:
+  - title: OS VectorMap District
+    url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
+markdown: os_distance_distance_to_buildings.md
