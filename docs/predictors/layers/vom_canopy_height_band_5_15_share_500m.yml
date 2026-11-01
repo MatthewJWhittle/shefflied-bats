@@ -1,0 +1,28 @@
+id: vom_canopy_height_band_5_15_share_500m
+title: Canopy height band 5–15 m share (500 m neighbourhood)
+kind: derived
+family: vegetation
+summary: >
+  Focal mean of vom_canopy_height_band_5_15_share over a 10-cell (500 m) neighbourhood on the 100 m grid.
+shows:
+  - Neighbourhood-average of the parent cell layer
+does_not_show:
+  - Anything the parent cell layer does not show
+units: "fraction (0–1)"
+model_resolution_m: 100
+crs: EPSG:27700
+pipeline:
+  rebuild_step: vom_canopy
+  code: sdm/commands/data_preparation/environmental/generate_vom_canopy_features.py
+derived_from:
+  - vom_canopy_height_band_5_15_share
+processing:
+  - Focal / multiscale mean at window 10 cells (500 m at 100 m resolution)
+caveats:
+  - Inherits VOM and canopy-geometry limits from the parent — do not re-copy; open the parent doc
+  - Edge cells use whatever neighbourhood exists inside the raster extent
+  - Not selected into the live EV model stack in this stage
+references:
+  - title: Predictor docs — vom_canopy_height_band_5_15_share
+    url: vom_canopy_height_band_5_15_share.md
+markdown: vom_canopy_height_band_5_15_share_500m.md

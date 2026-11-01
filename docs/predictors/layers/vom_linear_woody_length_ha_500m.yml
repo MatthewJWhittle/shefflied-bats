@@ -1,0 +1,29 @@
+id: vom_linear_woody_length_ha_500m
+title: Linear woody length per hectare (500 m neighbourhood)
+kind: derived
+family: vegetation
+selection: available
+summary: >
+  Focal mean of vom_linear_woody_length_ha over a 10-cell (500 m) neighbourhood on the 100 m grid.
+shows:
+  - Neighbourhood-average of the parent cell layer
+does_not_show:
+  - Anything the parent cell layer does not show
+units: "metres per hectare"
+model_resolution_m: 100
+crs: EPSG:27700
+pipeline:
+  rebuild_step: vom_canopy
+  code: sdm/commands/data_preparation/environmental/generate_vom_canopy_features.py
+derived_from:
+  - vom_linear_woody_length_ha
+processing:
+  - Focal / multiscale mean at window 10 cells (500 m at 100 m resolution)
+caveats:
+  - Inherits VOM and canopy-geometry limits from the parent — do not re-copy; open the parent doc
+  - Edge cells use whatever neighbourhood exists inside the raster extent
+  - Not selected into the live EV model stack in this stage
+references:
+  - title: Predictor docs — vom_linear_woody_length_ha
+    url: vom_linear_woody_length_ha.md
+markdown: vom_linear_woody_length_ha_500m.md

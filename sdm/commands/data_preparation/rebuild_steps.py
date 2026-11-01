@@ -27,6 +27,11 @@ REBUILD_STEPS: tuple[RebuildStep, ...] = (
     RebuildStep("ceh", "generate_ceh_lc_data", "CEH land cover → landcover/"),
     RebuildStep("vom", "generate_vom_data", "Vegetation Object Model → vom/"),
     RebuildStep(
+        "vom_canopy",
+        "generate_vom_canopy_features",
+        "VOM 1 m canopy components → vom_canopy/ (opt-in; not merged into EV stack)",
+    ),
+    RebuildStep(
         "coastal",
         "generate_coastal_distance",
         "Coastal distance → coastal_distance.tif",
@@ -45,6 +50,11 @@ REBUILD_STEPS: tuple[RebuildStep, ...] = (
 )
 
 REBUILD_STEP_NAMES: frozenset[str] = frozenset(step.name for step in REBUILD_STEPS)
+
+# Heavy / experimental steps excluded from a default full rebuild; request with
+# ``--only`` (or omit from ``--skip`` after an explicit ``--only`` that includes
+# them). ``vom_canopy`` writes scratch component layers only — never merge.
+OPT_IN_REBUILD_STEPS: frozenset[str] = frozenset({"vom_canopy"})
 
 
 class UnknownRebuildStepError(ValueError):
@@ -102,10 +112,11 @@ def resolve_active_steps(
         )
     if only_set:
         return only_set
-    return REBUILD_STEP_NAMES - skip_set
+    return (REBUILD_STEP_NAMES - skip_set) - OPT_IN_REBUILD_STEPS
 
 
 __all__ = [
+    "OPT_IN_REBUILD_STEPS",
     "REBUILD_STEPS",
     "REBUILD_STEP_NAMES",
     "RebuildStep",
