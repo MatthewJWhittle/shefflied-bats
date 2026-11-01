@@ -2,7 +2,6 @@ id: vom_trees_outside_woodland_share
 title: Trees-outside-woodland share
 kind: source
 family: vegetation
-selection: available
 summary: >
   Share of each 100 m cell with canopy that is not woodland-from-canopy (lone trees, small groups, and linear woody).
 shows:
@@ -18,14 +17,7 @@ temporal:
   notes: >
     VOM is derived from National LiDAR Programme elevation; Phase 1 blocks were
     captured in winter months (approx. November–April) between 2017 and 2023.
-source:
-  provider: Environment Agency
-  product: LIDAR Vegetation Object Model (VOM)
-  licence: OGL-UK-3.0
-  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
-  access_url: https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
-  citation: Contains Environment Agency information © Environment Agency and/or database right
-  version: Vegetation_Object_Model_Elevation_2022 (WCS coverage id in pipeline)
+source_id: ea_vom
 pipeline:
   rebuild_step: vom_canopy
   code: sdm/commands/data_preparation/environmental/generate_vom_canopy_features.py

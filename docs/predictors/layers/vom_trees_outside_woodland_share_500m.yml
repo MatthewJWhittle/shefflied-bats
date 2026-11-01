@@ -2,7 +2,6 @@ id: vom_trees_outside_woodland_share_500m
 title: Trees-outside-woodland share (500 m neighbourhood)
 kind: derived
 family: vegetation
-selection: available
 summary: >
   Focal mean of vom_trees_outside_woodland_share over a 10-cell (500 m) neighbourhood on the 100 m grid.
 shows:
