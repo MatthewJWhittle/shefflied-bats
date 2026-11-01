@@ -12,7 +12,7 @@ Habitat condition, or cover in the surrounding landscape (use multiscale derivat
 
 ## Source and licence
 
-**UKCEH Land Cover Map 2023** under UKCEH terms. Source GeoTIFF is gitignored.
+**UKCEH Land Cover Map 2023** under UKCEH click-through / non-commercial terms. See [ukceh_lcm_2023](../sources/ukceh_lcm_2023.md).
 
 ## Pipeline
 

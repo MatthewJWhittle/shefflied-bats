@@ -1,0 +1,18 @@
+id: ukceh_lcm_2023
+title: UKCEH Land Cover Map 2023
+provider: UK Centre for Ecology & Hydrology
+product: Land Cover Map 2023 10 m raster
+licence: UKCEH-LCM-click-through
+licence_url: https://eidc.ceh.ac.uk/licences/standard-click-through/plain
+access_url: https://www.ceh.ac.uk/data/ukceh-land-cover-maps
+citation: UKCEH Land Cover Map 2023
+version: "2023"
+notes: >
+  Raster LCM is available to non-commercial users under UKCEH click-through
+  terms. Class definitions and codes follow the published LCM 2023 legend.
+references:
+  - title: UKCEH Land Cover Maps
+    url: https://www.ceh.ac.uk/data/ukceh-land-cover-maps
+  - title: UKCEH EIDC standard click-through licence
+    url: https://eidc.ceh.ac.uk/licences/standard-click-through/plain
+markdown: ukceh_lcm_2023.md

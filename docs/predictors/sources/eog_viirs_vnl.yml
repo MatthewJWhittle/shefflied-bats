@@ -1,0 +1,18 @@
+id: eog_viirs_vnl
+title: EOG VIIRS night lights (VNL)
+provider: Earth Observation Group (Payne Institute) / VIIRS
+product: EOG annual VNL v2.2 average_masked
+licence: CC-BY-4.0
+access_url: https://eogdata.mines.edu/products/vnl/
+citation: Earth Observation Group, Payne Institute for Public Policy
+version: v2.2 / year 2025
+notes: >
+  Annual average masked radiance composite. Project canonical year/product is
+  2025 EOG VNL v2.2. ~500 m native information; model layers warp to 100 m.
+  Recent landscape lighting context — not matched to older occurrence years.
+references:
+  - title: EOG VIIRS night-time lights products
+    url: https://eogdata.mines.edu/products/vnl/
+  - title: Project ALAN layer notes
+    url: ../alan-layer.md
+markdown: eog_viirs_vnl.md

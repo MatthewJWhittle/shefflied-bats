@@ -1,8 +1,9 @@
 # Predictor layer YAML schema
 
-Validated by `sdm.predictors.schema.LayerDoc` (Pydantic). Extra keys are rejected.
+Validated by `sdm.predictors.schema.LayerDoc` and `SourceDoc` (Pydantic).
+Extra keys are rejected.
 
-## Required
+## Layer required
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -12,11 +13,10 @@ Validated by `sdm.predictors.schema.LayerDoc` (Pydantic). Extra keys are rejecte
 | `family` | string | Grouping key: `terrain`, `terrain_stats`, `climate`, `landcover`, `vegetation`, `coastal`, `os`, `alan`, … |
 | `summary` | string | One- or two-sentence plain description. |
 
-## Recommended
+## Layer recommended
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `selection` | `included` \| `excluded` \| `available` | `included`: used in the model stack (CSV `include=1`, or a multiscale band grown from an included parent). `excluded`: deliberately omitted from the model stack (CSV `include=0`). `available`: rebuild may write it, but it is not a current model feature. Default `included`. |
 | `shows` | string[] | What the values represent. |
 | `does_not_show` | string[] | Common misreadings / absences. |
 | `units` | string | Physical or coded units. |
@@ -24,29 +24,35 @@ Validated by `sdm.predictors.schema.LayerDoc` (Pydantic). Extra keys are rejecte
 | `model_resolution_m` | number | Model grid (default 100). |
 | `crs` | string | Default `EPSG:27700`. |
 | `temporal` | object | `label` plus optional `notes`. |
-| `source` | object | Public provider / product / licence (see below). |
+| `source_id` | string | Id of a doc under `sources/` (licence, URL, citation). Prefer this over repeating provider blocks on every layer. |
 | `pipeline` | object | `rebuild_step` registry name; optional `code` path. |
 | `derived_from` | string[] | Parent layer ids. **Required** when `kind: derived`; **forbidden** when `kind: source`. |
 | `processing` | string[] | What this repo does to the source. |
-| `caveats` | string[] | Limits for modelling and interpretation. |
+| `caveats` | string[] | Limits for modelling and interpretation (ecology / data quality — not pipeline policy). |
 | `references` | object[] | `{title, url}` public links. |
 | `markdown` | string | Markdown filename under `layers/` (default `<id>.md`). |
 
-### `source` object
+Derived layers may omit `source_id` and inherit context via `derived_from`, or
+set `source_id` when a direct pointer helps without opening the parent.
 
-| Field | Meaning |
-|-------|---------|
-| `provider` | Organisation. |
-| `product` | Dataset name. |
-| `licence` | Short licence label (e.g. `OGL-UK-3.0`, `WorldClim-noncommercial`). |
-| `licence_url` | Optional. |
-| `access_url` | Optional download or service URL. |
-| `citation` | Optional preferred citation. |
-| `version` | Optional product version string. |
-| `notes` | Optional licence or access caveats (e.g. CEH non-redistribution). |
+## Source docs (`sources/`)
 
-Derived layers may omit `source` and inherit context via `derived_from`, or
-repeat a short `source` pointer when that helps agents without opening the parent.
+One YAML + Markdown pair per upstream dataset. Validated by `SourceDoc`.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `id` | string | Source id (snake case); must match the YAML filename stem. |
+| `title` | string | Short human title. |
+| `provider` | string | Organisation. |
+| `product` | string | Dataset name. |
+| `licence` | string | Short licence label (e.g. `OGL-UK-3.0`, `WorldClim-noncommercial`). |
+| `licence_url` | string | Optional. |
+| `access_url` | string | Optional download or service URL. |
+| `citation` | string | Optional preferred citation. |
+| `version` | string | Optional product version string. |
+| `notes` | string | Optional licence or access caveats for the **dataset** (not repo implementation rules). |
+| `references` | object[] | `{title, url}` public links. |
+| `markdown` | string | Markdown filename under `sources/` (default `<id>.md`). |
 
 ## Catalog (`catalog.yml`)
 
@@ -57,6 +63,11 @@ description: >
 layers:
   - terrain_dtm
   - …
+sources:
+  - ea_lidar_dtm
+  - …
 ```
 
-Every id listed must have `layers/<id>.yml` and a Markdown page.
+Every layer id listed must have `layers/<id>.yml` and a Markdown page.
+Every source id listed must have `sources/<id>.yml` and a Markdown page.
+Layer `source_id` values must appear in `sources`.

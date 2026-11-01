@@ -1,6 +1,15 @@
 schema_version: 1
 description: Predictor-layer docs covering bands used by models on the public pipeline on
-  main, plus lineage parents required by derived layers.
+  main, plus lineage parents required by derived layers. Upstream datasets are listed under
+  sources with licence and access metadata.
+sources:
+- ea_lidar_dtm
+- ea_vom
+- eog_viirs_vnl
+- os_boundary_line
+- os_vector_map_district
+- ukceh_lcm_2023
+- worldclim_2_1
 layers:
 - alan_viirs_radiance
 - bgs_coast_distance_to_coast

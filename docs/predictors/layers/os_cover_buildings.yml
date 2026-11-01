@@ -2,9 +2,8 @@ id: os_cover_buildings
 title: Building cover
 kind: source
 family: os
-selection: included
-summary: Percentage of each 100 m cell covered by Ordnance Survey Vector Map District buildings
-  features.
+summary: >-
+  Percentage of each 100 m cell covered by Ordnance Survey Vector Map District buildings features.
 shows:
 - In-cell building footprint cover (%) from OS VMD Building
 does_not_show:
@@ -13,13 +12,7 @@ does_not_show:
 units: percent
 model_resolution_m: 100.0
 crs: EPSG:27700
-source:
-  provider: Ordnance Survey
-  product: OS Vector Map District — Buildings
-  licence: OGL-UK-3.0
-  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
-  access_url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
-  citation: Contains OS data © Crown copyright and database right
+source_id: os_vector_map_district
 pipeline:
   rebuild_step: os
   code: sdm/commands/data_preparation/processing/process_os_data.py

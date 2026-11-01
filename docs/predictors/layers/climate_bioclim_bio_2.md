@@ -13,7 +13,7 @@ Record-year extremes or microclimate.
 ## Source and licence
 
 WorldClim 2.1 bioclimatic surfaces — academic / non-commercial; no
-redistribution without permission. Rasters stay out of git.
+redistribution without permission. See [worldclim_2_1](../sources/worldclim_2_1.md).
 
 ## Pipeline
 

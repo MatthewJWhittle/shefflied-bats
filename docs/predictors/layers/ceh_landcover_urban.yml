@@ -2,9 +2,9 @@ id: ceh_landcover_urban
 title: Urban cover (in-cell)
 kind: source
 family: landcover
-selection: included
-summary: Area of UKCEH LCM 2023 class Urban (code 20) aggregated to each 100 m model cell
-  (percent × 100 units).
+summary: >-
+  Area of UKCEH LCM 2023 class Urban (code 20) aggregated to each 100 m model cell (percent
+  × 100 units).
 shows:
 - How much of the 100 m cell is mapped as urban in LCM 2023
 does_not_show:
@@ -16,26 +16,16 @@ model_resolution_m: 100.0
 crs: EPSG:27700
 temporal:
   label: UKCEH Land Cover Map 2023
-source:
-  provider: UK Centre for Ecology & Hydrology
-  product: Land Cover Map 2023 10 m raster
-  licence: UKCEH-LCM-click-through
-  licence_url: https://eidc.ceh.ac.uk/licences/standard-click-through/plain
-  access_url: https://www.ceh.ac.uk/data/ukceh-land-cover-maps
-  citation: UKCEH Land Cover Map 2023
-  version: '2023'
-  notes: Raster LCM is available to non-commercial users under UKCEH terms; do not publish
-    or commit the licensed GeoTIFF.
+source_id: ukceh_lcm_2023
 pipeline:
   rebuild_step: ceh
   code: sdm/commands/data_preparation/environmental/generate_ceh_lc_data.py
 processing:
-- Manual CEH 10 m GeoTIFF path (gitignored)
+- Manual CEH 10 m GeoTIFF path
 - Per-class / aggregated area to 100 m cells
 - Merge prefix ceh_landcover_
 caveats:
 - Classification error and mixed pixels at 10 m propagate into cell shares
-- Licensed source must not enter git
 - 'Class definition: UKCEH LCM 2023 class Urban (code 20)'
 references:
 - title: UKCEH Land Cover Maps

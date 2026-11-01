@@ -2,16 +2,14 @@ id: alan_viirs_radiance
 title: Artificial light at night (VIIRS radiance)
 kind: source
 family: alan
-selection: included
-summary: >
-  Annual VIIRS night-lights radiance (EOG VNL v2.2 average_masked) warped to
-  the model grid. Selected in the EV CSV; species enablement is separate.
+summary: |
+  Annual VIIRS night-lights radiance (EOG VNL v2.2 average_masked) warped to the model grid. Selected in the EV CSV; species enablement is separate.
 shows:
-  - Relative night-time radiance (nW/cm²/sr) from the annual composite
+- Relative night-time radiance (nW/cm²/sr) from the annual composite
 does_not_show:
-  - Spectral composition of lighting
-  - Year-matched lighting for older occurrence records
-  - Under-canopy or indoor light
+- Spectral composition of lighting
+- Year-matched lighting for older occurrence records
+- Under-canopy or indoor light
 units: nW/cm^2/sr
 native_resolution_m: 500
 model_resolution_m: 100
@@ -19,24 +17,18 @@ crs: EPSG:27700
 temporal:
   label: EOG VNL annual composite 2025 (canonical)
   notes: Recent landscape lighting context; not matched to older record years.
-source:
-  provider: Earth Observation Group (Payne Institute) / VIIRS
-  product: EOG annual VNL v2.2 average_masked
-  licence: CC-BY-4.0
-  access_url: https://eogdata.mines.edu/products/vnl/
-  version: v2.2 / year 2025
-  notes: Global radiance GeoTIFF stays in bucket/local cache — not in git.
+source_id: eog_viirs_vnl
 pipeline:
   rebuild_step: alan
   code: sdm/commands/data_preparation/environmental/generate_alan_data.py
 processing:
-  - Windowed read, bilinear warp to model grid
-  - Preserve radiance zeros; cf_cvg ≤ 0 → NaN when coverage present
+- Windowed read, bilinear warp to model grid
+- Preserve radiance zeros; cf_cvg ≤ 0 → NaN when coverage present
 caveats:
-  - Temporal mismatch with older occurrence years
-  - ~500 m native information in 100 m cells
-  - Auto-skips when the local/bucket source file is missing
+- Temporal mismatch with older occurrence years
+- ~500 m native information in 100 m cells
+- Auto-skips when the local/bucket source file is missing
 references:
-  - title: Project ALAN layer notes
-    url: ../alan-layer.md
+- title: Project ALAN layer notes
+  url: ../alan-layer.md
 markdown: alan_viirs_radiance.md

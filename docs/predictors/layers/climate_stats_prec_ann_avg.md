@@ -4,7 +4,7 @@ Mean of twelve monthly WorldClim precipitation bands (mm).
 
 ## Source and licence
 
-WorldClim 2.1 — academic / non-commercial; rasters not in git.
+WorldClim 2.1 — academic / non-commercial. See [worldclim_2_1](../sources/worldclim_2_1.md).
 
 ## Pipeline
 

@@ -8,7 +8,7 @@ Proximity to mapped buildings — not height, type, or roost quality.
 
 ## Source and licence
 
-OS Vector Map District (OGL). Keep raw tiles out of git as with other OS caches.
+OS Vector Map District (OGL). See [os_vector_map_district](../sources/os_vector_map_district.md).
 
 ## Pipeline
 

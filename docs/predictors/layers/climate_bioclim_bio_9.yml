@@ -2,9 +2,9 @@ id: climate_bioclim_bio_9
 title: Mean temperature of driest quarter (BIO9)
 kind: source
 family: climate
-selection: included
-summary: 'WorldClim bioclimatic variable BIO9 on the model grid: Mean temperature during the
-  driest quarter of the year.'
+summary: >-
+  WorldClim bioclimatic variable BIO9 on the model grid: Mean temperature during the driest
+  quarter of the year.
 shows:
 - Mean temperature during the driest quarter of the year
 does_not_show:
@@ -16,16 +16,7 @@ model_resolution_m: 100.0
 crs: EPSG:27700
 temporal:
   label: WorldClim 2.1 1970–2000 normals
-source:
-  provider: WorldClim
-  product: WorldClim 2.1 bioclimatic variables (BIO9)
-  licence: WorldClim-noncommercial
-  licence_url: https://worldclim.org/about.html
-  access_url: https://geodata.ucdavis.edu/climate/worldclim/2_1/tiles/iso/
-  citation: Fick, S.E. and R.J. Hijmans, 2017. WorldClim 2. International Journal of Climatology.
-  version: '2.1'
-  notes: Academic / non-commercial; redistribution or commercial use needs prior permission.
-    Do not commit WorldClim rasters to git.
+source_id: worldclim_2_1
 pipeline:
   rebuild_step: climate
   code: sdm/commands/data_preparation/environmental/generate_climate_data.py

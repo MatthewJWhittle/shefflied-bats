@@ -14,9 +14,8 @@ Year-matched weather for bat records, or fine-scale microclimate.
 ## Source and licence
 
 **WorldClim 2.1** (Fick & Hijmans 2017). Academic / non-commercial use; no
-redistribution or commercial use without permission
-([worldclim.org/about](https://worldclim.org/about.html)). Keep downloads out
-of git.
+redistribution or commercial use without permission. Licence and access:
+[worldclim_2_1](../sources/worldclim_2_1.md).
 
 ## Pipeline
 

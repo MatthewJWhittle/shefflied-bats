@@ -4,7 +4,7 @@ WorldClim **BIO4**: Standard deviation of monthly mean temperatures × 100.
 
 ## Source and licence
 
-WorldClim 2.1 — academic / non-commercial; no redistribution without permission. Rasters stay out of git.
+WorldClim 2.1 — academic / non-commercial; redistribution or commercial use needs prior permission. See [worldclim_2_1](../sources/worldclim_2_1.md).
 
 ## Pipeline
 

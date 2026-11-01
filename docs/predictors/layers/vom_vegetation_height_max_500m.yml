@@ -2,7 +2,6 @@ id: vom_vegetation_height_max_500m
 title: Vegetation canopy height (max, 500 m neighbourhood)
 kind: derived
 family: vegetation
-selection: included
 summary: Focal mean of vom_vegetation_height_max over a 10-cell (500 m) neighbourhood.
 shows:
 - Neighbourhood-average vegetation height max around each cell
@@ -19,7 +18,8 @@ derived_from:
 processing:
 - Focal mean at window 10 cells (500 m)
 caveats:
-- Inherits VOM 2.5 m / canopy-top / leaf-off limits from the parent — see parent doc
+- >-
+  Inherits VOM 2.5 m / canopy-top / leaf-off limits from the parent — see parent doc
 references:
 - title: Predictor docs — vom_vegetation_height_max
   url: vom_vegetation_height_max.md

@@ -2,42 +2,40 @@ id: vom_vegetation_height_max
 title: Vegetation canopy height (cell max)
 kind: source
 family: vegetation
-selection: included
-summary: >
-  Maximum canopy-top height (m) from the EA Vegetation Object Model within each
-  100 m cell, after the pipeline 40 m cap on source heights.
+summary: |
+  Maximum canopy-top height (m) from the EA Vegetation Object Model within each 100 m cell, after the pipeline 40 m cap on source heights.
 shows:
-  - Tallest classified canopy-top height in the cell (m)
+- Tallest classified canopy-top height in the cell (m)
 does_not_show:
-  - Vegetation shorter than 2.5 m
-  - Understorey / vertical layering
-  - Leaf-on hedge structure (leaf-off source surveys)
+- Vegetation shorter than 2.5 m
+- Understorey / vertical layering
+- Leaf-on hedge structure (leaf-off source surveys)
 units: metres
 native_resolution_m: 1
 model_resolution_m: 100
 crs: EPSG:27700
 temporal:
   label: National LiDAR Programme surveys (winter / leaf-off)
-source:
-  provider: Environment Agency
-  product: LIDAR Vegetation Object Model (VOM)
-  licence: OGL-UK-3.0
-  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
-  access_url: https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
-  citation: Contains Environment Agency information © Environment Agency and/or database right
+source_id: ea_vom
 pipeline:
   rebuild_step: vom
   code: sdm/commands/data_preparation/environmental/generate_vom_data.py
 processing:
-  - Same VOM download and 40 m pre-summary cap as other vom_vegetation_height_* bands
-  - Cell-wise maximum after coarsening
+- >-
+  Same VOM download and 40 m pre-summary cap as other vom_vegetation_height_* bands
+- Cell-wise maximum after coarsening
 caveats:
-  - Same official VOM limits as vom_vegetation_height_mean (2.5 m threshold; canopy top only; leaf-off National LiDAR)
-  - Max is sensitive to single tall trees or residual mis-classified structures; 40 m cap reduces mast/pylon spikes
-  - See vom_vegetation_height_mean for full source wording
+- >-
+  Same official VOM limits as vom_vegetation_height_mean (2.5 m threshold; canopy top only;
+  leaf-off National LiDAR)
+- >-
+  Max is sensitive to single tall trees or residual mis-classified structures; 40 m cap reduces
+  mast/pylon spikes
+- See vom_vegetation_height_mean for full source wording
 references:
-  - title: LIDAR Vegetation Object Model (VOM) — data.gov.uk
-    url: https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
-  - title: Predictor docs — vom_vegetation_height_mean
-    url: vom_vegetation_height_mean.md
+- title: LIDAR Vegetation Object Model (VOM) — data.gov.uk
+  url: >-
+    https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
+- title: Predictor docs — vom_vegetation_height_mean
+  url: vom_vegetation_height_mean.md
 markdown: vom_vegetation_height_max.md

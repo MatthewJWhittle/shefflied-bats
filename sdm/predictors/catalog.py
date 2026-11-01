@@ -7,7 +7,7 @@ from typing import Iterable, Optional
 
 import yaml
 
-from sdm.predictors.schema import LayerDoc, PredictorCatalog
+from sdm.predictors.schema import LayerDoc, PredictorCatalog, SourceDoc
 
 _REPO_ROOT_MARKERS = ("pyproject.toml", "docs", "sdm")
 
@@ -59,9 +59,34 @@ def load_layer(
     return doc
 
 
+def load_source(
+    source_id: str,
+    *,
+    docs_root: Optional[Path] = None,
+) -> SourceDoc:
+    """Load and validate one upstream source YAML by id."""
+    root = docs_root if docs_root is not None else default_docs_root()
+    path = root / "sources" / f"{source_id}.yml"
+    if not path.is_file():
+        raise FileNotFoundError(f"Predictor source doc not found: {path}")
+    with path.open(encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle) or {}
+    doc = SourceDoc.model_validate(payload)
+    if doc.id != source_id:
+        raise ValueError(
+            f"Source YAML id {doc.id!r} does not match filename stem {source_id!r}"
+        )
+    return doc
+
+
 def iter_layer_ids(*, docs_root: Optional[Path] = None) -> Iterable[str]:
     catalog = load_catalog(docs_root=docs_root)
     return list(catalog.layers)
+
+
+def iter_source_ids(*, docs_root: Optional[Path] = None) -> Iterable[str]:
+    catalog = load_catalog(docs_root=docs_root)
+    return list(catalog.sources)
 
 
 def resolve_layer_markdown(
@@ -75,4 +100,18 @@ def resolve_layer_markdown(
     path = root / "layers" / name
     if not path.is_file():
         raise FileNotFoundError(f"Predictor layer markdown not found: {path}")
+    return path
+
+
+def resolve_source_markdown(
+    doc: SourceDoc,
+    *,
+    docs_root: Optional[Path] = None,
+) -> Path:
+    """Return the human Markdown path for a source doc."""
+    root = docs_root if docs_root is not None else default_docs_root()
+    name = doc.markdown or f"{doc.id}.md"
+    path = root / "sources" / name
+    if not path.is_file():
+        raise FileNotFoundError(f"Predictor source markdown not found: {path}")
     return path

@@ -18,11 +18,12 @@ from sdm.predictors import (
     layer_raster_attrs,
     load_catalog,
     load_layer,
+    load_source,
     read_predictor_sidecar,
     resolve_layer_markdown,
+    resolve_source_markdown,
     write_predictor_sidecar,
 )
-from sdm.predictors.schema import LayerSelection
 
 
 def test_catalog_loads_and_matches_layer_files() -> None:
@@ -37,6 +38,35 @@ def test_catalog_loads_and_matches_layer_files() -> None:
         md = resolve_layer_markdown(doc, docs_root=root)
         assert md.is_file()
         assert md.read_text(encoding="utf-8").strip()
+
+
+def test_catalog_loads_and_matches_source_files() -> None:
+    """Every catalog source id has YAML + Markdown that validate."""
+    root = default_docs_root()
+    catalog = load_catalog(docs_root=root)
+    assert len(catalog.sources) >= 1
+    for source_id in catalog.sources:
+        doc = load_source(source_id, docs_root=root)
+        assert doc.id == source_id
+        assert doc.licence
+        assert doc.provider
+        assert doc.product
+        md = resolve_source_markdown(doc, docs_root=root)
+        assert md.is_file()
+        assert md.read_text(encoding="utf-8").strip()
+
+
+def test_layer_source_ids_resolve() -> None:
+    """Layer source_id values must be catalogued sources."""
+    root = default_docs_root()
+    catalog = load_catalog(docs_root=root)
+    known = set(catalog.sources)
+    for layer_id in catalog.layers:
+        doc = load_layer(layer_id, docs_root=root)
+        if doc.source_id is None:
+            continue
+        assert doc.source_id in known, f"{layer_id} -> missing source {doc.source_id}"
+        load_source(doc.source_id, docs_root=root)
 
 
 def test_all_model_feature_layers_are_documented() -> None:
@@ -86,9 +116,30 @@ def test_vom_docs_include_verified_source_limits() -> None:
     assert "canopy" in md
 
 
-def test_coast_distance_marked_excluded() -> None:
+def test_coast_distance_documented_as_not_model_feature() -> None:
     doc = load_layer("bgs_coast_distance_to_coast")
-    assert doc.selection is LayerSelection.EXCLUDED
+    blob = " ".join([doc.summary, *doc.caveats, *doc.processing]).lower()
+    assert "include=0" in blob or "not used" in blob
+    assert doc.source_id == "os_boundary_line"
+    md = resolve_layer_markdown(doc).read_text(encoding="utf-8").lower()
+    assert "not used" in md or "include=0" in md
+
+
+def test_layer_docs_avoid_git_policy_wording() -> None:
+    """Layer caveats/notes document sources, not repo commit policy."""
+    banned = (
+        "must not enter git",
+        "do not commit",
+        "stays out of git",
+        "not in git",
+        "gitignored",
+    )
+    root = default_docs_root()
+    for layer_id in load_catalog(docs_root=root).layers:
+        doc = load_layer(layer_id, docs_root=root)
+        blob = " ".join([*doc.processing, *doc.caveats]).lower()
+        for phrase in banned:
+            assert phrase not in blob, f"{layer_id} still has {phrase!r}"
 
 
 def test_attach_and_sidecar_round_trip(tmp_path: Path) -> None:

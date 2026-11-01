@@ -2,9 +2,9 @@ id: os_distance_distance_to_major_roads
 title: Distance to major roads
 kind: source
 family: os
-selection: included
-summary: Euclidean distance to the nearest OS Vector Map District major roads feature on the
-  model grid.
+summary: >-
+  Euclidean distance to the nearest OS Vector Map District major roads feature on the model
+  grid.
 shows:
 - Distance to nearest mapped major roads (metres)
 does_not_show:
@@ -12,13 +12,7 @@ does_not_show:
 units: metres
 model_resolution_m: 100.0
 crs: EPSG:27700
-source:
-  provider: Ordnance Survey
-  product: OS Vector Map District — major roads
-  licence: OGL-UK-3.0
-  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
-  access_url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
-  citation: Contains OS data © Crown copyright and database right
+source_id: os_vector_map_district
 pipeline:
   rebuild_step: os
   code: sdm/commands/data_preparation/processing/process_os_data.py

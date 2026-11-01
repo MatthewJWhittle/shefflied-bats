@@ -2,9 +2,9 @@ id: ceh_landcover_upland_heathland_1500m
 title: Upland heathland (aggregated) cover (1500 m neighbourhood)
 kind: derived
 family: landcover
-selection: included
-summary: Focal mean of ceh_landcover_upland_heathland over a 30-cell (1500 m) neighbourhood
-  on the 100 m grid.
+summary: >-
+  Focal mean of ceh_landcover_upland_heathland over a 30-cell (1500 m) neighbourhood on the
+  100 m grid.
 shows:
 - Neighbourhood-average upland heathland (aggregated) share around each cell
 does_not_show:
@@ -20,7 +20,8 @@ derived_from:
 processing:
 - Focal / multiscale mean at window 30 cells (1500 m at 100 m resolution)
 caveats:
-- Inherits CEH class definition, licence, and classification limits from the parent — do not
+- >-
+  Inherits CEH class definition, licence, and classification limits from the parent — do not
   re-copy; open the parent doc
 - Edge cells use whatever neighbourhood exists inside the raster extent
 references:

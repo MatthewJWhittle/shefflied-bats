@@ -2,9 +2,9 @@ id: ceh_landcover_broadleaved_woodland_1000m
 title: Broadleaved woodland cover (1000 m neighbourhood)
 kind: derived
 family: landcover
-selection: included
-summary: Focal mean of ceh_landcover_broadleaved_woodland over a 20-cell (1000 m) neighbourhood
-  on the 100 m grid.
+summary: >-
+  Focal mean of ceh_landcover_broadleaved_woodland over a 20-cell (1000 m) neighbourhood on
+  the 100 m grid.
 shows:
 - Neighbourhood-average broadleaved woodland share around each cell
 does_not_show:
@@ -20,7 +20,8 @@ derived_from:
 processing:
 - Focal / multiscale mean at window 20 cells (1000 m at 100 m resolution)
 caveats:
-- Inherits CEH class definition, licence, and classification limits from the parent — do not
+- >-
+  Inherits CEH class definition, licence, and classification limits from the parent — do not
   re-copy; open the parent doc
 - Edge cells use whatever neighbourhood exists inside the raster extent
 references:

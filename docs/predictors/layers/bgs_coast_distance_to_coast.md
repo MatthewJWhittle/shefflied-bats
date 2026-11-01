@@ -1,7 +1,7 @@
 # Distance to coast (`bgs_coast_distance_to_coast`)
 
-Coastal distance on the model grid. **Excluded** from `evs-to-model.tif`
-selection (`include=0`); the `coastal` rebuild step may still write it for QA.
+Coastal distance on the model grid. **Not used** as a model feature
+(`include=0` in the EV CSV); the `coastal` rebuild step may still write it for QA.
 
 ## What it shows
 
@@ -15,10 +15,11 @@ layer is flat.
 
 ## Source
 
-Default geometry from **OS Boundary-Line** (OGL). Historical band prefix
+Default geometry from **OS Boundary-Line** (OGL). See
+[os_boundary_line](../sources/os_boundary_line.md). Historical band prefix
 `bgs_coast_` retained. Optional BGS GeoCoast path is rebuild-only.
 
-## Why excluded
+## Why not a model feature
 
 Documented in [distance-to-coast.md](../modelling/distance-to-coast.md): heavy
 saturation at the 7 km cap and redundant ecological signal.

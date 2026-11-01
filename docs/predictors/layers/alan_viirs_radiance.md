@@ -14,7 +14,7 @@ Lamp type, under-canopy light, or lighting in the year of each bat record.
 ## Source and licence
 
 EOG VNL v2.2 (CC-BY 4.0; attribute Elvidge et al.; mark changes). Files live in
-the project bucket / local cache only — **not in git**.
+the project bucket / local cache. Licence and access: [eog_viirs_vnl](../sources/eog_viirs_vnl.md).
 
 Full operational detail: [alan-layer.md](../alan-layer.md).
 

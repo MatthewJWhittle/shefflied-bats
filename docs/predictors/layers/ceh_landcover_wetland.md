@@ -4,7 +4,7 @@ In-cell share of Sum of Bog and Fen, Marsh and Swamp LCM classes on the model gr
 
 ## Source and licence
 
-UKCEH Land Cover Map 2023 — licensed raster stays out of git.
+UKCEH Land Cover Map 2023. Licence and access: [ukceh_lcm_2023](../sources/ukceh_lcm_2023.md).
 
 ## Pipeline
 

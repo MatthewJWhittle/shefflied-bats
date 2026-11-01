@@ -4,7 +4,7 @@ In-cell share of Sum of Heather and shrub and Heather grassland on the model gri
 
 ## Source and licence
 
-UKCEH Land Cover Map 2023 — licensed raster stays out of git.
+UKCEH Land Cover Map 2023. Licence and access: [ukceh_lcm_2023](../sources/ukceh_lcm_2023.md).
 
 ## Pipeline
 

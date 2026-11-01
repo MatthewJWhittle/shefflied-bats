@@ -18,8 +18,8 @@ Elevation of the ground surface in metres on the 100 m model grid
 ## Source and licence
 
 Environment Agency **LiDAR Composite DTM 1 m**, Open Government Licence v3.0.
-Fetched live through the Defra/EA WCS endpoint during `sdm data` (`terrain`
-step). Rasters are not stored in git.
+Licence and access: [ea_lidar_dtm](../sources/ea_lidar_dtm.md). Fetched live
+through the Defra/EA WCS endpoint during `sdm data` (`terrain` step).
 
 ## Pipeline
 

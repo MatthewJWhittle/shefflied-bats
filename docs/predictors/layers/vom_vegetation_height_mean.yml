@@ -2,51 +2,52 @@ id: vom_vegetation_height_mean
 title: Vegetation canopy height (cell mean)
 kind: source
 family: vegetation
-selection: included
-summary: >
-  Mean canopy-top height (m) from the Environment Agency Vegetation Object
-  Model, summarised from 1 m VOM onto 100 m cells, with heights capped at 40 m
-  before summary.
+summary: |
+  Mean canopy-top height (m) from the Environment Agency Vegetation Object Model, summarised from 1 m VOM onto 100 m cells, with heights capped at 40 m before summary.
 shows:
-  - Average top-of-canopy height above ground for classified vegetation objects in the cell
+- >-
+  Average top-of-canopy height above ground for classified vegetation objects in the cell
 does_not_show:
-  - Vegetation shorter than the VOM 2.5 m inclusion threshold
-  - Understorey or vertical layering within the canopy
-  - Leaf-on hedge and understorey structure (source LiDAR is leaf-off)
-  - Non-vegetation tall objects that survive automated screening (masts may still appear before the 40 m cap)
+- Vegetation shorter than the VOM 2.5 m inclusion threshold
+- Understorey or vertical layering within the canopy
+- Leaf-on hedge and understorey structure (source LiDAR is leaf-off)
+- >-
+  Non-vegetation tall objects that survive automated screening (masts may still appear before
+  the 40 m cap)
 units: metres
 native_resolution_m: 1
 model_resolution_m: 100
 crs: EPSG:27700
 temporal:
   label: National LiDAR Programme surveys (winter / leaf-off)
-  notes: >
-    VOM is derived from National LiDAR Programme elevation; Phase 1 blocks were
-    captured in winter months (approx. November–April) between 2017 and 2023.
-source:
-  provider: Environment Agency
-  product: LIDAR Vegetation Object Model (VOM)
-  licence: OGL-UK-3.0
-  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
-  access_url: https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
-  citation: Contains Environment Agency information © Environment Agency and/or database right
-  version: Vegetation_Object_Model_Elevation_2022 (WCS coverage id in pipeline)
+  notes: |
+    VOM is derived from National LiDAR Programme elevation; Phase 1 blocks were captured in winter months (approx. November–April) between 2017 and 2023.
+source_id: ea_vom
 pipeline:
   rebuild_step: vom
   code: sdm/commands/data_preparation/environmental/generate_vom_data.py
 processing:
-  - WCS download of VOM elevation
-  - Cap cell heights above 40 m before summary (structures / masts)
-  - Coarsen to mean / min / max / std on the 100 m grid
+- WCS download of VOM elevation
+- Cap cell heights above 40 m before summary (structures / masts)
+- Coarsen to mean / min / max / std on the 100 m grid
 caveats:
-  - Official VOM product keeps only classified vegetation objects above 2.5 m (data.gov.uk VOM summary)
-  - Each VOM pixel is height of the top of canopy above ground — not vertical canopy layering (same source page)
-  - National LiDAR Programme surveys used for VOM were flown in winter (leaf-off); trimmed hedges and understorey below the threshold or without winter returns are missed or under-represented
-  - Automated classification can mis-label some non-vegetation objects (EA lists e.g. static caravans, containers, marquees, cliffs, buildings under trees)
-  - Pipeline also caps heights at 40 m before metrics (#73)
+- >-
+  Official VOM product keeps only classified vegetation objects above 2.5 m (data.gov.uk VOM
+  summary)
+- >-
+  Each VOM pixel is height of the top of canopy above ground — not vertical canopy layering
+  (same source page)
+- >-
+  National LiDAR Programme surveys used for VOM were flown in winter (leaf-off); trimmed hedges
+  and understorey below the threshold or without winter returns are missed or under-represented
+- >-
+  Automated classification can mis-label some non-vegetation objects (EA lists e.g. static
+  caravans, containers, marquees, cliffs, buildings under trees)
+- Pipeline also caps heights at 40 m before metrics (#73)
 references:
-  - title: LIDAR Vegetation Object Model (VOM) — data.gov.uk
-    url: https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
-  - title: National LIDAR Programme (winter capture window)
-    url: https://environment.data.gov.uk/dataset/2e8d0733-4f43-48b4-9e51-631c25d1b0a9
+- title: LIDAR Vegetation Object Model (VOM) — data.gov.uk
+  url: >-
+    https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
+- title: National LIDAR Programme (winter capture window)
+  url: https://environment.data.gov.uk/dataset/2e8d0733-4f43-48b4-9e51-631c25d1b0a9
 markdown: vom_vegetation_height_mean.md

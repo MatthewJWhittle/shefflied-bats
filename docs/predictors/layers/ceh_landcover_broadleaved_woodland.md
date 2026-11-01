@@ -15,8 +15,9 @@ Vegetation height, woodland quality, or cover in the surrounding landscape
 ## Source and licence
 
 **UKCEH Land Cover Map 2023** 10 m raster under UKCEH click-through /
-non-commercial terms. The source GeoTIFF is gitignored and must not be
-committed. See [UKCEH LCM pages](https://www.ceh.ac.uk/data/ukceh-land-cover-maps).
+non-commercial terms. Full licence and access:
+[ukceh_lcm_2023](../sources/ukceh_lcm_2023.md). Product page:
+[UKCEH Land Cover Maps](https://www.ceh.ac.uk/data/ukceh-land-cover-maps).
 
 ## Pipeline
 

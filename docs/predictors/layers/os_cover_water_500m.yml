@@ -2,7 +2,6 @@ id: os_cover_water_500m
 title: Water feature cover (500 m neighbourhood)
 kind: derived
 family: os
-selection: included
 summary: Focal mean of os_cover_water over a 10-cell (500 m) neighbourhood.
 shows:
 - Neighbourhood-average water cover around each cell

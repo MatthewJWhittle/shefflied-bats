@@ -4,7 +4,7 @@ Mean of WorldClim monthly average temperature for April–June (indices 3:6 in c
 
 ## Source and licence
 
-WorldClim 2.1 — academic / non-commercial; rasters not in git.
+WorldClim 2.1 — academic / non-commercial. See [worldclim_2_1](../sources/worldclim_2_1.md).
 
 ## Pipeline
 

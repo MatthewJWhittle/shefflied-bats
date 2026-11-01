@@ -4,7 +4,7 @@ Share of each model cell covered by OS VMD **buildings** features.
 
 ## Source and licence
 
-OS Vector Map District (OGL). Keep raw tiles out of git.
+OS Vector Map District (OGL). See [os_vector_map_district](../sources/os_vector_map_district.md).
 
 ## Pipeline
 

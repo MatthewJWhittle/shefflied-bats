@@ -1,0 +1,19 @@
+id: os_boundary_line
+title: OS Boundary-Line
+provider: Ordnance Survey
+product: Boundary-Line mean high water / coastline geometry
+licence: OGL-UK-3.0
+licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+access_url: https://osdatahub.os.uk/downloads/open/BoundaryLine
+citation: Contains OS data © Crown copyright and database right
+notes: >
+  Default coastline geometry for distance-to-coast. An optional legacy BGS
+  GeoCoast polygon path exists for like-for-like rebuilds; the public default
+  uses OS Boundary-Line MHW polylines. The historical band prefix remains
+  bgs_coast_.
+references:
+  - title: OS Boundary-Line downloads
+    url: https://osdatahub.os.uk/downloads/open/BoundaryLine
+  - title: Open Government Licence v3.0
+    url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+markdown: os_boundary_line.md

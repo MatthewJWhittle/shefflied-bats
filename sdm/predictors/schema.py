@@ -15,16 +15,8 @@ class LayerKind(str, Enum):
     DERIVED = "derived"
 
 
-class LayerSelection(str, Enum):
-    """Whether the band is selected into ``evs-to-model.tif``."""
-
-    INCLUDED = "included"
-    EXCLUDED = "excluded"
-    AVAILABLE = "available"
-
-
 class SourceInfo(BaseModel):
-    """Public data source for a layer (or its ultimate upstream)."""
+    """Public metadata for an upstream dataset (also the body of a source doc)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -36,6 +28,36 @@ class SourceInfo(BaseModel):
     citation: Optional[str] = None
     version: Optional[str] = None
     notes: Optional[str] = None
+
+
+class SourceDoc(BaseModel):
+    """Machine-readable upstream dataset document (``docs/predictors/sources/``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Stable source id (snake case).")
+    title: str
+    provider: str
+    product: str
+    licence: str
+    licence_url: Optional[str] = None
+    access_url: Optional[str] = None
+    citation: Optional[str] = None
+    version: Optional[str] = None
+    notes: Optional[str] = None
+    references: list[dict[str, str]] = Field(default_factory=list)
+    markdown: Optional[str] = Field(
+        default=None,
+        description="Markdown filename relative to the sources/ directory.",
+    )
+
+    @field_validator("id")
+    @classmethod
+    def _id_is_snake(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned or " " in cleaned:
+            raise ValueError(f"source id must be a non-empty snake token, got {value!r}")
+        return cleaned
 
 
 class TemporalInfo(BaseModel):
@@ -61,7 +83,6 @@ class LayerDoc(BaseModel):
     title: str
     kind: LayerKind
     family: str
-    selection: LayerSelection = LayerSelection.INCLUDED
     summary: str
     shows: list[str] = Field(default_factory=list)
     does_not_show: list[str] = Field(default_factory=list)
@@ -70,7 +91,10 @@ class LayerDoc(BaseModel):
     model_resolution_m: float = 100.0
     crs: str = "EPSG:27700"
     temporal: Optional[TemporalInfo] = None
-    source: Optional[SourceInfo] = None
+    source_id: Optional[str] = Field(
+        default=None,
+        description="Id of a docs/predictors/sources/*.yml entry for licence/URL metadata.",
+    )
     pipeline: Optional[PipelineInfo] = None
     derived_from: list[str] = Field(
         default_factory=list,
@@ -102,17 +126,25 @@ class LayerDoc(BaseModel):
 
 
 class PredictorCatalog(BaseModel):
-    """Index of documented predictor layer ids."""
+    """Index of documented predictor layer and source ids."""
 
     model_config = ConfigDict(extra="forbid")
 
     schema_version: int = 1
     description: str = ""
     layers: list[str]
+    sources: list[str] = Field(default_factory=list)
 
     @field_validator("layers")
     @classmethod
-    def _unique_ids(cls, value: list[str]) -> list[str]:
+    def _unique_layer_ids(cls, value: list[str]) -> list[str]:
         if len(value) != len(set(value)):
             raise ValueError("catalog layer ids must be unique")
+        return value
+
+    @field_validator("sources")
+    @classmethod
+    def _unique_source_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("catalog source ids must be unique")
         return value

@@ -1,0 +1,18 @@
+id: os_vector_map_district
+title: OS Vector Map District
+provider: Ordnance Survey
+product: OS Vector Map District
+licence: OGL-UK-3.0
+licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+access_url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
+citation: Contains OS data © Crown copyright and database right
+notes: >
+  Open vector product used for building, water, and road cover and distance
+  predictors. Themes (buildings, water, roads) are selected in the rebuild
+  pipeline; each layer doc names the theme it uses.
+references:
+  - title: OS Vector Map District downloads
+    url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
+  - title: Open Government Licence v3.0
+    url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+markdown: os_vector_map_district.md

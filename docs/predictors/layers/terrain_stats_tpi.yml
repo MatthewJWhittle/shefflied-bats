@@ -2,7 +2,6 @@ id: terrain_stats_tpi
 title: Topographic position index
 kind: derived
 family: terrain_stats
-selection: included
 summary: Elevation minus neighbourhood mean elevation (local high/low).
 shows:
 - Whether the cell sits above or below its local neighbourhood
@@ -19,7 +18,8 @@ derived_from:
 processing:
 - Computed from the model-grid DTM in process_dem_to_terrain_attributes
 caveats:
-- Inherits DTM gaps and coastal / estuary artefacts from terrain_dtm — see parent doc
+- >-
+  Inherits DTM gaps and coastal / estuary artefacts from terrain_dtm — see parent doc
 references:
 - title: Predictor docs — terrain_dtm
   url: terrain_dtm.md
