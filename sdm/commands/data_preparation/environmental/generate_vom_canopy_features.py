@@ -209,6 +209,7 @@ async def fetch_and_process_vom_canopy(
     compare_bbox = sample_compare_bbox
     if compare_bbox is None and tiles:
         compare_bbox = tiles[0]
+    skipped_tiles: list[list[float]] = []
 
     downloader.temp_dir = Path(tempfile.mkdtemp())
     try:
@@ -223,6 +224,7 @@ async def fetch_and_process_vom_canopy(
                 )
                 for tile_bbox, da in zip(batch, arrays):
                     if da is None:
+                        skipped_tiles.append([float(v) for v in tile_bbox])
                         logging.warning("Skipping failed VOM tile %s", tile_bbox)
                         continue
                     try:
@@ -301,6 +303,22 @@ async def fetch_and_process_vom_canopy(
     logging.info("Writing VOM canopy components to %s", output_path)
     ds.rio.to_raster(output_path)
 
+    n_skipped = len(skipped_tiles)
+    n_ok = len(tiles) - n_skipped
+    if n_skipped:
+        logging.warning(
+            "VOM canopy finished with %d skipped tile(s) of %d requested "
+            "(%d processed); coverage gaps possible — see notes sidecar",
+            n_skipped,
+            len(tiles),
+            n_ok,
+        )
+    else:
+        logging.info(
+            "VOM canopy finished with 0 skipped tiles (%d processed)",
+            n_ok,
+        )
+
     notes = {
         "source": "EA Lidar Vegetation Object Model (VOM) only",
         "wcs_endpoint": VOM_WCS_ENDPOINT,
@@ -313,6 +331,9 @@ async def fetch_and_process_vom_canopy(
         "woodland_min_area_m2": 5000.0,
         "multiscale_windows_cells": list(multiscale_windows_cells),
         "n_tiles": len(tiles),
+        "n_tiles_processed": n_ok,
+        "n_tiles_skipped": n_skipped,
+        "skipped_tiles": skipped_tiles,
         "spatial_resolution_model_m": spatial_config.get("resolution"),
         "component_layers": list(COMPONENT_LAYER_IDS),
         "not_in_model_stack": True,
@@ -320,7 +341,11 @@ async def fetch_and_process_vom_canopy(
     }
     notes_path = output_dir / "vom_canopy_features_notes.json"
     notes_path.write_text(json.dumps(notes, indent=2, sort_keys=True), encoding="utf-8")
-    logging.info("Wrote processing notes to %s", notes_path)
+    logging.info(
+        "Wrote processing notes to %s (n_tiles_skipped=%d)",
+        notes_path,
+        n_skipped,
+    )
     return output_path
 
 

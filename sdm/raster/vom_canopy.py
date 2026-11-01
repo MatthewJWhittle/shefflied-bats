@@ -332,6 +332,9 @@ def summarise_masks_by_coordinates(
     ys = np.asarray(y_coords, dtype=np.float64)
     col = np.floor(xs[None, :] / res).astype(np.int64)
     row = np.floor(ys[:, None] / res).astype(np.int64)
+    # Broadcast (ny, 1) × (1, nx) to (ny, nx) before flatten — otherwise
+    # keys/inv have ny (or nx) entries and bincount weights fail on real tiles.
+    row, col = np.broadcast_arrays(row, col)
     keys = np.stack([row.ravel(), col.ravel()], axis=1)
     uniq, inv = np.unique(keys, axis=0, return_inverse=True)
     n_cells = uniq.shape[0]

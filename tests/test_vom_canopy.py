@@ -17,6 +17,7 @@ from sdm.raster.vom_canopy import (
     compare_narrow_canopy_retention,
     height_band_masks,
     linear_woody_mask,
+    summarise_masks_by_coordinates,
     summarise_masks_to_grid,
     woodland_from_canopy,
 )
@@ -81,6 +82,56 @@ def test_linear_woody_detects_narrow_strip() -> None:
     linear = linear_woody_mask(grid, woodland=np.zeros_like(grid), resolution_m=1.0)
     assert linear.sum() > 0
     assert linear.sum() == grid.sum()
+
+
+def test_summarise_masks_by_coordinates_matches_brute_force_64x64() -> None:
+    """Real-shaped 2-D tile: broadcast keys so bincount weights match ny×nx."""
+    rng = np.random.default_rng(0)
+    ny = nx = 64
+    height = rng.uniform(0.0, 20.0, size=(ny, nx)).astype(np.float64)
+    height[height < 2.0] = 0.0
+    # Cell centres on a national-metre lattice (1 m spacing).
+    x_coords = 420000.5 + np.arange(nx, dtype=np.float64)
+    y_coords = 381000.5 - np.arange(ny, dtype=np.float64)
+    masks = build_canopy_masks(height, resolution_m=1.0)
+    summary_res = 10
+    got = summarise_masks_by_coordinates(
+        masks,
+        height,
+        x_coords=x_coords,
+        y_coords=y_coords,
+        fine_resolution_m=1.0,
+        summary_resolution_m=summary_res,
+    )
+    assert got, "expected at least one summary cell"
+
+    # Brute-force canopy pixel counts per floor(y/res), floor(x/res) cell.
+    expected_counts: dict[tuple[int, int], int] = {}
+    for iy in range(ny):
+        for ix in range(nx):
+            key = (
+                int(np.floor(y_coords[iy] / summary_res)),
+                int(np.floor(x_coords[ix] / summary_res)),
+            )
+            if masks.canopy[iy, ix]:
+                expected_counts[key] = expected_counts.get(key, 0) + 1
+
+    expected_pixels = float((summary_res / 1.0) ** 2)
+    for key, count in expected_counts.items():
+        assert key in got
+        # Full 10×10 blocks inside the 64×64 tile use expected_pixels denom.
+        n_in_cell = sum(
+            1
+            for iy in range(ny)
+            for ix in range(nx)
+            if (
+                int(np.floor(y_coords[iy] / summary_res)),
+                int(np.floor(x_coords[ix] / summary_res)),
+            )
+            == key
+        )
+        denom = expected_pixels if n_in_cell >= expected_pixels * 0.99 else float(n_in_cell)
+        assert got[key]["vom_canopy_share"] == pytest.approx(count / denom)
 
 
 def test_summarise_masks_to_grid_shares_and_lengths() -> None:
