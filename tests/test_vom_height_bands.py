@@ -60,6 +60,13 @@ def test_summarise_height_block_caps_and_tolerates_bad_input() -> None:
     assert stacked.shape == (len(CELL_LAYER_STEMS), 1, 1)
     assert np.all(np.isfinite(stacked))
 
+    # Soft-failed fetch tile (all-NaN) must stay NaN summaries, not open-land zeros.
+    soft_fail = summarise_height_block(
+        np.full((100, 100), np.nan), fine_resolution_m=1.0, summary_resolution_m=100
+    )
+    assert soft_fail.shape == (len(CELL_LAYER_STEMS), 1, 1)
+    assert np.all(np.isnan(soft_fail))
+
     # Non-array-like path: empty → all-NaN failure tile (no raise).
     bad = summarise_height_block(
         np.zeros((0, 0)), fine_resolution_m=1.0, summary_resolution_m=100

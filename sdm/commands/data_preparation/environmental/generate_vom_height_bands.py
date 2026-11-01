@@ -1,9 +1,10 @@
 """Simple VOM height bands + woody cover at 100 m (#121).
 
-Each WCS tile is fetched inside its own per-chunk task (try/except → NaN
-summary + failed count) so one bad tile does not abort siblings via tilearray's
-shared fetch abort. Summaries use xarray ``coarsen``. Neighbourhood woody cover
-uses a box mean on the 100 m grid.
+Live path: one lazy tilearray mosaic + ``map_blocks`` summarise under a
+soft-fail session (failed tiles → NaN; siblings keep fetching under the
+shared AIMD ceiling). Optional ``fetch_chunk`` path keeps per-chunk isolation
+for injected-failure tests. Chunk bboxes used on that path snap to the
+resolution grid. Neighbourhood woody cover uses a box mean on the 100 m grid.
 """
 
 from __future__ import annotations
@@ -13,13 +14,18 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
+import dask.array as da
 import numpy as np
 import rioxarray  # noqa: F401  # registers .rio on xarray
 import xarray as xr
 from rasterio.transform import from_origin
+from tilearray import compute_with_policy
+from tilearray import array as tilearray_array
+from tilearray.fetch import FetchProgress
 
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
     VEGETATION_HEIGHT_MAX_M,
@@ -46,6 +52,11 @@ from sdm.utils.logging_utils import setup_logging
 # proof complete while still refusing a mostly-empty mosaic.
 DEFAULT_MAX_FAILED_CHUNK_FRACTION = 0.15
 
+# EA DSP polite ceiling used by tilearray presets (8–12). Cap here too so a
+# caller cannot open more parallel WCS requests than the shared fetcher allows.
+EA_FETCH_CONCURRENCY_MIN_PARALLEL = 8
+EA_FETCH_CONCURRENCY_MAX = 12
+
 # 10 cells at 100 m → ``_500m`` suffix via calculate_multiscale_variables.
 WOODY_NEIGHBOURHOOD_WINDOW_CELLS = 10
 
@@ -58,6 +69,69 @@ FetchChunkFn = Callable[[BBox], np.ndarray]
 
 class VomHeightBandsChunkFailureError(RuntimeError):
     """Raised when too many chunks fail (no GeoTIFF written)."""
+
+
+def resolve_vom_fetch_concurrency(max_concurrent_downloads: int) -> int:
+    """Clamp WCS concurrency to the EA-safe band without collapsing to 1.
+
+    Explicit ``1`` is allowed (serial debug). Any parallel request
+    (``>= 2``) is raised to at least ``EA_FETCH_CONCURRENCY_MIN_PARALLEL``
+    and capped at ``EA_FETCH_CONCURRENCY_MAX`` so ThreadPool workers are not
+    serialized by a shared TileFetcher with ``max_concurrent=1``.
+    """
+    n = int(max_concurrent_downloads)
+    if n < 1:
+        raise ValueError("max_concurrent_downloads must be >= 1")
+    if n == 1:
+        return 1
+    return max(EA_FETCH_CONCURRENCY_MIN_PARALLEL, min(n, EA_FETCH_CONCURRENCY_MAX))
+
+
+@contextmanager
+def tilearray_soft_fail_tiles() -> Iterator[None]:
+    """Failed tiles become NaN; do not abort sibling fetches.
+
+    Patches tilearray's shared ``FetchProgress.abort`` (no hard abort) and
+    ``_load_tile_array`` (exceptions → NaN block) for the duration of the
+    fused ``compute_with_policy`` call.
+    """
+    original_abort = FetchProgress.abort
+    original_load = tilearray_array._load_tile_array
+
+    def soft_abort(self: FetchProgress, reason: str) -> None:
+        with self._lock:
+            self.errors.append(reason)
+            # Intentionally leave ``_aborted`` false so siblings continue.
+
+    def soft_load(
+        request,
+        cache_dir,
+        decoder,
+        dtype,
+        fetch_policy=None,
+        progress=None,
+    ):
+        try:
+            return original_load(
+                request, cache_dir, decoder, dtype, fetch_policy, progress
+            )
+        except Exception as exc:
+            height = int(request.height or 0)
+            width = int(request.width or 0)
+            if height <= 0 or width <= 0:
+                raise
+            logging.warning(
+                "VOM tile soft-fail → NaN block %sx%s: %s", height, width, exc
+            )
+            return np.full((height, width), np.nan, dtype=dtype)
+
+    FetchProgress.abort = soft_abort  # type: ignore[method-assign]
+    tilearray_array._load_tile_array = soft_load  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        FetchProgress.abort = original_abort  # type: ignore[method-assign]
+        tilearray_array._load_tile_array = original_load  # type: ignore[assignment]
 
 
 def _summary_grid_coords(
@@ -154,19 +228,20 @@ def _default_fetch_chunk(
     cache_dir: Optional[Path],
 ) -> np.ndarray:
     """Fetch one chunk as a numpy height array (raises on hard failure)."""
-    da = fetch_wcs_dataarray(
+    concurrency = resolve_vom_fetch_concurrency(max_concurrent)
+    da_out = fetch_wcs_dataarray(
         endpoint=EA_VOM_WCS_ENDPOINT,
         coverage_id=EA_VOM_COVERAGE_ID,
         bbox=bbox,
         resolution_m=float(resolution_m),
         chunk_size=chunk_size,
-        max_concurrent=max_concurrent,
+        max_concurrent=concurrency,
         cache_dir=cache_dir,
         compute=True,
     )
-    if "band" in da.dims:
-        da = da.isel(band=0)
-    return np.asarray(cap_vegetation_heights(da).values, dtype=np.float64)
+    if "band" in da_out.dims:
+        da_out = da_out.isel(band=0)
+    return np.asarray(cap_vegetation_heights(da_out).values, dtype=np.float64)
 
 
 def summarise_chunks_resilient(
@@ -191,7 +266,6 @@ def summarise_chunks_resilient(
     n_chunks = len(y_slices) * len(x_slices)
     out_ny = (len(y_coords) // factor) * factor // factor
     out_nx = (len(x_coords) // factor) * factor // factor
-    # Trim coords to whole summary cells for output placement.
     y_trim = np.asarray(y_coords[: out_ny * factor], dtype=np.float64)
     x_trim = np.asarray(x_coords[: out_nx * factor], dtype=np.float64)
     mosaic = np.full(
@@ -202,16 +276,20 @@ def summarise_chunks_resilient(
     def _one(
         iy: int, ix: int, ys: int, ye: int, xs: int, xe: int
     ) -> tuple[int, int, np.ndarray, bool]:
-        # Clip to trimmed extent.
         ye_t = min(ye, len(y_trim))
         xe_t = min(xe, len(x_trim))
         if ys >= ye_t or xs >= xe_t:
-            return iy, ix, _nan_summary(
-                max(0, ye_t - ys),
-                max(0, xe_t - xs),
-                fine_resolution_m=fine_resolution_m,
-                summary_resolution_m=summary_resolution_m,
-            ), True
+            return (
+                iy,
+                ix,
+                _nan_summary(
+                    max(0, ye_t - ys),
+                    max(0, xe_t - xs),
+                    fine_resolution_m=fine_resolution_m,
+                    summary_resolution_m=summary_resolution_m,
+                ),
+                True,
+            )
         bbox = _bbox_from_centres(
             y_trim[ys:ye_t],
             x_trim[xs:xe_t],
@@ -269,19 +347,19 @@ def summarise_chunks_resilient(
     return mosaic, n_chunks, n_failed
 
 
-def _map_blocks_summaries(
+def _map_blocks_summaries_fused(
     lazy_height: xr.DataArray,
     *,
     fine_resolution_m: float,
     summary_resolution_m: int,
-    fetch_chunk: Optional[FetchChunkFn] = None,
-    max_workers: int = 8,
-) -> tuple[xr.DataArray, int, int]:
-    """Summarise the AOI; network path uses resilient per-chunk fetch.
+) -> tuple[xr.DataArray, int, int, dict[str, float]]:
+    """One mosaic graph: map_blocks summarise + compute_with_policy.
 
-    When ``fetch_chunk`` is set (live rebuild), each chunk is fetched inside its
-    own task. In-memory / test arrays (no fetch_chunk) summarise locally.
+    Caller must enter :func:`tilearray_soft_fail_tiles` so fetch failures
+    become NaN tiles without aborting siblings. Returns stage timings.
     """
+    stages: dict[str, float] = {}
+    t_prep = time.perf_counter()
     if "band" in lazy_height.dims:
         lazy_height = lazy_height.isel(band=0)
     if lazy_height.dims != ("y", "x"):
@@ -289,11 +367,9 @@ def _map_blocks_summaries(
 
     data = lazy_height.data
     factor = int(round(summary_resolution_m / fine_resolution_m))
-    y_coords = np.asarray(lazy_height.y.values, dtype=np.float64)
-    x_coords = np.asarray(lazy_height.x.values, dtype=np.float64)
+    n_layers = len(CELL_LAYER_STEMS)
 
-    # Eager numpy path (unit tests / small fixtures).
-    if not hasattr(data, "chunks") or data.chunks is None or fetch_chunk is None:
+    if not hasattr(data, "chunks") or data.chunks is None:
         stacked = summarise_height_block(
             np.asarray(lazy_height.values),
             fine_resolution_m=fine_resolution_m,
@@ -301,16 +377,16 @@ def _map_blocks_summaries(
             max_height_m=VEGETATION_HEIGHT_MAX_M,
         )
         failed = int(stacked.size > 0 and np.all(~np.isfinite(stacked)))
-        y0 = float(y_coords[0])
-        x0 = float(x_coords[0])
+        y0 = float(lazy_height.y.values[0])
+        x0 = float(lazy_height.x.values[0])
         dy = (
-            float(y_coords[1] - y_coords[0])
-            if len(y_coords) > 1
+            float(lazy_height.y.values[1] - lazy_height.y.values[0])
+            if lazy_height.sizes["y"] > 1
             else -fine_resolution_m
         )
         dx = (
-            float(x_coords[1] - x_coords[0])
-            if len(x_coords) > 1
+            float(lazy_height.x.values[1] - lazy_height.x.values[0])
+            if lazy_height.sizes["x"] > 1
             else fine_resolution_m
         )
         y_c = y0 + dy * (factor / 2.0 - 0.5) + dy * factor * np.arange(
@@ -325,32 +401,124 @@ def _map_blocks_summaries(
             coords={"band": list(CELL_LAYER_STEMS), "y": y_c, "x": x_c},
             name="vom_height_bands",
         )
-        return da_out, 1, failed
+        stages["prep_s"] = time.perf_counter() - t_prep
+        stages["compute_s"] = 0.0
+        return da_out, 1, failed, stages
 
-    chunks = (
-        tuple(int(c) for c in data.chunks[0]),
-        tuple(int(c) for c in data.chunks[1]),
+    ny = (int(data.shape[0]) // factor) * factor
+    nx = (int(data.shape[1]) // factor) * factor
+    if ny == 0 or nx == 0:
+        raise ValueError("VOM extent smaller than one summary cell after trim")
+    trimmed = data[:ny, :nx]
+    # Prefer ~1k blocks that still divide the factor (1000 = 10×100).
+    block_px = factor * max(1, 1024 // factor)
+    rechunked = trimmed.rechunk({0: block_px, 1: block_px})
+
+    def _kernel(block: np.ndarray) -> np.ndarray:
+        return summarise_height_block(
+            block,
+            fine_resolution_m=fine_resolution_m,
+            summary_resolution_m=summary_resolution_m,
+            max_height_m=VEGETATION_HEIGHT_MAX_M,
+        )
+
+    in_chy = tuple(int(c) for c in rechunked.chunks[0])
+    in_chx = tuple(int(c) for c in rechunked.chunks[1])
+    out_chy = tuple(c // factor for c in in_chy)
+    out_chx = tuple(c // factor for c in in_chx)
+    n_chunks = int(np.prod([len(c) for c in trimmed.chunks]))
+    stages["prep_s"] = time.perf_counter() - t_prep
+
+    t_compute = time.perf_counter()
+    delayed = da.map_blocks(
+        _kernel,
+        rechunked,
+        dtype=np.float32,
+        chunks=((n_layers,), out_chy, out_chx),
+        new_axis=0,
     )
-    mosaic, n_chunks, n_failed = summarise_chunks_resilient(
-        y_coords=y_coords,
-        x_coords=x_coords,
-        chunks=chunks,
-        fine_resolution_m=fine_resolution_m,
-        summary_resolution_m=summary_resolution_m,
-        fetch_chunk=fetch_chunk,
-        max_workers=max_workers,
-    )
-    ny = mosaic.shape[1] * factor
-    nx = mosaic.shape[2] * factor
-    y_c = y_coords[:ny].reshape(-1, factor).mean(axis=1)
-    x_c = x_coords[:nx].reshape(-1, factor).mean(axis=1)
+    computed = compute_with_policy(delayed)
+    stages["compute_s"] = time.perf_counter() - t_compute
+
+    y_fine = np.asarray(lazy_height.y.values[:ny], dtype=np.float64)
+    x_fine = np.asarray(lazy_height.x.values[:nx], dtype=np.float64)
+    y_c = y_fine.reshape(-1, factor).mean(axis=1)
+    x_c = x_fine.reshape(-1, factor).mean(axis=1)
     da_out = xr.DataArray(
-        mosaic,
+        np.asarray(computed, dtype=np.float32),
         dims=("band", "y", "x"),
         coords={"band": list(CELL_LAYER_STEMS), "y": y_c, "x": x_c},
         name="vom_height_bands",
     )
-    return da_out, n_chunks, n_failed
+
+    n_failed = 0
+    band0 = np.asarray(da_out.isel(band=0).values)
+    row_starts = np.cumsum((0,) + out_chy[:-1])
+    col_starts = np.cumsum((0,) + out_chx[:-1])
+    for rs, rh in zip(row_starts, out_chy):
+        for cs, cw in zip(col_starts, out_chx):
+            tile = band0[rs : rs + rh, cs : cs + cw]
+            if tile.size and not np.any(np.isfinite(tile)):
+                n_failed += 1
+
+    return da_out, n_chunks, n_failed, stages
+
+
+def _map_blocks_summaries(
+    lazy_height: xr.DataArray,
+    *,
+    fine_resolution_m: float,
+    summary_resolution_m: int,
+    fetch_chunk: Optional[FetchChunkFn] = None,
+    max_workers: int = 8,
+) -> tuple[xr.DataArray, int, int, dict[str, float]]:
+    """Summarise AOI via fused soft-fail mosaic, or injected ``fetch_chunk`` path."""
+    if "band" in lazy_height.dims:
+        lazy_height = lazy_height.isel(band=0)
+    if lazy_height.dims != ("y", "x"):
+        lazy_height = lazy_height.transpose("y", "x")
+
+    data = lazy_height.data
+    if fetch_chunk is not None and hasattr(data, "chunks") and data.chunks is not None:
+        t0 = time.perf_counter()
+        y_coords = np.asarray(lazy_height.y.values, dtype=np.float64)
+        x_coords = np.asarray(lazy_height.x.values, dtype=np.float64)
+        chunks = (
+            tuple(int(c) for c in data.chunks[0]),
+            tuple(int(c) for c in data.chunks[1]),
+        )
+        mosaic, n_chunks, n_failed = summarise_chunks_resilient(
+            y_coords=y_coords,
+            x_coords=x_coords,
+            chunks=chunks,
+            fine_resolution_m=fine_resolution_m,
+            summary_resolution_m=summary_resolution_m,
+            fetch_chunk=fetch_chunk,
+            max_workers=max_workers,
+        )
+        factor = int(round(summary_resolution_m / fine_resolution_m))
+        ny = mosaic.shape[1] * factor
+        nx = mosaic.shape[2] * factor
+        y_c = y_coords[:ny].reshape(-1, factor).mean(axis=1)
+        x_c = x_coords[:nx].reshape(-1, factor).mean(axis=1)
+        da_out = xr.DataArray(
+            mosaic,
+            dims=("band", "y", "x"),
+            coords={"band": list(CELL_LAYER_STEMS), "y": y_c, "x": x_c},
+            name="vom_height_bands",
+        )
+        return (
+            da_out,
+            n_chunks,
+            n_failed,
+            {"prep_s": 0.0, "compute_s": time.perf_counter() - t0},
+        )
+
+    return _map_blocks_summaries_fused(
+        lazy_height,
+        fine_resolution_m=fine_resolution_m,
+        summary_resolution_m=summary_resolution_m,
+    )
 
 
 def _add_woody_neighbourhood(cell_ds: xr.Dataset) -> xr.Dataset:
@@ -405,13 +573,15 @@ async def fetch_and_process_vom_height_bands(
     model_crs = boundary_gdf.crs
     cache = Path(cache_dir) if cache_dir is not None else output_dir / "wcs-cache"
     cache.mkdir(parents=True, exist_ok=True)
+    concurrency = resolve_vom_fetch_concurrency(max_concurrent_downloads)
 
     logging.info(
-        "Planning VOM height-band tiles via tilearray at %sm...",
+        "Downloading VOM height bands via tilearray at %sm (concurrency=%s)...",
         wcs_download_resolution_m,
+        concurrency,
     )
     t0 = time.perf_counter()
-    # Lazy mosaic for coords + chunk layout only (no full compute).
+    t_plan = time.perf_counter()
     lazy_height = await asyncio.to_thread(
         fetch_wcs_dataarray,
         endpoint=EA_VOM_WCS_ENDPOINT,
@@ -419,35 +589,37 @@ async def fetch_and_process_vom_height_bands(
         bbox=grid_bounds,
         resolution_m=float(wcs_download_resolution_m),
         chunk_size=wcs_tile_pixels,
-        max_concurrent=max_concurrent_downloads,
+        max_concurrent=concurrency,
         cache_dir=cache,
         compute=False,
     )
     lazy_height = cap_vegetation_heights(lazy_height)
+    plan_s = time.perf_counter() - t_plan
 
     y_coords, x_coords, transform, _out_h, _out_w = _summary_grid_coords(
         grid_bounds, summary_target_resolution_m
     )
 
-    if fetch_chunk is None:
-
-        def fetch_chunk(bbox: BBox) -> np.ndarray:
-            return _default_fetch_chunk(
-                bbox,
-                resolution_m=float(wcs_download_resolution_m),
-                chunk_size=wcs_tile_pixels,
-                max_concurrent=1,
-                cache_dir=cache,
+    # Injected-failure tests supply fetch_chunk; live path uses fused soft-fail.
+    def _run_summaries() -> tuple[xr.DataArray, int, int, dict[str, float]]:
+        if fetch_chunk is not None:
+            return _map_blocks_summaries(
+                lazy_height,
+                fine_resolution_m=float(wcs_download_resolution_m),
+                summary_resolution_m=summary_target_resolution_m,
+                fetch_chunk=fetch_chunk,
+                max_workers=concurrency,
+            )
+        with tilearray_soft_fail_tiles():
+            return _map_blocks_summaries(
+                lazy_height,
+                fine_resolution_m=float(wcs_download_resolution_m),
+                summary_resolution_m=summary_target_resolution_m,
+                fetch_chunk=None,
+                max_workers=concurrency,
             )
 
-    stacked, n_chunks, n_failed = await asyncio.to_thread(
-        _map_blocks_summaries,
-        lazy_height,
-        fine_resolution_m=float(wcs_download_resolution_m),
-        summary_resolution_m=summary_target_resolution_m,
-        fetch_chunk=fetch_chunk,
-        max_workers=max_concurrent_downloads,
-    )
+    stacked, n_chunks, n_failed, stages = await asyncio.to_thread(_run_summaries)
     wall_s = time.perf_counter() - t0
 
     fail_frac = (n_failed / n_chunks) if n_chunks else 1.0
@@ -457,6 +629,7 @@ async def fetch_and_process_vom_height_bands(
             f"allowed {max_failed_chunk_fraction:.0%}; refusing to write GeoTIFF"
         )
 
+    t_write = time.perf_counter()
     cell_ds = _dataset_from_stacked(stacked, crs=model_crs, transform=transform)
     if cell_ds.sizes.get("y") == len(y_coords) and cell_ds.sizes.get("x") == len(
         x_coords
@@ -481,6 +654,7 @@ async def fetch_and_process_vom_height_bands(
     output_path = output_dir / f"vom_height_bands_{summary_target_resolution_m}m.tif"
     logging.info("Saving VOM height bands to %s", output_path)
     full_ds.rio.to_raster(output_path)
+    write_s = time.perf_counter() - t_write
 
     corr_layers = {
         name: np.asarray(full_ds[name].values) for name in full_ds.data_vars
@@ -508,17 +682,32 @@ async def fetch_and_process_vom_height_bands(
         "summary_resolution_m": summary_target_resolution_m,
         "pairwise_pearson": corr,
         "max_failed_chunk_fraction": max_failed_chunk_fraction,
-        "fetch": "per-chunk fetch_wcs_dataarray (soft-fail → NaN)",
+        "max_concurrent_downloads": concurrency,
+        "fetch": (
+            "per-chunk fetch_wcs_dataarray (soft-fail → NaN)"
+            if fetch_chunk is not None
+            else "fused mosaic + tilearray_soft_fail_tiles + map_blocks"
+        ),
         "summary": "xarray.coarsen mean/std",
+        "stage_seconds": {
+            "plan_lazy_mosaic": round(plan_s, 3),
+            "prep": round(float(stages.get("prep_s", 0.0)), 3),
+            "compute_fetch_summarise": round(float(stages.get("compute_s", 0.0)), 3),
+            "neighbourhood_write": round(write_s, 3),
+            "wall": round(wall_s, 3),
+        },
     }
     notes_path = output_dir / "vom_height_bands_notes.json"
     notes_path.write_text(json.dumps(notes, indent=2) + "\n", encoding="utf-8")
     logging.info(
-        "VOM height bands done: chunks=%s failed=%s wall=%.1fs (%.2f tiles/s)",
+        "VOM height bands done: chunks=%s failed=%s wall=%.1fs (%.2f tiles/s) "
+        "concurrency=%s stages=%s",
         n_chunks,
         n_failed,
         wall_s,
         tiles_per_s or 0.0,
+        concurrency,
+        notes["stage_seconds"],
     )
     return output_path
 
@@ -561,11 +750,15 @@ def generate_vom_height_bands(
 
 __all__ = [
     "DEFAULT_MAX_FAILED_CHUNK_FRACTION",
+    "EA_FETCH_CONCURRENCY_MAX",
+    "EA_FETCH_CONCURRENCY_MIN_PARALLEL",
     "MAX_FAILED_CHUNK_FRACTION",
     "VomHeightBandsChunkFailureError",
     "_bbox_from_centres",
     "fetch_and_process_vom_height_bands",
     "generate_vom_height_bands",
     "process_height_array_block_aligned",
+    "resolve_vom_fetch_concurrency",
     "summarise_chunks_resilient",
+    "tilearray_soft_fail_tiles",
 ]

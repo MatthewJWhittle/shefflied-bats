@@ -7,11 +7,54 @@ import pytest
 
 from sdm.commands.data_preparation.environmental.generate_vom_height_bands import (
     DEFAULT_MAX_FAILED_CHUNK_FRACTION,
+    EA_FETCH_CONCURRENCY_MAX,
+    EA_FETCH_CONCURRENCY_MIN_PARALLEL,
     VomHeightBandsChunkFailureError,
     _bbox_from_centres,
+    _default_fetch_chunk,
+    resolve_vom_fetch_concurrency,
     summarise_chunks_resilient,
 )
 from sdm.raster.vom_height_bands import CELL_LAYER_STEMS
+
+
+def test_resolve_vom_fetch_concurrency_never_collapses_parallel_to_one() -> None:
+    """Guard: parallel downloads must not be serialized via max_concurrent=1."""
+    assert resolve_vom_fetch_concurrency(1) == 1  # explicit serial OK
+    assert resolve_vom_fetch_concurrency(8) == 8
+    assert resolve_vom_fetch_concurrency(4) == EA_FETCH_CONCURRENCY_MIN_PARALLEL
+    assert resolve_vom_fetch_concurrency(20) == EA_FETCH_CONCURRENCY_MAX
+    assert resolve_vom_fetch_concurrency(8) > 1
+
+
+def test_default_fetch_chunk_passes_resolved_concurrency(monkeypatch) -> None:
+    """Regression for shared TileFetcher serializing 8 workers at max_concurrent=1."""
+    seen: dict[str, object] = {}
+
+    def fake_fetch_wcs_dataarray(**kwargs):
+        seen["max_concurrent"] = kwargs.get("max_concurrent")
+        yy = np.arange(10.0, 0.0, -1.0) - 0.5
+        xx = np.arange(0.0, 10.0, 1.0) + 0.5
+        return __import__("xarray").DataArray(
+            np.full((10, 10), 5.0, dtype=np.float32),
+            dims=("y", "x"),
+            coords={"y": yy, "x": xx},
+        )
+
+    monkeypatch.setattr(
+        "sdm.commands.data_preparation.environmental.generate_vom_height_bands.fetch_wcs_dataarray",
+        fake_fetch_wcs_dataarray,
+    )
+    arr = _default_fetch_chunk(
+        (0.0, 0.0, 10.0, 10.0),
+        resolution_m=1.0,
+        chunk_size=(10, 10),
+        max_concurrent=8,
+        cache_dir=None,
+    )
+    assert arr.shape == (10, 10)
+    assert seen["max_concurrent"] == 8
+    assert seen["max_concurrent"] != 1
 
 
 def test_bbox_from_centres_snaps_to_resolution_grid() -> None:

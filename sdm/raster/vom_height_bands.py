@@ -143,10 +143,21 @@ def summarise_height_block(
     Failures are swallowed so one bad chunk does not abort siblings; the caller
     counts all-NaN outputs as failed chunks.
     """
+    factor = int(round(summary_resolution_m / fine_resolution_m))
+
+    def _nan_out(shape: tuple[int, ...]) -> np.ndarray:
+        ny = max(0, (shape[-2] // factor) if len(shape) >= 2 else 0)
+        nx = max(0, (shape[-1] // factor) if len(shape) >= 2 else 0)
+        return np.full((len(CELL_LAYER_STEMS), ny, nx), np.nan, dtype=np.float32)
+
     try:
         arr = np.asarray(block, dtype=np.float64)
         if arr.ndim == 3:
             arr = arr[..., 0]
+        # Soft-failed fetches arrive as all-NaN height tiles — keep NaN summaries
+        # so open-land fill (std=0) does not disguise a failed download.
+        if arr.size == 0 or not np.any(np.isfinite(arr)):
+            return _nan_out(arr.shape)
         finite = np.isfinite(arr)
         capped = arr.copy()
         capped[finite & (capped > max_height_m)] = max_height_m
@@ -160,11 +171,7 @@ def summarise_height_block(
             axis=0,
         )
     except Exception:
-        factor = int(round(summary_resolution_m / fine_resolution_m))
-        shape = np.asarray(block).shape
-        ny = max(0, (shape[-2] // factor) if len(shape) >= 2 else 0)
-        nx = max(0, (shape[-1] // factor) if len(shape) >= 2 else 0)
-        return np.full((len(CELL_LAYER_STEMS), ny, nx), np.nan, dtype=np.float32)
+        return _nan_out(np.asarray(block).shape)
 
 
 def fill_canopy_std_where_no_woody(
