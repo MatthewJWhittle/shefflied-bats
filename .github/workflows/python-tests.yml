@@ -40,9 +40,10 @@ jobs:
       uses: andgineer/uv-venv@v3
 
     - name: Install dependencies
-      run: uv sync --all-groups
-      
-          
+      # gcp extra: gcsfs + Secret Manager (optional for local-only runs; needed for
+      # clear-error unit tests and any suite path that exercises gs:// via fsspec).
+      run: uv sync --all-groups --extra gcp
+
     - name: Test with pytest
       run: |
         # Exclude live WCS/integration tests — they depend on external services and flake in CI.
@@ -54,3 +55,42 @@ jobs:
         uvx flake8 sdm tests --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         uvx flake8 sdm tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  # Prove core local workflows do not require the optional gcp extra.
+  no-gcp-smoke:
+    name: no-gcp-smoke
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v3
+      with:
+        python-version: 3.12
+    - name: Setup uv
+      uses: andgineer/uv-venv@v3
+    - name: Install dependencies without gcp extra
+      run: uv sync --all-groups
+    - name: Import sdm and training helpers without gcp packages
+      run: |
+        uv run python - <<'PY'
+        import importlib.util
+
+        def _missing(name: str) -> bool:
+            try:
+                return importlib.util.find_spec(name) is None
+            except ModuleNotFoundError:
+                # Parent package absent (e.g. google.cloud) → treat as missing.
+                return True
+
+        assert _missing("gcsfs"), "gcsfs must not be installed"
+        assert _missing("google.cloud.secretmanager"), (
+            "google-cloud-secret-manager must not be installed"
+        )
+        import sdm
+        import sdm.utils.mlflow_tracking
+        import sdm.commands.modelling.train_sdm_models
+        import sdm.utils.prediction_publish
+        print("import-ok")
+        PY
+    - name: Local-only predict/publish tests without gcp extra
+      run: uv run pytest tests/test_prediction_publish.py -q

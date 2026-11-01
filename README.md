@@ -14,6 +14,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/MatthewJWhittle/shefflied-bats.git
 cd shefflied-bats
 uv sync
+# Optional GCS / Secret Manager support: uv sync --extra gcp
 ```
 
 ### Workflow
