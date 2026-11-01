@@ -94,16 +94,26 @@ def _bbox_from_centres(
     *,
     resolution_m: float,
 ) -> BBox:
-    """Pixel-edge bbox covering the given cell centres (OSGB-style)."""
+    """Pixel-edge bbox covering the given cell centres, snapped to the grid.
+
+    Tilearray ``linspace`` centres (and float drift) can yield spans like
+    1024.1 m; EA WCS then HTTP 500s. Snap the NW/SW edges to ``resolution_m``
+    and span exactly ``n * resolution_m`` so each request is an integer pixel
+    count — one request per chunk, no sliver tiles.
+    """
     res = float(resolution_m)
-    y = np.asarray(y_centres, dtype=np.float64)
-    x = np.asarray(x_centres, dtype=np.float64)
-    return (
-        float(x.min() - res / 2.0),
-        float(y.min() - res / 2.0),
-        float(x.max() + res / 2.0),
-        float(y.max() + res / 2.0),
-    )
+    y = np.asarray(y_centres, dtype=np.float64).ravel()
+    x = np.asarray(x_centres, dtype=np.float64).ravel()
+    if y.size == 0 or x.size == 0:
+        return (0.0, 0.0, 0.0, 0.0)
+
+    minx_edge = float(np.min(x)) - res / 2.0
+    maxy_edge = float(np.max(y)) + res / 2.0
+    minx = float(round(minx_edge / res) * res)
+    maxy = float(round(maxy_edge / res) * res)
+    maxx = minx + float(x.size) * res
+    miny = maxy - float(y.size) * res
+    return (minx, miny, maxx, maxy)
 
 
 def process_height_array_block_aligned(
@@ -553,6 +563,7 @@ __all__ = [
     "DEFAULT_MAX_FAILED_CHUNK_FRACTION",
     "MAX_FAILED_CHUNK_FRACTION",
     "VomHeightBandsChunkFailureError",
+    "_bbox_from_centres",
     "fetch_and_process_vom_height_bands",
     "generate_vom_height_bands",
     "process_height_array_block_aligned",

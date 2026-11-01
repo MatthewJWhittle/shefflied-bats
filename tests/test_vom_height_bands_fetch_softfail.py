@@ -8,9 +8,67 @@ import pytest
 from sdm.commands.data_preparation.environmental.generate_vom_height_bands import (
     DEFAULT_MAX_FAILED_CHUNK_FRACTION,
     VomHeightBandsChunkFailureError,
+    _bbox_from_centres,
     summarise_chunks_resilient,
 )
 from sdm.raster.vom_height_bands import CELL_LAYER_STEMS
+
+
+def test_bbox_from_centres_snaps_to_resolution_grid() -> None:
+    """Drifted linspace centres must still yield exact n×resolution spans."""
+    res = 1.0
+    n = 1024
+    # Mimic tilearray: linspace over edges (inclusive) → ~1024.0 + epsilon span
+    # when half-pixel pads are applied without snapping.
+    x_drifted = np.linspace(420000.0, 420000.0 + n, n)
+    y_drifted = np.linspace(380000.0 + n, 380000.0, n)
+    raw_w = (x_drifted.max() + res / 2.0) - (x_drifted.min() - res / 2.0)
+    assert raw_w != pytest.approx(n * res)  # documents the drift bug
+
+    minx, miny, maxx, maxy = _bbox_from_centres(
+        y_drifted, x_drifted, resolution_m=res
+    )
+    width = maxx - minx
+    height = maxy - miny
+    assert width == pytest.approx(n * res)
+    assert height == pytest.approx(n * res)
+    assert width / res == pytest.approx(int(width / res))
+    assert minx / res == pytest.approx(round(minx / res))
+    assert maxy / res == pytest.approx(round(maxy / res))
+
+
+def test_resilient_chunks_one_request_per_chunk_no_slivers() -> None:
+    """Each chunk issues one snapped bbox; widths are exact pixel multiples."""
+    y = np.linspace(10000.0, 0.0, 1000)  # drifted centres
+    x = np.linspace(0.0, 1000.0, 1000)
+    chunks = ((100,) * 10, (1000,))
+    seen: list[tuple[float, float, float, float]] = []
+
+    def fetch_chunk(bbox):
+        seen.append(bbox)
+        minx, miny, maxx, maxy = bbox
+        width = maxx - minx
+        height = maxy - miny
+        assert width == pytest.approx(round(width))
+        assert height == pytest.approx(round(height))
+        assert width % 1.0 == pytest.approx(0.0)
+        ny = int(round(height))
+        nx = int(round(width))
+        return np.full((ny, nx), 10.0, dtype=np.float64)
+
+    mosaic, n_chunks, n_failed = summarise_chunks_resilient(
+        y_coords=y,
+        x_coords=x,
+        chunks=chunks,
+        fine_resolution_m=1.0,
+        summary_resolution_m=100,
+        fetch_chunk=fetch_chunk,
+        max_workers=4,
+    )
+    assert n_chunks == 10
+    assert n_failed == 0
+    assert len(seen) == n_chunks  # one request per chunk, no slivers
+    assert mosaic.shape[0] == len(CELL_LAYER_STEMS)
 
 
 def test_injected_fetch_failures_do_not_abort_siblings() -> None:
