@@ -1,0 +1,29 @@
+id: ceh_landcover_wetland_1500m
+title: Wetland (aggregated) cover (1500 m neighbourhood)
+kind: derived
+family: landcover
+summary: >-
+  Focal mean of ceh_landcover_wetland over a 30-cell (1500 m) neighbourhood on the 100 m grid.
+shows:
+- Neighbourhood-average wetland (aggregated) share around each cell
+does_not_show:
+- Anything the parent in-cell layer does not show
+units: 0–10000 (percent × 100)
+model_resolution_m: 100.0
+crs: EPSG:27700
+pipeline:
+  rebuild_step: build_model_ev_stack
+  code: sdm/commands/data_preparation/processing/build_model_ev_stack.py
+derived_from:
+- ceh_landcover_wetland
+processing:
+- Focal / multiscale mean at window 30 cells (1500 m at 100 m resolution)
+caveats:
+- >-
+  Inherits CEH class definition, licence, and classification limits from the parent — do not
+  re-copy; open the parent doc
+- Edge cells use whatever neighbourhood exists inside the raster extent
+references:
+- title: Predictor docs — ceh_landcover_wetland
+  url: ceh_landcover_wetland.md
+markdown: ceh_landcover_wetland_1500m.md

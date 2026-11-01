@@ -12,6 +12,10 @@ import numpy as np
 import rioxarray as rxr
 import xarray as xr
 
+from sdm.predictors.associate import (
+    attach_predictor_docs,
+    write_predictor_sidecar,
+)
 from sdm.raster.processing import calculate_multiscale_variables
 from sdm.utils.text_utils import tidy_variable_name
 
@@ -409,9 +413,19 @@ def build_model_ev_stack(
         dataset[var].attrs["long_name"] = str(var)
     dataset = _restore_nodata(dataset, source_nodata)
 
+    # Stamp predictor-doc attrs where docs exist (partial catalog is OK).
+    stamped = attach_predictor_docs(dataset)
+    if stamped:
+        logging.info(
+            "Attached predictor docs to %d / %d bands",
+            len(stamped),
+            len(dataset.data_vars),
+        )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     logging.info("Writing model EV stack (%d bands) to %s", len(dataset.data_vars), output_path)
     dataset.rio.to_raster(output_path)
+    write_predictor_sidecar(output_path, list(dataset.data_vars))
     return output_path, settings
 
 

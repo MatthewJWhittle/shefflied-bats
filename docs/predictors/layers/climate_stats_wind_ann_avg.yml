@@ -1,0 +1,31 @@
+id: climate_stats_wind_ann_avg
+title: Annual mean wind speed
+kind: source
+family: climate
+summary: Mean of twelve monthly WorldClim wind-speed bands.
+shows:
+- Mean of twelve monthly WorldClim wind-speed bands.
+does_not_show:
+- Year-matched weather
+- Microclimate
+units: m/s
+native_resolution_m: 1000.0
+model_resolution_m: 100.0
+crs: EPSG:27700
+temporal:
+  label: WorldClim 2.1 1970–2000 normals
+source_id: worldclim_2_1
+pipeline:
+  rebuild_step: climate
+  code: sdm/commands/data_preparation/environmental/generate_climate_data.py
+processing:
+- Monthly WorldClim surfaces downloaded and reprojected
+- Annual mean across monthly wind
+caveats:
+- Temporal mismatch with occurrence years
+- Coarse native grid upsampled to 100 m
+- Coastal / edge missing ring possible
+references:
+- title: WorldClim about / licence
+  url: https://worldclim.org/about.html
+markdown: climate_stats_wind_ann_avg.md

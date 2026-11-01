@@ -64,6 +64,9 @@ sdm data -o /tmp/evs-smoke --skip ceh,coastal
 
 Each run writes `rebuild_metrics.json` and `rebuild_metrics.csv` next to the layers (wall time and per-step peak RSS, plus git commit and source version/date provenance). Use `--ceh-path` when the CEH LCM GeoTIFF is not at the default git-ignored location. Point train/predict at the rebuilt stack explicitly, e.g. `--ev-file data/evs-rebuild/evs-to-model.tif`.
 
+Predictor-layer sources, caveats, and lineage:
+[docs/predictors/](docs/predictors/README.md).
+
 Full command list: [sdm/README.md](sdm/README.md).
 
 ## What you get

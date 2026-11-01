@@ -1,0 +1,19 @@
+id: ea_vom
+title: EA LIDAR Vegetation Object Model
+provider: Environment Agency
+product: LIDAR Vegetation Object Model (VOM)
+licence: OGL-UK-3.0
+licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+access_url: https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
+citation: Contains Environment Agency information © Environment Agency and/or database right
+notes: >
+  Canopy / vegetation object heights derived from EA LiDAR. Values below about
+  2.5 m are unreliable for canopy interpretation; leaf-off surveys understate
+  deciduous canopy. See vegetation height layer docs for processing and
+  caveats.
+references:
+  - title: LIDAR Vegetation Object Model (VOM) on data.gov.uk
+    url: https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
+  - title: Open Government Licence v3.0
+    url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+markdown: ea_vom.md
