@@ -16,8 +16,8 @@ from sdm.commands.modelling.train_sdm_models import (
     save_models,
     save_run_thresholds,
     save_training_data,
-    train_single_model,
 )
+from sdm.models.maxent.training import train_single_model
 from sdm.models.core.threshold import (
     compute_pooled_oof_percentile,
     write_run_thresholds,

@@ -467,7 +467,7 @@ def test_make_predictions_publish_opt_in(
         }
     )
 
-    def fake_load_model(model_path: Path) -> SimpleNamespace:  # noqa: ARG001
+    def fake_load_model(model_path: Path, **_kwargs) -> SimpleNamespace:  # noqa: ARG001
         return SimpleNamespace(named_steps={})
 
     def fake_apply(models, raster_path, output_path, window_size=128):  # noqa: ARG001

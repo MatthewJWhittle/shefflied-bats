@@ -552,7 +552,7 @@ def test_setup_training_data(
 
 
 @patch("sdm.commands.modelling.train_sdm_models.generate_training_data")
-@patch("sdm.commands.modelling.train_sdm_models.train_models_parallel")
+@patch("sdm.models.adapters.train_models_parallel")
 def test_train_models_with_setup(
     mock_train_parallel,
     mock_generate_training,

@@ -9,22 +9,19 @@ Uses a modular approach where each function does one thing and can be easily com
 import json
 import logging
 import math
-import os
 import pickle
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TypeVar, cast, Any, Any
-from concurrent.futures import ProcessPoolExecutor
+from typing import Dict, List, Optional, Tuple, TypeVar, cast, Any
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import xarray as xr
-from sklearn.metrics import roc_auc_score
-from tqdm import tqdm
 import elapid as ela
 from scipy.spatial import cKDTree
+from tqdm import tqdm
 import topojson as tp
 
 from sdm.data.loaders.vector import load_bat_data, load_background_points
@@ -33,8 +30,6 @@ from sdm.models.maxent.maxent_model import (
     ActivityType,
     DefaultMaxentConfig,
     MaxentConfig,
-    create_maxent_pipeline,
-    evaluate_and_train_maxent_model,
 )
 from sdm.occurrence.sampling import (
     generate_background_points_from_data,
@@ -47,7 +42,6 @@ from sdm.occurrence.background_settings import (
     resolve_background_settings,
 )
 from sdm.raster.io import load_environmental_variables
-from sdm.utils.rng import apply_training_seed
 from sdm.utils.io import (
     load_project_config,
     load_model_config,
@@ -68,21 +62,19 @@ from sdm.types import (
     TrainingResults,
     ProjectConfig,
     VariablesConfig,
-    ModelConfig,
-    CvConfig,
 )
 from sdm.commands.modelling.utils import get_model_id
+from sdm.models.adapters import ModelAdapter, get_adapter
 from sdm.models.core.threshold import write_run_thresholds
 from sdm.models.maxent.folds import (
     DEFAULT_BUFFERED_LOO_WARN_ABOVE,
     FoldMethod,
     FoldParams,
-    buffered_loo_presence_warning,
     fold_assignments_frame,
-    presence_counts_per_fold,
     resolve_fold_params,
 )
-from sdm.utils.fs import join_uri_path, local_materialized_path, uri_exists
+from sdm.models.maxent.training import summarize_cv_scores as _summarize_cv_scores
+from sdm.utils.fs import local_materialized_path, uri_exists
 from sdm.utils.model_runs import (
     artifact_parent_uri,
     build_run_output_uri,
@@ -660,297 +652,8 @@ def generate_training_data(
     return training_data
 
 
-# ============================================================================
-# Model training functions
-# ============================================================================
-
-
-def _summarize_cv_scores(
-    cv_scores: Optional[np.ndarray],
-) -> Tuple[float, float, int, int]:
-    """Return (mean, std, n_valid, n_total) for a CV score array, safely handling NaNs."""
-    if cv_scores is None or len(cv_scores) == 0:
-        return np.nan, np.nan, 0, 0
-    
-    valid_scores = cv_scores[~np.isnan(cv_scores)]
-    n_total = len(cv_scores)
-    n_valid = len(valid_scores)
-    
-    if n_valid == 0:
-        return np.nan, np.nan, 0, n_total
-    
-    return float(valid_scores.mean()), float(valid_scores.std()), n_valid, n_total
-
-
-def train_single_model(
-    data: TrainingData,
-    max_threads_per_model: int,
-    n_cv_folds: int = 3,
-    min_presence: int = 15,
-    *,
-    seed: int,
-    fold_params: Optional[FoldParams] = None,
-) -> TrainingResults:
-    """Train a single MaxEnt model for a given set of training data."""
-    try:
-        apply_training_seed(seed)
-        activity_type = ActivityType(data.activity_type)
-        latin_name = data.latin_name
-        logger.debug(f"Training model for {latin_name} ({activity_type.value})...")
-
-        resolved_folds = fold_params or resolve_fold_params(CvConfig(), model_seed=seed)
-        model_config = data.maxent_config
-        model_features = data.model_features
-        
-        # Verify features list is not empty
-        if len(model_features) == 0:
-            raise ValueError(
-                f"model_features list is empty for {latin_name} - {activity_type}. "
-                f"At least one feature must be provided."
-            )
-        
-        # Verify all required features are in the data
-        missing_features = list(set(model_features) - set(data.occurrence.columns))
-        if missing_features:
-            raise ValueError(
-                f"Missing features {missing_features} in occurrence data for {latin_name} - {activity_type}. "
-                f"Available columns: {list(data.occurrence.columns)}"
-            )
-        
-        # Create model with appropriate thread count
-        model = create_maxent_pipeline(
-            feature_names=model_features,
-            maxent_n_jobs=max_threads_per_model,
-            model_config=model_config,
-        )
-        logger.info(f"Model features: {model_features}")
-        n_presence = len(data.occurrence[data.occurrence["class"] == 1])
-        if resolved_folds.method is FoldMethod.BUFFERED_LOO:
-            loo_warning = buffered_loo_presence_warning(
-                n_presence,
-                resolved_folds.buffered_loo_warn_above,
-                latin_name=latin_name,
-                activity_type=activity_type.value,
-            )
-            if loo_warning:
-                logger.warning(loo_warning)
-        if resolved_folds.method is FoldMethod.KMEANS:
-            # Prefer explicit fold_params; otherwise honour the n_cv_folds argument.
-            effective_n_folds = (
-                resolved_folds.n_folds if fold_params is not None else n_cv_folds
-            )
-            # do 2 folds if average presence per fold would fall below min_presence
-            if effective_n_folds > 0 and (n_presence // effective_n_folds) < min_presence:
-                effective_n_folds = 2
-                logger.info(
-                    "Using 2 folds for %s - %s because n_presence < %s",
-                    latin_name,
-                    activity_type.value,
-                    min_presence,
-                )
-        elif resolved_folds.method is FoldMethod.BLOCKS:
-            effective_n_folds = resolved_folds.n_folds
-        elif resolved_folds.method is FoldMethod.BUFFERED_LOO:
-            effective_n_folds = int(n_presence)
-        else:
-            raise ValueError(f"unknown fold method: {resolved_folds.method!r}")
-
-        effective_params = FoldParams(
-            method=resolved_folds.method,
-            n_folds=effective_n_folds,
-            random_state=resolved_folds.random_state,
-            block_size_m=resolved_folds.block_size_m,
-            block_n_tries=resolved_folds.block_n_tries,
-            buffer_m=resolved_folds.buffer_m,
-            buffered_loo_warn_above=resolved_folds.buffered_loo_warn_above,
-        )
-        fold_presence = presence_counts_per_fold(data.occurrence, effective_params)
-
-        final_model, cv_models, cv_scores, validation_scores = evaluate_and_train_maxent_model(
-            model=model,
-            occurrence_gdf=data.occurrence,
-            n_cv_folds=effective_n_folds,
-            metric_fn=roc_auc_score,
-            feature_columns=model_features,  # Explicitly pass feature columns to avoid using extra columns as features
-            collect_validation_scores=True,
-            random_state=effective_params.random_state,
-            fold_method=effective_params.method,
-            block_size_m=effective_params.block_size_m,
-            block_n_tries=effective_params.block_n_tries,
-            buffer_m=effective_params.buffer_m,
-        )
-        
-        if final_model is None:
-            raise ValueError("Model training failed - final_model is None")
-        
-        cv_mean, cv_std, n_valid, n_total = _summarize_cv_scores(cv_scores)
-        if n_valid > 0:
-            logger.debug(
-                "✓ %s - %s: CV AUC = %.4f ± %.4f (%d/%d folds valid)",
-                latin_name,
-                activity_type.value,
-                cv_mean,
-                cv_std,
-                n_valid,
-                n_total,
-            )
-        else:
-            logger.debug(
-                "✗ %s - %s: No valid CV scores", latin_name, activity_type.value
-            )
-        logger.info(
-            "%s - %s: fold_method=%s scored %d/%d folds; presence per fold=%s",
-            latin_name,
-            activity_type.value,
-            effective_params.method.value,
-            n_valid,
-            n_total,
-            fold_presence,
-        )
-        
-        return TrainingResults(
-            latin_name=latin_name,
-            activity_type=activity_type.value,
-            final_model=final_model,
-            cv_models=cv_models if cv_models is not None else None,
-            cv_scores=cv_scores,
-            validation_scores=validation_scores,
-            cv_n_folds=effective_n_folds if effective_n_folds else n_total,
-            fold_method=effective_params.method.value,
-            fold_params=effective_params.to_metadata(),
-            fold_presence_counts=fold_presence,
-            success=True,
-            error=None,
-        )
-    except Exception as e:
-        logger.error(
-            f"Error training model for {data.latin_name} - {data.activity_type}: {e}"
-        )
-        return TrainingResults(
-            latin_name=data.latin_name,
-            activity_type=data.activity_type,
-            final_model=None,
-            cv_models=None,
-            cv_scores=None,
-            success=False,
-            error=str(e),
-        )
-
-
-def train_models_parallel(
-    training_data: List[TrainingData],
-    max_threads_per_model: int = 1,
-    n_jobs: Optional[int] = None,
-    *,
-    seed: int,
-    fold_params: Optional[FoldParams] = None,
-) -> List[TrainingResults]:
-    """Train MaxEnt models in parallel for each set of training data.
-    
-    Args:
-        training_data: List of TrainingData objects, one per species-activity combination.
-            Each TrainingData must include maxent_config and model_features.
-        max_threads_per_model: Maximum threads per model (default 1, parallelization handled at higher level)
-        n_jobs: Number of parallel jobs (None = auto)
-        
-    Returns:
-        List of TrainingResults
-    """
-    # Calculate optimal number of jobs if not specified
-    if n_jobs is None:
-        total_cpus = os.cpu_count()
-        if total_cpus is None:
-            total_cpus = 1.0
-        # Use 80% of available CPUs by default
-        n_jobs = max(1, int(total_cpus * 0.8) // max_threads_per_model)
-    
-    logger.debug(
-        f"Training with {n_jobs} parallel jobs, {max_threads_per_model} threads per model"
-    )
-    
-    # Execute training in parallel using ProcessPoolExecutor
-    results: List[TrainingResults] = []
-    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-        # Create a list of futures
-        futures = []
-        for data in training_data:
-            identifier = data.identifier()
-            
-            futures.append(
-                executor.submit(
-                    train_single_model,
-                    data,
-                    max_threads_per_model,
-                    seed=seed,
-                    fold_params=fold_params,
-                )
-            )
-        
-        # Collect results as they complete
-        for future in tqdm(futures, total=len(futures), desc="Training models"):
-            try:
-                result = future.result()
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Error in parallel training: {e}")
-                # Create a failed result
-                results.append(
-                    TrainingResults(
-                        latin_name="unknown",
-                        activity_type="unknown",
-                        final_model=None,
-                        cv_models=None,
-                        cv_scores=None,
-                        success=False,
-                        error=str(e),
-                    )
-                )
-    
-    # Extract successful results
-    successful_results = [r for r in results if r.success]
-    
-    # Report failed models
-    failed_models = [
-        f"{r.latin_name} - {r.activity_type}: {r.error}"
-        for r in results
-        if not r.success
-    ]
-    if failed_models:
-        logger.warning("Failed models:")
-        for failure in failed_models:
-            logger.warning(f"  {failure}")
-    
-    logger.info(
-        f"Successfully trained {len(successful_results)} models out of {len(training_data)} attempts"
-    )
-    
-    # Print summary of model accuracies
-    if successful_results:
-        logger.info("\n" + "=" * 80)
-        logger.info("MODEL PERFORMANCE SUMMARY")
-        logger.info("=" * 80)
-        for result in successful_results:
-            cv_mean, cv_std, n_valid, n_total = _summarize_cv_scores(result.cv_scores)
-            if n_valid > 0:
-                logger.info(
-                    "  %s - %s: AUC = %.4f ± %.4f (%d/%d folds valid)",
-                    f"{result.latin_name:30s}",
-                    f"{result.activity_type:15s}",
-                    cv_mean,
-                    cv_std,
-                    n_valid,
-                    n_total,
-                )
-            else:
-                logger.info(
-                    "  %s - %s: No valid scores",
-                    f"{result.latin_name:30s}",
-                    f"{result.activity_type:15s}",
-                )
-        logger.info("=" * 80 + "\n")
-    
-    return successful_results
-
+# MaxEnt fit helpers (train_single_model / train_models_parallel) live in
+# sdm.models.maxent.training. CV score summary is imported above for save/results.
 
 def _finite_float_or_none(x: Any) -> Any:
     """JSON-friendly float: map NaN/inf to None."""
@@ -1066,6 +769,8 @@ def save_models(
     models: List[TrainingResults],
     training_data: List[TrainingData],
     output_dir: Path,
+    *,
+    trainer: str = "maxent",
 ) -> Dict[str, Path]:
     """
     Save each successful model as a small on-disk package for training outputs and API upload.
@@ -1079,6 +784,7 @@ def save_models(
         models: Training results (only entries with ``final_model`` are written).
         training_data: Parallel list of training data (matched by ``identifier()``).
         output_dir: Root directory for all model packages.
+        trainer: Adapter name written into ``package.json`` (default ``maxent``).
 
     Returns:
         Map from ``TrainingResults.identifier()`` to path of ``model.pkl`` inside the package
@@ -1113,6 +819,7 @@ def save_models(
             "model_id": get_model_id([model.latin_name, model.activity_type]),
             "latin_name": model.latin_name,
             "activity_type": model.activity_type,
+            "trainer": trainer,
             "model_limited": bool(data.model_limited),
             "feature_names": list(data.model_features),
             "maxent_config": _maxent_config_to_dict(data.maxent_config),
@@ -1222,6 +929,7 @@ def save_run_metadata(
     seed: int,
     model_config_path: str,
     fold_params: Optional[FoldParams] = None,
+    trainer: str = "maxent",
     background_settings: Optional[ResolvedBackgroundSettings] = None,
 ) -> Path:
     """Write run-level metadata (including the training seed) into the run folder."""
@@ -1229,6 +937,7 @@ def save_run_metadata(
         "schema_version": 1,
         "seed": seed,
         "model_config_path": model_config_path,
+        "trainer": trainer,
     }
     if fold_params is not None:
         metadata["cv"] = fold_params.to_metadata()
@@ -1425,6 +1134,7 @@ def train_models_with_setup(
     *,
     seed: int,
     fold_params: Optional[FoldParams] = None,
+    adapter: Optional[ModelAdapter] = None,
 ) -> tuple[List[TrainingResults], List[TrainingData]]:
     """Train models using pre-setup shared data.
     
@@ -1440,6 +1150,7 @@ def train_models_with_setup(
         max_threads_per_model: Maximum threads per model
         n_jobs: Number of parallel jobs
         verbose: Enable verbose logging
+        adapter: Resolved ModelAdapter (defaults to the MaxEnt adapter).
         
     Returns:
         Tuple of (List of TrainingResults, List of TrainingData)
@@ -1483,16 +1194,17 @@ def train_models_with_setup(
         seed=seed,
     )
 
-    logger.debug("Training %d models...", len(training_data))
-    models = train_models_parallel(
+    resolved = adapter or get_adapter(None)
+    logger.debug("Training %d models with adapter %s...", len(training_data), resolved.name)
+    bundle = resolved.train(
         training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
         seed=seed,
         fold_params=fold_params,
     )
-    
-    return models, training_data
+
+    return bundle.results, bundle.training_data
 
 
 def train_sdm_models(
@@ -1823,17 +1535,23 @@ def train_sdm_models(
         f"Generated training data for {len(training_data)} species-activity combinations"
     )
     
-    # Train models
-    logger.info(f"Training {len(training_data)} models...")
-    
-    models = train_models_parallel(
-        training_data=training_data,
+    # Train models via adapter registry (default maxent).
+    adapter = get_adapter(base_model_cfg.type)
+    logger.info(
+        "Training %d models with adapter %s...",
+        len(training_data),
+        adapter.name,
+    )
+
+    bundle = adapter.train(
+        training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
         seed=training_seed,
         fold_params=fold_params,
     )
-    
+    models = bundle.results
+
     # Prepare and save results
     logger.info("Saving results...")
     results_df = prepare_results_dataframe(models, training_data)
@@ -1841,7 +1559,12 @@ def train_sdm_models(
     logger.info("Writing model run to %s", run_uri)
 
     with model_run_write_context(run_uri) as (models_output_dir, written_uri):
-        model_paths = save_models(models, training_data, models_output_dir)
+        model_paths = save_models(
+            models,
+            training_data,
+            models_output_dir,
+            trainer=adapter.name,
+        )
 
         published_paths = {
             identifier: join_run_artifact(
@@ -1867,6 +1590,7 @@ def train_sdm_models(
             seed=training_seed,
             model_config_path=repo_relative_config_path(model_config_path),
             fold_params=fold_params,
+            trainer=adapter.name,
             background_settings=background_settings,
         )
 

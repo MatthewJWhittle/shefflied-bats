@@ -10,7 +10,7 @@ Uses the new modular approach with efficient one-time data preparation.
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 import geopandas as gpd
@@ -28,7 +28,6 @@ from sdm.commands.modelling.train_sdm_models import (
     simplify_boundary,
     prepare_species_training_data,
     prepare_training_data,
-    _summarize_cv_scores,
 )
 from sdm.utils.mlflow_tracking import (
     TrainingSessionMetadata,
@@ -38,11 +37,10 @@ from sdm.utils.mlflow_tracking import (
     resolve_mlflow_config,
 )
 from sdm.data.loaders.vector import load_bat_data
+from sdm.models.adapters import Tunable, get_adapter, require_tune_support
 from sdm.models.maxent.maxent_model import (
     ActivityType,
     DefaultMaxentConfig,
-    create_maxent_pipeline,
-    cross_validate_maxent_model,
 )
 from sdm.occurrence.sampling import (
     BackgroundMethod,
@@ -51,7 +49,6 @@ from sdm.occurrence.sampling import (
 from sdm.raster.io import load_environmental_variables
 from sdm.utils.fs import local_materialized_path
 from sdm.utils.model_runs import resolve_data_path
-from sdm.utils.rng import apply_training_seed
 from sdm.utils.sdm_config import resolve_sdm_config_root
 from sdm.utils.io import (
     load_model_config,
@@ -62,7 +59,6 @@ from sdm.utils.io import (
 from sdm.utils.logging_utils import setup_logging
 from sdm.types import ModelConfig, VariablesConfig, TrainingData, BackgroundConfig
 from sdm.commands.modelling.utils import get_model_id
-from sklearn.metrics import roc_auc_score
 
 logger = logging.getLogger(__name__)
 
@@ -98,87 +94,11 @@ class TuningResult(BaseModel):
     transform_method: str
 
 
-def suggest_maxent_hyperparameters(trial: optuna.Trial) -> Dict[str, Any]:
-    """Suggest MaxEnt hyperparameters from Optuna trial.
-    
-    Fixed parameters (for consistency across species):
-    - clamp: True (restrict suitability to training range)
-    - tau: 0.5 (regularization strength)
-    - transform: "cloglog" (output transform for consistent map interpretation)
-    
-    Tuned parameters:
-    - feature_types: Selection from ["linear", "hinge", "product", "quadratic"] (at least linear must be included)
-    - beta_multiplier, beta_lqp, beta_hinge, beta_threshold, beta_categorical: Regularization
-    - n_hinge_features: Number of hinge features (only if hinge is selected)
-    
-    Args:
-        trial: Optuna trial object
-        
-    Returns:
-        Dictionary of suggested hyperparameters
-    """
-    # Feature types - individual selection from ["linear", "hinge", "product", "quadratic"]
-    available_feature_types = ["linear", "hinge", "product", "quadratic"]
-    selected_feature_types = []
-    
-    for feature_type in available_feature_types:
-        include = trial.suggest_categorical(
-            f"feature_type_{feature_type}",
-            [True, False]
-        )
-        if include:
-            selected_feature_types.append(feature_type)
-    
-    # Ensure at least linear is included (most basic feature type, required)
-    if "linear" not in selected_feature_types:
-        selected_feature_types.append("linear")
-    
-    feature_types = sorted(selected_feature_types)  # Sort for consistency
-    
-    # Beta multiplier - log uniform distribution
-    beta_multiplier = trial.suggest_float("beta_multiplier", 1, 5.0, step=0.1)
-    
-    # Beta values for specific feature types
-    beta_lqp = trial.suggest_float("beta_lqp", 0.5, 3.0, step=0.1)
-    beta_hinge = trial.suggest_float("beta_hinge", 1, 4.0, step=0.1)
-    beta_threshold = trial.suggest_float("beta_threshold", 1, 3.0, step=0.1)
-    beta_categorical = trial.suggest_float("beta_categorical", 0.5, 3.0, step=0.1)
-    
-    # Number of hinge features (only if hinge is in selected feature types)
-    has_hinge = "hinge" in selected_feature_types
-    if has_hinge:
-        n_hinge_features = trial.suggest_int("n_hinge_features", 10, 15)
-    else:
-        n_hinge_features = 0
-    
-    # Threshold not in available feature types
-    n_threshold_features = 0
-    
-    # Fixed parameters for consistency across species (for comparable suitability maps)
-    clamp = True  # Fixed: restrict suitability to training range
-    tau = 0.5  # Fixed: regularization strength
-    transform = "cloglog"  # Fixed: output transform for consistent map interpretation
-    
-    return {
-        "feature_types": feature_types,
-        "beta_multiplier": beta_multiplier,
-        "beta_lqp": beta_lqp,
-        "beta_hinge": beta_hinge,
-        "beta_threshold": beta_threshold,
-        "beta_categorical": beta_categorical,
-        "n_hinge_features": n_hinge_features,
-        "n_threshold_features": n_threshold_features,
-        "clamp": clamp,
-        "tau": tau,
-        "transform": transform,
-    }
-
-
 def get_default_trial_params(features: List[str]) -> Dict[str, Any]:
     """Flat Optuna-style parameter dict for baseline / smoke trials and tests.
 
     Keys align with ``pick_features`` (``feature_<name>``) and legacy
-    ``feature_type_*`` toggles used alongside ``suggest_maxent_hyperparameters``.
+    ``feature_type_*`` toggles used alongside adapter ``suggest_hyperparameters``.
     """
     params: Dict[str, Any] = {}
     for name in features:
@@ -350,51 +270,6 @@ def pick_features(
     return sorted(selected)
 
 
-def eval_model(
-    data: TrainingData,
-    max_threads_per_model: int = 1,
-    n_cv_folds: int = 3,
-    *,
-    seed: int,
-) -> Tuple[float, float]:
-    """Evaluate a model and return CV scores and stability for tuning."""
-    apply_training_seed(seed)
-    # Create model
-    model = create_maxent_pipeline(
-        feature_names=data.model_features,
-        maxent_n_jobs=max_threads_per_model,
-        model_config=data.maxent_config,
-    )
-    
-    # Verify all required features are in the data
-    missing_features = list(set(data.model_features) - set(data.occurrence.columns))
-
-    if missing_features:
-        raise ValueError(
-            f"Missing features {missing_features} for {data.latin_name} - {data.activity_type}"
-        )
-
-    if data.occurrence["class"].isna().any():
-        raise ValueError(
-            f"NaN values in class column for {data.latin_name} - {data.activity_type}"
-        )
-    
-    # Only do CV evaluation (no final model training for tuning)
-    _cv_models, cv_scores, _ = cross_validate_maxent_model(
-        model=model,
-        occurrence_gdf=data.occurrence,
-        n_folds=n_cv_folds,
-        metric_fn=roc_auc_score,
-        feature_columns=data.model_features,  # Explicitly pass feature columns
-        random_state=seed,
-    )
-    
-    # Get mean and std CV scores
-    cv_mean, cv_std, _, _ = _summarize_cv_scores(cv_scores)
-    
-    return cv_mean, cv_std
-
-
 def objective_train_model(
     trial: optuna.Trial,
     species_training_gdf: gpd.GeoDataFrame,
@@ -403,6 +278,7 @@ def objective_train_model(
     latin_name: str,
     activity_type: str,
     min_presence: int,
+    adapter: Tunable,
     n_cv_folds: int = 3,
     stability_penalty: float = 0.05,
     feature_penalty: float = 0.0005,
@@ -449,22 +325,22 @@ def objective_train_model(
         )
 
     # Suggest hyperparameters (only model params and features)
-    maxent_params = suggest_maxent_hyperparameters(trial)
-    
+    suggested_params = adapter.suggest_hyperparameters(trial)
+
     # Suggest feature selection for this single activity type
     selected_features = pick_features(
         trial, available_features,
     )
-    
+
     # Create model config
     model_config = DefaultMaxentConfig(
-        **maxent_params,
+        **suggested_params,
         convergence_tolerance=base_model_config.maxent.convergence_tolerance,
         use_lambdas=base_model_config.maxent.use_lambdas,
         n_lambdas=base_model_config.maxent.n_lambdas,
         class_weights=base_model_config.maxent.class_weights,
     )
-    
+
     # Verify all required features are in the data
     missing_features = [f for f in selected_features if f not in species_training_gdf.columns]
     if missing_features:
@@ -480,10 +356,10 @@ def objective_train_model(
         maxent_config=model_config,
         model_features=selected_features,
     )
-    
+
     # Train model and get scores
-    mean_auc, std_auc = eval_model(
-        data=training_data,
+    mean_auc, std_auc = adapter.eval_trial(
+        training_data,
         max_threads_per_model=1,  # Use 1 thread per model for tuning
         n_cv_folds=n_cv_folds,
         seed=base_model_config.seed,
@@ -1068,7 +944,10 @@ def tune_hyperparameters(
     # Load base configs
     project_config = load_project_config(project_config_path)
     base_model_config = load_model_config(resolve_sdm_config_root(model_config_path))
-    
+    resolved_adapter = get_adapter(base_model_config.type)
+    adapter = require_tune_support(resolved_adapter)
+    logger.info("Tuning with adapter %s", resolved_adapter.name)
+
     # Get background config from model config (use provided values as overrides)
     bg_config = base_model_config.background or BackgroundConfig()
     
@@ -1286,6 +1165,7 @@ def tune_hyperparameters(
                     latin_name=latin_name,
                     activity_type=activity_type,
                     min_presence=base_model_config.sampling.min_presence,
+                    adapter=adapter,
                     n_cv_folds=n_cv_folds,
                     stability_penalty=stability_penalty,
                     feature_penalty=feature_penalty,

@@ -1,6 +1,8 @@
 model:
   seed: 42
   record_age_years: 20
+  # Modelling method (adapter registry key). Omit or set maxent for elapid MaxEnt.
+  # type: maxent
 
   # Cross-validation fold method (default: 10 km spatial blocks into 5 folds).
   # CLI overrides: --cv-method, --cv-n-folds, --cv-block-size-m,
