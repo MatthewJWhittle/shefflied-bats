@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Optional
 
+import dask.array as da
 import numpy as np
 import xarray as xr
 from scipy import ndimage
@@ -187,27 +188,13 @@ def woodland_from_canopy(
     )
 
 
-def linear_woody_mask(
-    canopy: np.ndarray,
-    *,
-    woodland: Optional[np.ndarray] = None,
-    resolution_m: float = 1.0,
-) -> np.ndarray:
-    """Narrow elongated non-woodland canopy via box-mean density windows."""
-    del resolution_m  # windows are pixel-sized at the fine grid
-    canopy_bool = np.asarray(canopy, dtype=bool)
-    if woodland is None:
-        woodland = woodland_from_canopy(canopy_bool)
-    candidates = canopy_bool & ~np.asarray(woodland, dtype=bool)
-    if not candidates.any():
-        return np.zeros_like(canopy_bool, dtype=bool)
-
-    dens = candidates.astype(np.float64)
+def _linear_woody_from_candidates(candidates: np.ndarray) -> np.ndarray:
+    """Box-mean narrow + H/V elongation on a candidate mask (serial kernel)."""
+    dens = np.asarray(candidates, dtype=np.float64)
     local = ndimage.uniform_filter(dens, size=LINEAR_NARROW_WINDOW_PX)
     narrow = candidates & (local > 0.0) & (local <= LINEAR_NARROW_MAX_DENSITY)
     if not narrow.any():
-        return np.zeros_like(canopy_bool, dtype=bool)
-
+        return np.zeros_like(candidates, dtype=bool)
     short_px, long_px = LINEAR_LINE_WINDOW_PX
     line_h = ndimage.uniform_filter(dens, size=(short_px, long_px))
     line_v = ndimage.uniform_filter(dens, size=(long_px, short_px))
@@ -217,6 +204,51 @@ def linear_woody_mask(
         & (blob <= LINEAR_BLOB_MAX_DENSITY)
     )
     return narrow & elongated
+
+
+def linear_woody_mask(
+    canopy: np.ndarray,
+    *,
+    woodland: Optional[np.ndarray] = None,
+    resolution_m: float = 1.0,
+    parallel_chunk: int = 1024,
+) -> np.ndarray:
+    """Narrow elongated non-woodland canopy via box-mean density windows.
+
+    Large arrays use Dask ``map_overlap`` (threaded) so H/V filters run across
+    cores; small arrays stay serial.
+    """
+    del resolution_m  # windows are pixel-sized at the fine grid
+    canopy_bool = np.asarray(canopy, dtype=bool)
+    if woodland is None:
+        woodland = woodland_from_canopy(canopy_bool)
+    candidates = canopy_bool & ~np.asarray(woodland, dtype=bool)
+    if not candidates.any():
+        return np.zeros_like(canopy_bool, dtype=bool)
+
+    ny, nx = candidates.shape
+    if min(ny, nx) < parallel_chunk * 2:
+        return _linear_woody_from_candidates(candidates)
+
+    depth = (max(LINEAR_LINE_WINDOW_PX) + 1) // 2
+
+    def _block(block: np.ndarray, block_info=None) -> np.ndarray:
+        return _linear_woody_from_candidates(
+            np.asarray(block, dtype=bool)
+        ).astype(np.uint8)
+
+    darr = da.from_array(
+        candidates.astype(np.uint8), chunks=(parallel_chunk, parallel_chunk)
+    )
+    out = da.map_overlap(
+        _block,
+        darr,
+        depth=depth,
+        boundary=0,
+        dtype=np.uint8,
+        trim=True,
+    ).compute(scheduler="threads")
+    return np.asarray(out, dtype=bool)
 
 
 def canopy_edge_mask(canopy: np.ndarray) -> np.ndarray:
@@ -282,14 +314,16 @@ def _block_reduce_canopy_std(
     if ny_c == 0 or nx_c == 0:
         return out
     vals = np.where(can & np.isfinite(h), h, np.nan)[:ny_c, :nx_c]
+    # Reduce on axes (1, 3) — do NOT reshape to (out_ny, out_nx, factor²);
+    # that mixes neighbouring east–west blocks (memory order interleaves fy
+    # with out_nx).
     blocks = vals.reshape(out_ny, factor, out_nx, factor)
-    flat = blocks.reshape(out_ny, out_nx, factor * factor)
-    finite = np.isfinite(flat)
-    n = np.sum(finite, axis=2)
-    filled = np.where(finite, flat, 0.0)
+    finite = np.isfinite(blocks)
+    n = np.sum(finite, axis=(1, 3))
+    filled = np.where(finite, blocks, 0.0)
     with np.errstate(invalid="ignore", divide="ignore"):
-        mean = np.sum(filled, axis=2) / np.maximum(n, 1)
-        mean_sq = np.sum(filled * filled, axis=2) / np.maximum(n, 1)
+        mean = np.sum(filled, axis=(1, 3)) / np.maximum(n, 1)
+        mean_sq = np.sum(filled * filled, axis=(1, 3)) / np.maximum(n, 1)
         var = mean_sq - mean * mean
     out = np.where(n >= 2, np.sqrt(np.maximum(var, 0.0)), out)
     out = np.where(n == 1, 0.0, out)

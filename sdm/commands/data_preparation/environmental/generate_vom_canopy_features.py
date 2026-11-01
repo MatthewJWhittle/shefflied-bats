@@ -339,7 +339,7 @@ async def fetch_and_process_vom_canopy(
     wcs_tile_pixels: tuple[int, int] = (1024, 1024),
     wcs_download_resolution_m: float = 1.0,
     summary_target_resolution_m: int = DEFAULT_SUMMARY_RESOLUTION_M,
-    max_concurrent_downloads: int = 4,
+    max_concurrent_downloads: int = 8,
     multiscale_windows_cells: Sequence[int] = DEFAULT_MULTISCALE_WINDOWS_CELLS,
     sample_compare_bbox: Optional[tuple[float, float, float, float]] = None,
     write_resolution_compare: bool = True,
@@ -488,7 +488,7 @@ def generate_vom_canopy_features(
     wcs_tile_height_px: int = 1024,
     wcs_download_resolution_m: float = 1.0,
     summary_target_resolution_m: int = DEFAULT_SUMMARY_RESOLUTION_M,
-    max_concurrent_downloads: int = 4,
+    max_concurrent_downloads: int = 8,
     verbose: bool = False,
 ) -> Path:
     """Public entry: build stage-one VOM canopy component layers into ``output_dir``."""

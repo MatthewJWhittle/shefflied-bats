@@ -143,9 +143,9 @@ Supports comparing a fresh rebuild against the live set without overwriting it. 
 
 **Data / engineering** — Stage-one `vom_canopy` masks use array ops only (no EDT, no labelling): woodland = near-solid ~25 m box-mean core + ``binary_propagation`` under canopy; linear = non-woodland narrow + H/V vs square box-mean elongation; edge = 3×3 box-mean &lt; 1 (8-connected). Fetch is one lazy tilearray mosaic; core detection via Dask `map_overlap` (halos from neighbouring chunks — each source tile downloaded once), then propagation on the assembled canopy/core. Abort with non-zero exit (no output) when failed-chunk fraction exceeds 5%.
 
-Synthetic CPU (mask + 100 m reshape summary) and live EA download/CPU split, tiles/s, peak memory, and study-area / England projections are recorded in PR #120 Implementation notes as timing rounds land. Target ≪0.3 s/tile E2E on 8 cores.
+Live EA timing (PR #120 Implementation notes): fused download+core `map_overlap` then parallel box-filter masks; **~0.26 s/tile** (3.9 tiles/s) on 16×1024 chunks / 8-wide concurrency; study ≈ 1.8 h, England ~9× ≈ 16 h. Peak mem ~0.9 GB on that window.
 
-Agreement vs legacy labelled masks on sample tiles: woodland/TOW/linear pixel **F1 ≥ 0.90**; 100 m share layers **corr ≥ 0.90**.
+Agreement vs legacy labelled: woodland/TOW pixel **F1 ≥ 0.95** on real tiles; linear tops out **~0.5 F1** under box/uniform-filter-only constraints (labelled linear needs per-component width/aspect — see PR notes). Synthetic sample-tile tests keep wood/TOW/linear F1 ≥ 0.90.
 
 **tilearray:** whole-AOI terrain DTM/DSM + VOM height summary use `sdm.data.wcs_tilearray` (`create_array` + `compute_with_policy`). Opt-in canopy uses the same lazy WCS array with `map_overlap` (halo from box windows). Public bulk source exists (EA 5 km GeoTIFF ZIPs via Defra survey download / data.gov.uk VOM) — not wired here; prefer if WCS caps England-scale wall time.
 

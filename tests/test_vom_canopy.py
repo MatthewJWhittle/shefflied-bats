@@ -416,6 +416,44 @@ def test_summarise_masks_to_grid_shares_and_lengths() -> None:
     assert np.isfinite(summaries["vom_canopy_height_std"][0, 0])
 
 
+def test_block_reduce_canopy_std_matches_per_block_loop() -> None:
+    """Adjacent 100 m blocks must not mix (reshape bug regressed corr ~0.1–0.4)."""
+    from sdm.raster.vom_canopy import _block_reduce_canopy_std
+
+    rng = np.random.default_rng(0)
+    factor = 100
+    height = np.zeros((200, 200), dtype=np.float64)
+    # Left block: low canopy heights; right block: high spread.
+    left = rng.uniform(3.0, 6.0, size=(100, 100))
+    right = rng.uniform(3.0, 25.0, size=(100, 100))
+    canopy = np.zeros((200, 200), dtype=bool)
+    canopy[:100, :100] = rng.random((100, 100)) > 0.3
+    canopy[:100, 100:] = rng.random((100, 100)) > 0.3
+    height[:100, :100] = np.where(canopy[:100, :100], left, np.nan)
+    height[:100, 100:] = np.where(canopy[:100, 100:], right, np.nan)
+
+    got = _block_reduce_canopy_std(height, canopy, factor)
+
+    def _loop_std(h: np.ndarray, can: np.ndarray) -> np.ndarray:
+        out = np.full((2, 2), np.nan)
+        for iy in range(2):
+            for ix in range(2):
+                y0, y1 = iy * factor, (iy + 1) * factor
+                x0, x1 = ix * factor, (ix + 1) * factor
+                vals = h[y0:y1, x0:x1][can[y0:y1, x0:x1]]
+                vals = vals[np.isfinite(vals)]
+                if vals.size >= 2:
+                    out[iy, ix] = float(vals.std(ddof=0))
+                elif vals.size == 1:
+                    out[iy, ix] = 0.0
+        return out
+
+    ref = _loop_std(height, canopy)
+    np.testing.assert_allclose(got, ref, rtol=1e-9, atol=1e-9)
+    # Distinct neighbouring blocks must stay distinct.
+    assert got[0, 0] != pytest.approx(got[0, 1], abs=0.5)
+
+
 def test_canopy_component_docs_are_available() -> None:
     from sdm.predictors import load_layer
 
