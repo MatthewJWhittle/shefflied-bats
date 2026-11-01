@@ -11,8 +11,14 @@
 #   highest, which tracks where surveys happen rather than where bats roost.
 # - ceh_landcover_urban_500m: overlaps urban cover within 1.5 km (r = 0.87),
 #   the scale at which avoidance of built-up land has been measured.
-# - ceh_landcover_suburban_500m: overlaps in-cell building cover (r = 0.81);
-#   urban cover within 1.5 km covers the landscape-scale urban effect.
+#
+# One-change restore (1 Nov 2026) — reason before the edit:
+# - ceh_landcover_suburban_500m: put back. Specialists avoid small towns /
+#   suburban fabric at this neighbourhood scale; Sep25-on-main SHAP showed a
+#   falling response at 6.9% mean |SHAP| (see store docs/ble-roost-shap-
+#   sep25-vs-main.md). The earlier drop treated it as redundant with
+#   buildings + urban 1.5 km; this restore tests the neighbourhood-scale
+#   avoidance signal alone (no other layer changes).
 #
 # Layers added:
 # - ceh_landcover_broadleaved_woodland_500m: roosts sit close to broadleaved
@@ -40,3 +46,4 @@ variables:
 - ceh_landcover_broadleaved_woodland_500m
 - ceh_landcover_urban_1500m
 - vom_vegetation_height_std  # canopy structural variability: edges, tree-shrub mix
+- ceh_landcover_suburban_500m  # neighbourhood-scale avoidance of small-town / suburban fabric
