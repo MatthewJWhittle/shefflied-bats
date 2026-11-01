@@ -1,8 +1,8 @@
 """Simple VOM height-band and woody-cover summaries for 100 m cells (#121).
 
-Array ops only: threshold masks, coarsen shares / std, optional box-mean
-neighbourhood. No woodland/TOW labelling, distance transforms, or patch loops.
-Safe under Dask ``map_blocks`` with no halo when summarising aligned chunks.
+Array ops only: threshold masks, xarray ``coarsen`` shares / std, optional
+box-mean neighbourhood. No woodland/TOW labelling, distance transforms, or
+patch loops. Safe under Dask when chunks are multiples of the coarsen factor.
 """
 
 from __future__ import annotations
@@ -59,69 +59,75 @@ def height_band_masks(
     return low, mid, high
 
 
-def _block_reduce_sum(mask: np.ndarray, factor: int) -> np.ndarray:
-    arr = np.asarray(mask, dtype=np.float64)
-    ny, nx = arr.shape
-    ny_c = (ny // factor) * factor
-    nx_c = (nx // factor) * factor
-    if ny_c == 0 or nx_c == 0:
-        return np.zeros((0, 0), dtype=np.float64)
-    trimmed = arr[:ny_c, :nx_c]
-    reshaped = trimmed.reshape(ny_c // factor, factor, nx_c // factor, factor)
-    return reshaped.sum(axis=(1, 3))
-
-
-def _block_reduce_canopy_std(
-    height: np.ndarray,
-    canopy: np.ndarray,
-    factor: int,
-) -> np.ndarray:
-    """Per-block standard deviation of height within canopy cells only."""
-    h = np.asarray(height, dtype=np.float64)
-    can = np.asarray(canopy, dtype=bool)
-    ny, nx = h.shape
-    ny_c = (ny // factor) * factor
-    nx_c = (nx // factor) * factor
-    out_ny, out_nx = ny_c // factor, nx_c // factor
-    out = np.full((out_ny, out_nx), np.nan, dtype=np.float64)
-    if ny_c == 0 or nx_c == 0:
-        return out
-    vals = np.where(can & np.isfinite(h), h, np.nan)[:ny_c, :nx_c]
-    blocks = vals.reshape(out_ny, factor, out_nx, factor)
-    finite = np.isfinite(blocks)
-    n = np.sum(finite, axis=(1, 3))
-    filled = np.where(finite, blocks, 0.0)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        mean = np.sum(filled, axis=(1, 3)) / np.maximum(n, 1)
-        mean_sq = np.sum(filled * filled, axis=(1, 3)) / np.maximum(n, 1)
-        var = mean_sq - mean * mean
-    out = np.where(n >= 2, np.sqrt(np.maximum(var, 0.0)), out)
-    out = np.where(n == 1, 0.0, out)
-    return out
+def _as_yx_dataarray(height: np.ndarray) -> xr.DataArray:
+    arr = np.asarray(height, dtype=np.float64)
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    return xr.DataArray(arr, dims=("y", "x"))
 
 
 def summarise_height_to_grid(
-    height: np.ndarray,
+    height: np.ndarray | xr.DataArray,
     *,
     fine_resolution_m: float = 1.0,
     summary_resolution_m: int = DEFAULT_SUMMARY_RESOLUTION_M,
 ) -> dict[str, np.ndarray]:
-    """Coarsen 1 m heights to cell shares and canopy-height std (no loops)."""
+    """Coarsen 1 m heights to cell shares and canopy-height std via xarray.
+
+    ``canopy_height_std`` is 0 where woody cover share is 0 (no canopy in the
+    cell) so MaxEnt does not see NaNs on open land.
+    """
     if summary_resolution_m % int(fine_resolution_m) != 0:
         raise ValueError(
             f"summary_resolution_m ({summary_resolution_m}) must be a multiple "
             f"of fine_resolution_m ({fine_resolution_m})"
         )
     factor = int(round(summary_resolution_m / fine_resolution_m))
-    cell_pixels = float(factor * factor)
-    canopy = canopy_mask(height)
-    low, mid, high = height_band_masks(height, canopy=canopy)
+    h = height if isinstance(height, xr.DataArray) else _as_yx_dataarray(height)
+    if h.dims != ("y", "x"):
+        h = h.transpose("y", "x")
+
+    ny = (int(h.sizes["y"]) // factor) * factor
+    nx = (int(h.sizes["x"]) // factor) * factor
+    if ny == 0 or nx == 0:
+        empty = {
+            stem: np.zeros((0, 0), dtype=np.float64) for stem in CELL_LAYER_STEMS
+        }
+        empty["canopy_height_std"] = np.full((0, 0), np.nan, dtype=np.float64)
+        return empty
+    h = h.isel(y=slice(0, ny), x=slice(0, nx))
+
+    canopy = (h.notnull() & (h >= CANOPY_MIN_HEIGHT_M)).astype("float64")
+    low = (
+        canopy
+        * (h >= HEIGHT_BAND_LOW[0]).astype("float64")
+        * (h < HEIGHT_BAND_LOW[1]).astype("float64")
+    )
+    mid = (
+        canopy
+        * (h >= HEIGHT_BAND_MID[0]).astype("float64")
+        * (h <= HEIGHT_BAND_MID[1]).astype("float64")
+    )
+    high = canopy * (h > HEIGHT_BAND_HIGH_MIN).astype("float64")
+
+    coarse = dict(y=factor, x=factor)
+    woody = canopy.coarsen(coarse, boundary="trim").mean()
+    band_low = low.coarsen(coarse, boundary="trim").mean()
+    band_mid = mid.coarsen(coarse, boundary="trim").mean()
+    band_high = high.coarsen(coarse, boundary="trim").mean()
+    # Std only among canopy cells (non-canopy → NaN before coarsen).
+    h_canopy = h.where(canopy > 0)
+    # ddof=0 so a single canopy pixel yields 0 (not NaN / warning).
+    std = h_canopy.coarsen(coarse, boundary="trim").std(skipna=True, ddof=0)
+    # Open land (no woody cover): treat structural variability as 0, not NaN.
+    std = std.where(woody > 0, 0.0)
+
     return {
-        "woody_cover_share": _block_reduce_sum(canopy, factor) / cell_pixels,
-        "height_band_2p5_5_share": _block_reduce_sum(low, factor) / cell_pixels,
-        "height_band_5_15_share": _block_reduce_sum(mid, factor) / cell_pixels,
-        "height_band_gt15_share": _block_reduce_sum(high, factor) / cell_pixels,
-        "canopy_height_std": _block_reduce_canopy_std(height, canopy, factor),
+        "woody_cover_share": np.asarray(woody.values, dtype=np.float64),
+        "height_band_2p5_5_share": np.asarray(band_low.values, dtype=np.float64),
+        "height_band_5_15_share": np.asarray(band_mid.values, dtype=np.float64),
+        "height_band_gt15_share": np.asarray(band_high.values, dtype=np.float64),
+        "canopy_height_std": np.asarray(std.values, dtype=np.float64),
     }
 
 
@@ -132,7 +138,7 @@ def summarise_height_block(
     summary_resolution_m: int = DEFAULT_SUMMARY_RESOLUTION_M,
     max_height_m: float = 40.0,
 ) -> np.ndarray:
-    """``map_blocks`` kernel: height → stacked float32 summaries (or all-NaN).
+    """Per-chunk kernel: height → stacked float32 summaries (or all-NaN).
 
     Failures are swallowed so one bad chunk does not abort siblings; the caller
     counts all-NaN outputs as failed chunks.
@@ -149,16 +155,28 @@ def summarise_height_block(
             fine_resolution_m=fine_resolution_m,
             summary_resolution_m=summary_resolution_m,
         )
-        stacked = np.stack(
+        return np.stack(
             [layers[stem].astype(np.float32) for stem in CELL_LAYER_STEMS],
             axis=0,
         )
-        return stacked
     except Exception:
         factor = int(round(summary_resolution_m / fine_resolution_m))
-        ny = max(0, (np.asarray(block).shape[-2] // factor))
-        nx = max(0, (np.asarray(block).shape[-1] // factor))
+        shape = np.asarray(block).shape
+        ny = max(0, (shape[-2] // factor) if len(shape) >= 2 else 0)
+        nx = max(0, (shape[-1] // factor) if len(shape) >= 2 else 0)
         return np.full((len(CELL_LAYER_STEMS), ny, nx), np.nan, dtype=np.float32)
+
+
+def fill_canopy_std_where_no_woody(
+    canopy_height_std: np.ndarray,
+    woody_cover_share: np.ndarray,
+) -> np.ndarray:
+    """Set canopy SD to 0 where woody cover share is 0 (open land)."""
+    std = np.asarray(canopy_height_std, dtype=np.float64).copy()
+    woody = np.asarray(woody_cover_share, dtype=np.float64)
+    open_land = np.isfinite(woody) & (woody <= 0.0)
+    std[open_land] = 0.0
+    return std
 
 
 def summaries_to_dataset(
@@ -189,7 +207,8 @@ def pairwise_pearson(
     """Pearson r for every unordered pair (finite cells only)."""
     names = list(layers)
     flat = {
-        name: np.asarray(values, dtype=np.float64).ravel() for name, values in layers.items()
+        name: np.asarray(values, dtype=np.float64).ravel()
+        for name, values in layers.items()
     }
     out: dict[tuple[str, str], float] = {}
     for i, left in enumerate(names):
@@ -198,7 +217,9 @@ def pairwise_pearson(
             if int(mask.sum()) < 3:
                 out[(left, right)] = float("nan")
                 continue
-            out[(left, right)] = float(np.corrcoef(flat[left][mask], flat[right][mask])[0, 1])
+            out[(left, right)] = float(
+                np.corrcoef(flat[left][mask], flat[right][mask])[0, 1]
+            )
     return out
 
 
@@ -211,6 +232,7 @@ __all__ = [
     "HEIGHT_BAND_MID",
     "LAYER_IDS",
     "canopy_mask",
+    "fill_canopy_std_where_no_woody",
     "height_band_masks",
     "pairwise_pearson",
     "summaries_to_dataset",

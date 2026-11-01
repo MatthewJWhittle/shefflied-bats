@@ -88,3 +88,20 @@ def test_bands_sum_to_woody_cover() -> None:
         + layers["height_band_gt15_share"]
     )
     np.testing.assert_allclose(band_sum, layers["woody_cover_share"], atol=1e-6)
+
+
+def test_canopy_std_zero_where_woody_share_zero() -> None:
+    """Open-land cells (no canopy) must get canopy SD 0, not NaN (#122 box)."""
+    h = np.full((200, 200), 1.0, dtype=np.float64)  # below VOM threshold
+    h[0:100, 0:100] = 12.0  # canopy in one 100 m cell only
+    layers = summarise_height_to_grid(h, summary_resolution_m=100)
+    woody = layers["woody_cover_share"]
+    std = layers["canopy_height_std"]
+    assert woody.shape == (2, 2)
+    # Cell with canopy: finite std; open cells: exactly 0.
+    assert woody[0, 0] == pytest.approx(1.0)
+    assert np.isfinite(std[0, 0])
+    open_cells = woody <= 0.0
+    assert np.any(open_cells)
+    np.testing.assert_array_equal(std[open_cells], 0.0)
+    assert not np.any(np.isnan(std))
