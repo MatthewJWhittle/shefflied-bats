@@ -19,7 +19,7 @@ EA VOM only (no CEH/OS). Rebuild with:
 sdm data -o <scratch-or-local-path> --only vom_canopy
 ```
 
-Processing: Non-woodland canopy components with small mean width and high aspect, Skeletonize, Length / cell hectares.
+Processing: Non-woodland canopy with narrow + elongated box-mean density windows (no labelling), Skeletonize, Length / cell hectares.
 
 Neighbourhood means at 500 / 1000 / 1500 m reuse `calculate_multiscale_variables`
 (see `vom_linear_woody_length_ha_500m`).

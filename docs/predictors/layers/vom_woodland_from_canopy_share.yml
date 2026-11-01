@@ -3,9 +3,10 @@ title: Woodland-from-canopy share
 kind: source
 family: vegetation
 summary: >
-  Share of each 100 m cell classified as woodland from joined canopy that survives ~12 m inward erosion and covers ≥0.5 ha.
+  Share of each 100 m cell classified as woodland from joined canopy with a
+  near-solid ~25 m box-mean core, filled through canopy by binary propagation.
 shows:
-  - Joined canopy blocks large enough to keep a core after ~10–15 m erosion
+  - Joined canopy reachable from a near-solid ~25 m box-mean core
 does_not_show:
   - CEH woodland classes
   - Managed woodland boundaries from maps
@@ -24,9 +25,10 @@ pipeline:
   code: sdm/commands/data_preparation/environmental/generate_vom_canopy_features.py
 processing:
   - Canopy mask
-  - Binary erosion ~12 m
-  - Keep components ≥0.5 ha intersecting a surviving core
+  - Near-solid box-mean core (~25 m window, high fraction)
+  - binary_propagation under canopy (no EDT / labelling)
   - Fraction of 100 m cell
+
 caveats:
   - Official VOM product keeps only classified vegetation objects above 2.5 m (data.gov.uk VOM summary)
   - Each VOM pixel is height of the top of canopy above ground — not vertical canopy layering

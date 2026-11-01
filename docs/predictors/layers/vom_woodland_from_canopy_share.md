@@ -1,10 +1,10 @@
 # Woodland-from-canopy share (`vom_woodland_from_canopy_share`)
 
-Share of each 100 m cell classified as woodland from joined canopy that survives a ~12 m Euclidean morphological opening.
+Share of each 100 m cell classified as woodland from joined canopy that keeps a near-solid ~25 m box-mean core, then filled through canopy by binary propagation (no EDT / labelling).
 
 ## What it shows
 
-- Joined canopy thick enough to keep a core after ~10–15 m inward erosion (grown back locally)
+- Joined canopy reachable from a near-solid ~25 m box-mean core
 
 ## What it does not show
 
@@ -19,7 +19,7 @@ EA VOM only (no CEH/OS). Rebuild with:
 sdm data -o <scratch-or-local-path> --only vom_canopy
 ```
 
-Processing: Canopy mask, Euclidean opening (`edt > r` then grow back by `r` ∩ canopy), Fraction of 100 m cell. Local fixed-radius op (no patch labelling).
+Processing: Canopy mask, near-solid box-mean core (~25 m), ``binary_propagation`` under canopy, Fraction of 100 m cell. No EDT / connected-component labelling.
 
 Neighbourhood means at 500 / 1000 / 1500 m reuse `calculate_multiscale_variables`
 (see `vom_woodland_from_canopy_share_500m`).

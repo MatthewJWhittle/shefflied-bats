@@ -13,11 +13,11 @@ from sdm.commands.data_preparation.rebuild_steps import (
 from sdm.raster.vom_canopy import (
     CANOPY_MIN_HEIGHT_M,
     COMPONENT_LAYER_IDS,
-    LINEAR_MAX_WIDTH_M,
-    WOODLAND_EROSION_M,
+    WOODLAND_CLOSE_WINDOW_M,
+    WOODLAND_MIN_FRAC,
+    WOODLAND_WINDOW_M,
     CanopyMasks,
     build_canopy_masks,
-    canopy_distance_px,
     canopy_edge_mask,
     canopy_mask,
     compare_narrow_canopy_retention,
@@ -39,7 +39,7 @@ def _legacy_woodland(
     canopy: np.ndarray,
     *,
     resolution_m: float = 1.0,
-    erosion_m: float = WOODLAND_EROSION_M,
+    erosion_m: float = 12.0,
     min_area_m2: float = _LEGACY_WOODLAND_MIN_AREA_M2,
 ) -> np.ndarray:
     """Former EDT-core + labelled area filter (agreement baseline)."""
@@ -71,7 +71,7 @@ def _legacy_linear(
     *,
     woodland: np.ndarray,
     resolution_m: float = 1.0,
-    max_width_m: float = LINEAR_MAX_WIDTH_M,
+    max_width_m: float = 20.0,
     min_aspect: float = _LEGACY_LINEAR_MIN_ASPECT,
     min_area_m2: float = _LEGACY_LINEAR_MIN_AREA_M2,
 ) -> np.ndarray:
@@ -192,11 +192,11 @@ def test_height_band_masks() -> None:
     )
 
 
-def test_woodland_opening_keeps_thick_core() -> None:
+def test_woodland_box_keeps_thick_core() -> None:
     solid = np.ones((100, 100), dtype=bool)
-    woodland = woodland_from_canopy(solid, resolution_m=1.0, erosion_m=12.0)
+    woodland = woodland_from_canopy(solid, resolution_m=1.0)
     assert woodland.any()
-    # Opening of a solid block is the block (core grows back to the edge).
+    # Dense core + dilate recovers a solid block.
     assert woodland.sum() == solid.sum()
 
     small = np.zeros((50, 50), dtype=bool)
@@ -227,16 +227,20 @@ def test_canopy_edge_mask_is_8_connected() -> None:
     assert edge_block[2, 2]
 
 
-def test_mask_overlap_halo_covers_openings() -> None:
+def test_mask_overlap_halo_covers_box_filters() -> None:
     halo = mask_overlap_halo_px(resolution_m=1.0)
-    # Woodland opening 2*12 + linear elong window half of 41.
-    assert halo == 2 * 12 + 21
+    win_r = int(round(WOODLAND_WINDOW_M)) // 2
+    linear_r = (41 + 1) // 2
+    assert halo == win_r + linear_r
+    assert WOODLAND_MIN_FRAC >= 0.9
+    assert WOODLAND_CLOSE_WINDOW_M == 0.0
 
 
 def test_local_heuristics_agree_with_legacy_on_sample_tiles() -> None:
     """Pixel F1 vs labelled baseline; 100 m summaries corr + MAD.
 
-    Target band is ~0.90–0.95+; heuristics trade exact match for local ops.
+    Target band is ~0.90–0.95; box-filter heuristics trade exact match for
+    local uniform_filter ops (no EDT / labelling).
     """
     f1_wood: list[float] = []
     f1_linear: list[float] = []
@@ -431,3 +435,35 @@ def test_compare_narrow_canopy_retention_reports_loss() -> None:
     assert stats["linear_pixels_1m"] > 0
     assert stats["linear_retained_at_10m_frac"] == pytest.approx(0.0)
     assert stats["linear_lost_frac"] == pytest.approx(1.0)
+
+
+def test_vom_canopy_fails_loudly_when_most_chunks_fail(tmp_path, monkeypatch) -> None:
+    """High chunk-failure fraction → non-zero path, no GeoTIFF written."""
+    from sdm.commands.data_preparation.environmental import (
+        generate_vom_canopy_features as mod,
+    )
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}', encoding="utf-8"
+    )
+    out_dir = tmp_path / "out"
+
+    async def _boom(*_args, **_kwargs):
+        raise mod.VomCanopyChunkFailureError(
+            "VOM canopy abort: 10/10 chunks failed (100% > allowed 5%); "
+            "no output written"
+        )
+
+    monkeypatch.setattr(mod, "fetch_and_process_vom_canopy", _boom)
+    with pytest.raises(mod.VomCanopyChunkFailureError, match="no output written"):
+        mod.generate_vom_canopy_features(out_dir, boundary)
+    assert not (out_dir / "vom_canopy_features_100m.tif").exists()
+
+
+def test_max_failed_chunk_fraction_constant() -> None:
+    from sdm.commands.data_preparation.environmental.generate_vom_canopy_features import (
+        MAX_FAILED_CHUNK_FRACTION,
+    )
+
+    assert 0.0 < MAX_FAILED_CHUNK_FRACTION <= 0.1

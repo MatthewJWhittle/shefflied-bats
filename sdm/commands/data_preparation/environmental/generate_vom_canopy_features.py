@@ -1,8 +1,9 @@
 """Stage-one VOM canopy component layers (1 m EA VOM only; scratch output).
 
-Opt-in rebuild step ``vom_canopy``: lazy tilearray WCS fetch, local-morphology
-masks under ``map_overlap``-sized chunks with halo, summarise to 100 m, then
-neighbourhood means. Not wired into the live EV merge or model configs.
+Opt-in rebuild step ``vom_canopy``: one lazy tilearray WCS mosaic; masks under
+Dask ``map_overlap`` (halos from neighbouring chunks — each source tile fetched
+once); reshape/coarsen-style 100 m summaries; neighbourhood means. Not wired
+into the live EV merge or model configs.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+import dask.array as da
 import numpy as np
 import rioxarray  # noqa: F401  # registers .rio on xarray
 import xarray as xr
@@ -34,14 +36,21 @@ from sdm.data.wcs_tilearray import (
 from sdm.raster.vom_canopy import (
     COMPONENT_LAYER_IDS,
     DEFAULT_SUMMARY_RESOLUTION_M,
-    LINEAR_MAX_WIDTH_M,
-    WOODLAND_EROSION_M,
+    WOODLAND_CLOSE_WINDOW_M,
+    WOODLAND_MIN_FRAC,
+    WOODLAND_WINDOW_M,
     CanopyMasks,
     build_canopy_masks,
+    canopy_edge_mask,
+    canopy_mask,
     compare_narrow_canopy_retention,
+    height_band_masks,
+    linear_woody_mask,
     mask_overlap_halo_px,
     summarise_masks_by_coordinates,
     summarise_masks_to_grid,
+    woodland_core_mask,
+    woodland_from_canopy,
 )
 from sdm.utils.io import load_boundary_and_transform
 from sdm.utils.logging_utils import setup_logging
@@ -50,9 +59,16 @@ from sdm.utils.logging_utils import setup_logging
 DEFAULT_MULTISCALE_WINDOWS_CELLS: tuple[int, ...] = (10, 20, 30)
 DEFAULT_MULTISCALE_GROUPS: tuple[str, ...] = ("vom_",)
 
+# Abort before writing outputs when this fraction of chunks fail (e.g. 403s).
+MAX_FAILED_CHUNK_FRACTION = 0.05
+
 # Back-compat aliases for notes / callers.
 VOM_WCS_ENDPOINT = EA_VOM_WCS_ENDPOINT
 VOM_COVERAGE_ID = EA_VOM_COVERAGE_ID
+
+
+class VomCanopyChunkFailureError(RuntimeError):
+    """Raised when too many canopy chunks fail (no output written)."""
 
 
 def _summary_grid_coords(
@@ -145,20 +161,45 @@ def process_height_array_block_aligned(
     )
 
 
-def _chunk_slices(
-    size: int, chunk_sizes: tuple[int, ...]
-) -> list[tuple[int, int]]:
-    """Inclusive-exclusive ``(start, stop)`` for each chunk along one axis."""
-    out: list[tuple[int, int]] = []
-    start = 0
-    for length in chunk_sizes:
-        stop = start + int(length)
-        out.append((start, min(stop, size)))
-        start = stop
+def _cap_height_block(block: np.ndarray) -> np.ndarray:
+    """Apply the shared vegetation height cap on a numpy block."""
+    arr = np.asarray(block, dtype=np.float64)
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    finite = np.isfinite(arr)
+    out = arr.copy()
+    out[finite & (out > VEGETATION_HEIGHT_MAX_M)] = VEGETATION_HEIGHT_MAX_M
     return out
 
 
-def _process_lazy_canopy_chunks(
+def _masks_from_canopy_and_core(
+    height: np.ndarray,
+    canopy: np.ndarray,
+    core: np.ndarray,
+    *,
+    resolution_m: float,
+) -> CanopyMasks:
+    """Propagate woodland from assembled cores, then local linear / edge / bands."""
+    woodland = woodland_from_canopy(
+        canopy, resolution_m=resolution_m, core=core
+    )
+    low, mid, high = height_band_masks(height, canopy=canopy)
+    linear = linear_woody_mask(
+        canopy, woodland=woodland, resolution_m=resolution_m
+    )
+    return CanopyMasks(
+        canopy=canopy,
+        band_2p5_5=low,
+        band_5_15=mid,
+        band_gt15=high,
+        woodland=woodland,
+        trees_outside_woodland=canopy & ~woodland,
+        linear=linear,
+        canopy_edge=canopy_edge_mask(canopy),
+    )
+
+
+def _process_lazy_canopy_map_overlap(
     lazy_height: xr.DataArray,
     mosaic: dict[str, np.ndarray],
     *,
@@ -169,19 +210,17 @@ def _process_lazy_canopy_chunks(
     halo_px: int,
     write_resolution_compare: bool,
 ) -> tuple[int, int, Optional[dict[str, Any]]]:
-    """Compute tilearray chunks with halo; accumulate 100 m summaries.
+    """Fetch each chunk once via ``map_overlap``; accumulate 100 m summaries.
 
     Returns ``(n_chunks, n_failed, compare_stats)``.
     """
     if "band" in lazy_height.dims:
         lazy_height = lazy_height.isel(band=0)
-    # Ensure y, x dim order.
     if lazy_height.dims != ("y", "x"):
         lazy_height = lazy_height.transpose("y", "x")
 
     data = lazy_height.data
     if not hasattr(data, "chunks") or data.chunks is None:
-        # Already concrete — treat as one chunk.
         cell_values = process_height_tile(
             lazy_height,
             fine_resolution_m=fine_resolution_m,
@@ -209,104 +248,87 @@ def _process_lazy_canopy_chunks(
 
     chy = tuple(int(c) for c in data.chunks[0])
     chx = tuple(int(c) for c in data.chunks[1])
-    ny = int(lazy_height.sizes["y"])
-    nx = int(lazy_height.sizes["x"])
-    y_slices = _chunk_slices(ny, chy)
-    x_slices = _chunk_slices(nx, chx)
-    n_chunks = len(y_slices) * len(x_slices)
-    n_failed = 0
-    compare_stats: Optional[dict[str, Any]] = None
-    done = 0
+    n_chunks = len(chy) * len(chx)
+    res = float(fine_resolution_m)
 
-    for iy0, iy1 in y_slices:
-        for ix0, ix1 in x_slices:
-            ya = max(0, iy0 - halo_px)
-            yb = min(ny, iy1 + halo_px)
-            xa = max(0, ix0 - halo_px)
-            xb = min(nx, ix1 + halo_px)
-            tile_id = f"y{iy0}:{iy1}_x{ix0}:{ix1}"
-            try:
-                expanded = lazy_height.isel(y=slice(ya, yb), x=slice(xa, xb))
-                computed = compute_with_policy(expanded)
-                capped = cap_vegetation_heights(computed)
-                values = np.asarray(capped.values, dtype=np.float64)
-                if values.ndim == 3:
-                    values = values[0]
-                # Masks on expanded (halo) so opening/EDT see neighbours; crop
-                # to chunk interior before 100 m accumulate (no double-count).
-                masks = build_canopy_masks(
-                    values, resolution_m=fine_resolution_m
-                )
-                y_off, x_off = iy0 - ya, ix0 - xa
-                y_len, x_len = iy1 - iy0, ix1 - ix0
-                masks_inner = CanopyMasks(
-                    canopy=masks.canopy[
-                        y_off : y_off + y_len, x_off : x_off + x_len
-                    ],
-                    band_2p5_5=masks.band_2p5_5[
-                        y_off : y_off + y_len, x_off : x_off + x_len
-                    ],
-                    band_5_15=masks.band_5_15[
-                        y_off : y_off + y_len, x_off : x_off + x_len
-                    ],
-                    band_gt15=masks.band_gt15[
-                        y_off : y_off + y_len, x_off : x_off + x_len
-                    ],
-                    woodland=masks.woodland[
-                        y_off : y_off + y_len, x_off : x_off + x_len
-                    ],
-                    trees_outside_woodland=masks.trees_outside_woodland[
-                        y_off : y_off + y_len, x_off : x_off + x_len
-                    ],
-                    linear=masks.linear[
-                        y_off : y_off + y_len, x_off : x_off + x_len
-                    ],
-                    canopy_edge=masks.canopy_edge[
-                        y_off : y_off + y_len, x_off : x_off + x_len
-                    ],
-                )
-                height_inner = values[
-                    y_off : y_off + y_len, x_off : x_off + x_len
-                ]
-                x_inner = np.asarray(capped.x.values, dtype=np.float64)[
-                    x_off : x_off + x_len
-                ]
-                y_inner = np.asarray(capped.y.values, dtype=np.float64)[
-                    y_off : y_off + y_len
-                ]
-                if write_resolution_compare and compare_stats is None:
-                    compare_stats = dict(
-                        compare_narrow_canopy_retention(
-                            height_inner, resolution_1m=fine_resolution_m
-                        )
-                    )
-                    compare_stats["sample_chunk"] = tile_id
-                    logging.info(
-                        "10 m vs 1 m narrow-canopy sample: %s", compare_stats
-                    )
-                cell_values = summarise_masks_by_coordinates(
-                    masks_inner,
-                    height_inner,
-                    x_coords=x_inner,
-                    y_coords=y_inner,
-                    fine_resolution_m=fine_resolution_m,
-                    summary_resolution_m=summary_resolution_m,
-                    tile_id=tile_id,
-                )
-                _accumulate_coordinate_summaries(
-                    mosaic,
-                    cell_values,
-                    minx_s=minx_s,
-                    maxy_s=maxy_s,
-                    summary_resolution_m=summary_resolution_m,
-                )
-            except Exception:
-                n_failed += 1
-                logging.exception("VOM canopy chunk failed: %s", tile_id)
-            done += 1
-            if done % 4 == 0 or done == n_chunks:
-                logging.info("VOM canopy chunks %d / %d", done, n_chunks)
-    return n_chunks, n_failed, compare_stats
+    def _core_block(block: np.ndarray, block_info=None) -> np.ndarray:
+        capped = _cap_height_block(block)
+        return woodland_core_mask(
+            canopy_mask(capped), resolution_m=res
+        ).astype(np.uint8)
+
+    try:
+        # Core needs halo; height shares the same delayed tiles in one compute.
+        core_da = da.map_overlap(
+            _core_block,
+            data,
+            depth=halo_px,
+            boundary=0,
+            dtype=np.uint8,
+            trim=True,
+        )
+        fused = xr.Dataset(
+            {
+                "height": lazy_height,
+                "core": xr.DataArray(
+                    core_da,
+                    dims=("y", "x"),
+                    coords={"y": lazy_height.y, "x": lazy_height.x},
+                ),
+            },
+            attrs=dict(lazy_height.attrs),
+        )
+        computed = compute_with_policy(fused)
+    except Exception:
+        logging.exception("VOM canopy map_overlap / compute failed for all chunks")
+        return n_chunks, n_chunks, None
+
+    height_vals = np.asarray(computed["height"].values, dtype=np.float64)
+    if height_vals.ndim == 3:
+        height_vals = height_vals[0]
+    height_vals = _cap_height_block(height_vals)
+    canopy = canopy_mask(height_vals)
+    core = np.asarray(computed["core"].values, dtype=bool)
+    masks = _masks_from_canopy_and_core(
+        height_vals, canopy, core, resolution_m=fine_resolution_m
+    )
+    capped_height = lazy_height.copy(data=height_vals)
+    compare_stats = None
+    if write_resolution_compare:
+        # Sample first chunk interior for 10 m retention notes.
+        y0, x0 = 0, 0
+        y1 = min(int(chy[0]), height_vals.shape[0])
+        x1 = min(int(chx[0]), height_vals.shape[1])
+        compare_stats = dict(
+            compare_narrow_canopy_retention(
+                height_vals[y0:y1, x0:x1], resolution_1m=fine_resolution_m
+            )
+        )
+        compare_stats["sample_chunk"] = f"y0:{y1}_x0:{x1}"
+        logging.info("10 m vs 1 m narrow-canopy sample: %s", compare_stats)
+
+    try:
+        cell_values = summarise_masks_by_coordinates(
+            masks,
+            height_vals,
+            x_coords=np.asarray(capped_height.x.values, dtype=np.float64),
+            y_coords=np.asarray(capped_height.y.values, dtype=np.float64),
+            fine_resolution_m=fine_resolution_m,
+            summary_resolution_m=summary_resolution_m,
+            tile_id="map_overlap_mosaic",
+        )
+        _accumulate_coordinate_summaries(
+            mosaic,
+            cell_values,
+            minx_s=minx_s,
+            maxy_s=maxy_s,
+            summary_resolution_m=summary_resolution_m,
+        )
+    except Exception:
+        logging.exception("VOM canopy summary accumulate failed")
+        return n_chunks, n_chunks, compare_stats
+
+    return n_chunks, 0, compare_stats
 
 
 async def fetch_and_process_vom_canopy(
@@ -321,9 +343,10 @@ async def fetch_and_process_vom_canopy(
     multiscale_windows_cells: Sequence[int] = DEFAULT_MULTISCALE_WINDOWS_CELLS,
     sample_compare_bbox: Optional[tuple[float, float, float, float]] = None,
     write_resolution_compare: bool = True,
+    max_failed_chunk_fraction: float = MAX_FAILED_CHUNK_FRACTION,
 ) -> Path:
-    """Lazy tilearray VOM fetch + chunked canopy components → GeoTIFF."""
-    del sample_compare_bbox  # compare uses first successful chunk; bbox kept for API
+    """Lazy tilearray VOM fetch + map_overlap canopy components → GeoTIFF."""
+    del sample_compare_bbox  # compare uses first chunk; bbox kept for API
 
     boundary_gdf, _model_transform, grid_bounds, spatial_config = (
         load_boundary_and_transform(boundary_path, buffer_distance=buffer_distance)
@@ -359,7 +382,7 @@ async def fetch_and_process_vom_canopy(
     )
 
     n_chunks, n_failed, compare_stats = await asyncio.to_thread(
-        _process_lazy_canopy_chunks,
+        _process_lazy_canopy_map_overlap,
         lazy,
         mosaic,
         fine_resolution_m=fine_res,
@@ -370,13 +393,22 @@ async def fetch_and_process_vom_canopy(
         write_resolution_compare=write_resolution_compare,
     )
 
+    n_ok = n_chunks - n_failed
+    fail_frac = (n_failed / n_chunks) if n_chunks else 1.0
+    if fail_frac > max_failed_chunk_fraction:
+        raise VomCanopyChunkFailureError(
+            f"VOM canopy abort: {n_failed}/{n_chunks} chunks failed "
+            f"({fail_frac:.0%} > allowed {max_failed_chunk_fraction:.0%}); "
+            "no output written"
+        )
+
     data_vars = {}
     for name, arr in mosaic.items():
-        da = xr.DataArray(
+        da_out = xr.DataArray(
             arr, coords={"y": mosaic_y, "x": mosaic_x}, dims=("y", "x"), name=name
         )
-        da.attrs["long_name"] = name
-        data_vars[name] = da
+        da_out.attrs["long_name"] = name
+        data_vars[name] = da_out
     ds = xr.Dataset(data_vars)
     ds = ds.rio.write_crs(model_crs)
     ds = ds.rio.write_transform(mosaic_transform)
@@ -398,7 +430,6 @@ async def fetch_and_process_vom_canopy(
     logging.info("Writing VOM canopy components to %s", output_path)
     ds.rio.to_raster(output_path)
 
-    n_ok = n_chunks - n_failed
     if n_failed:
         logging.warning(
             "VOM canopy finished with %d failed chunk(s) of %d "
@@ -414,27 +445,29 @@ async def fetch_and_process_vom_canopy(
 
     notes = {
         "source": "EA Lidar Vegetation Object Model (VOM) only",
-        "fetch": "tilearray.create_array + compute_with_policy (chunked)",
+        "fetch": "tilearray.create_array + map_overlap + compute_with_policy",
         "wcs_endpoint": EA_VOM_WCS_ENDPOINT,
         "coverage_id": EA_VOM_COVERAGE_ID,
         "download_resolution_m": fine_res,
         "summary_resolution_m": summary_res,
         "canopy_min_height_m": 2.5,
         "height_cap_m": VEGETATION_HEIGHT_MAX_M,
-        "woodland_method": "euclidean_morphological_opening",
-        "woodland_erosion_m": WOODLAND_EROSION_M,
-        "linear_method": "local_edt_width_plus_directional_density",
-        "linear_max_width_m": LINEAR_MAX_WIDTH_M,
+        "woodland_method": "box_mean_core_plus_binary_propagation",
+        "woodland_close_window_m": WOODLAND_CLOSE_WINDOW_M,
+        "woodland_window_m": WOODLAND_WINDOW_M,
+        "woodland_min_frac": WOODLAND_MIN_FRAC,
+        "linear_method": "box_mean_narrow_plus_directional_density",
         "mask_overlap_halo_px": halo_px,
         "multiscale_windows_cells": list(multiscale_windows_cells),
         "n_chunks": n_chunks,
         "n_chunks_processed": n_ok,
         "n_chunks_failed": n_failed,
+        "max_failed_chunk_fraction": max_failed_chunk_fraction,
         "spatial_resolution_model_m": spatial_config.get("resolution"),
         "component_layers": list(COMPONENT_LAYER_IDS),
         "not_in_model_stack": True,
         "resolution_compare_10m_vs_1m": compare_stats,
-        "canopy_edge_connectivity": "8-connected (3x3 structure; docstring matches code)",
+        "canopy_edge_connectivity": "8-connected (3x3 box-mean < 1)",
     }
     notes_path = output_dir / "vom_canopy_features_notes.json"
     notes_path.write_text(json.dumps(notes, indent=2, sort_keys=True), encoding="utf-8")
@@ -479,8 +512,10 @@ def generate_vom_canopy_features(
 __all__ = [
     "DEFAULT_MULTISCALE_GROUPS",
     "DEFAULT_MULTISCALE_WINDOWS_CELLS",
+    "MAX_FAILED_CHUNK_FRACTION",
     "VOM_COVERAGE_ID",
     "VOM_WCS_ENDPOINT",
+    "VomCanopyChunkFailureError",
     "fetch_and_process_vom_canopy",
     "generate_vom_canopy_features",
     "process_height_array_block_aligned",

@@ -141,12 +141,12 @@ Supports comparing a fresh rebuild against the live set without overwriting it. 
 
 ### VOM canopy speed (raster-native)
 
-**Data / engineering** — Stage-one `vom_canopy` masks use local Euclidean morphology (no connected-component labelling): woodland = EDT opening (`edt > r` then grow-back ∩ canopy); linear = non-woodland narrow width + H/V density elongation. `canopy_edge_mask` is **8-connected** (3×3 structure; docstring matches code).
+**Data / engineering** — Stage-one `vom_canopy` masks use array ops only (no EDT, no labelling): woodland = near-solid ~25 m box-mean core + ``binary_propagation`` under canopy; linear = non-woodland narrow + H/V vs square box-mean elongation; edge = 3×3 box-mean &lt; 1 (8-connected). Fetch is one lazy tilearray mosaic; core detection via Dask `map_overlap` (halos from neighbouring chunks — each source tile downloaded once), then propagation on the assembled canopy/core. Abort with non-zero exit (no output) when failed-chunk fraction exceeds 5%.
 
-Measured on a synthetic 1024² tile (mask + 100 m summary): **~3.9 tiles/s** (~0.25 s/tile) vs prior ~0.9 s/tile labelled path. CPU-only projection for **24 288** study-area tiles ≈ **1.7 h**; England-scale (~9× area) ≈ **15 h** CPU. Live rebuild remains **download-bound** at WCS concurrency — expect wall time closer to prior WCS-limited hours unless bulk tiles are used.
+Synthetic CPU (mask + 100 m reshape summary) and live EA download/CPU split, tiles/s, peak memory, and study-area / England projections are recorded in PR #120 Implementation notes as timing rounds land. Target ≪0.3 s/tile E2E on 8 cores.
 
-Agreement vs legacy labelled masks on sample tiles: woodland/TOW/linear pixel **F1 ≥ 0.95**; 100 m share layers **corr ≈ 1.0**, MAD ≪ 0.05.
+Agreement vs legacy labelled masks on sample tiles: woodland/TOW/linear pixel **F1 ≥ 0.90**; 100 m share layers **corr ≥ 0.90**.
 
-**tilearray:** whole-AOI terrain DTM/DSM + VOM height summary use `sdm.data.wcs_tilearray` (`create_array` + `compute_with_policy`). Opt-in canopy uses the same lazy WCS array with chunked halo (~45 px) so 1 m is never held whole. Public bulk source exists (EA 5 km GeoTIFF ZIPs via Defra survey download / data.gov.uk VOM) — not wired here; prefer if WCS caps England-scale wall time.
+**tilearray:** whole-AOI terrain DTM/DSM + VOM height summary use `sdm.data.wcs_tilearray` (`create_array` + `compute_with_policy`). Opt-in canopy uses the same lazy WCS array with `map_overlap` (halo from box windows). Public bulk source exists (EA 5 km GeoTIFF ZIPs via Defra survey download / data.gov.uk VOM) — not wired here; prefer if WCS caps England-scale wall time.
 
 **Not moved to tilearray:** Climate HTTPS GeoTIFFs, OS/CEH manual bulk, orphan `ImageTileDownloader`.

@@ -1,7 +1,8 @@
 """Composable VOM canopy masks and 100 m summaries (EA VOM only; no CEH/OS).
 
-Building blocks operate on fine-resolution height arrays (typically 1 m).
-Component layers for modelling are short recipes over these masks/summaries.
+Masks are local array ops only: thresholds and ``scipy.ndimage.uniform_filter``
+box means. No Euclidean distance transforms and no connected-component
+labelling — safe under Dask ``map_overlap`` with a fixed halo.
 """
 
 from __future__ import annotations
@@ -23,14 +24,18 @@ HEIGHT_BAND_MID = (5.0, 15.0)
 # Open upper bound: canopy cells with height > 15 m.
 HEIGHT_BAND_HIGH_MIN = 15.0
 
-# Woodland-from-canopy: Euclidean morphological opening radius (~10–15 m).
-WOODLAND_EROSION_M = 12.0
+# Woodland-from-canopy: near-solid box-mean core (~25 m ≈ 2·12+1), then
+# binary_propagation under canopy (component fill without labelling / EDT).
+WOODLAND_CLOSE_WINDOW_M = 0.0
+WOODLAND_CLOSE_MIN_FRAC = 0.0
+WOODLAND_WINDOW_M = 25.0
+WOODLAND_MIN_FRAC = 0.99
 
-# Linear woody: non-woodland canopy thinner than this width + local elongation.
-LINEAR_MAX_WIDTH_M = 20.0
-# Directional density windows (px) for cheap elongation vs compact TOW blobs.
+# Linear woody: non-woodland canopy via H/V vs square box-mean elongation.
 LINEAR_LINE_WINDOW_PX = (5, 41)  # (short, long) for H/V uniform filters
 LINEAR_BLOB_WINDOW_PX = 9
+LINEAR_NARROW_WINDOW_PX = 21
+LINEAR_NARROW_MAX_DENSITY = 0.55
 LINEAR_LINE_MIN_DENSITY = 0.45
 LINEAR_BLOB_MAX_DENSITY = 0.70
 
@@ -38,31 +43,43 @@ LINEAR_BLOB_MAX_DENSITY = 0.70
 DEFAULT_SUMMARY_RESOLUTION_M = 100
 
 
-def woodland_halo_px(resolution_m: float = 1.0, erosion_m: float = WOODLAND_EROSION_M) -> int:
-    """``map_overlap`` halo (px) for woodland opening: erode + dilate by ``r``."""
-    r = max(1, int(round(erosion_m / resolution_m)))
-    return 2 * r
+def _window_px(window_m: float, resolution_m: float) -> int:
+    """Odd pixel window covering ``window_m`` at ``resolution_m`` (≥1)."""
+    return max(1, int(round(float(window_m) / float(resolution_m))))
 
 
-def linear_halo_px(
+def woodland_halo_px(
     resolution_m: float = 1.0,
-    max_width_m: float = LINEAR_MAX_WIDTH_M,
+    *,
+    close_window_m: float = WOODLAND_CLOSE_WINDOW_M,
+    window_m: float = WOODLAND_WINDOW_M,
 ) -> int:
-    """Extra halo (px) for candidate EDT width + elongation windows."""
-    width_r = max(1, int(round((max_width_m / 2.0) / resolution_m)))
-    elong_r = (max(LINEAR_LINE_WINDOW_PX) + 1) // 2
-    return max(width_r, elong_r)
+    """``map_overlap`` halo (px) for woodland core box-mean.
+
+    Propagation under canopy is applied after cores are assembled so a fixed
+    halo only needs to cover the core window (not whole woodland extent).
+    """
+    close_px = _window_px(close_window_m, resolution_m) if close_window_m > 0 else 0
+    win_px = _window_px(window_m, resolution_m)
+    return (close_px // 2) + (win_px // 2)
+
+
+def linear_halo_px(resolution_m: float = 1.0) -> int:
+    """Extra halo (px) for H/V and narrow box-mean windows."""
+    del resolution_m  # windows are defined in pixels at 1 m; scale with res if needed
+    return (max(LINEAR_LINE_WINDOW_PX) + 1) // 2
 
 
 def mask_overlap_halo_px(
     resolution_m: float = 1.0,
-    erosion_m: float = WOODLAND_EROSION_M,
-    max_width_m: float = LINEAR_MAX_WIDTH_M,
+    *,
+    close_window_m: float = WOODLAND_CLOSE_WINDOW_M,
+    window_m: float = WOODLAND_WINDOW_M,
 ) -> int:
     """Halo covering woodland then linear local ops in one ``map_overlap``."""
-    return woodland_halo_px(resolution_m, erosion_m) + linear_halo_px(
-        resolution_m, max_width_m
-    )
+    return woodland_halo_px(
+        resolution_m, close_window_m=close_window_m, window_m=window_m
+    ) + linear_halo_px(resolution_m)
 
 
 @dataclass(frozen=True)
@@ -110,49 +127,63 @@ def height_band_masks(
     return low, mid, high
 
 
-def canopy_distance_px(mask: np.ndarray) -> np.ndarray:
-    """Euclidean distance (pixels) from each True cell to the nearest False."""
-    return ndimage.distance_transform_edt(np.asarray(mask, dtype=bool))
-
-
-def _euclidean_opening(
-    mask: np.ndarray,
-    radius_px: int,
+def woodland_core_mask(
+    canopy: np.ndarray,
     *,
-    distance_px: Optional[np.ndarray] = None,
+    resolution_m: float = 1.0,
+    close_window_m: float = WOODLAND_CLOSE_WINDOW_M,
+    close_min_frac: float = WOODLAND_CLOSE_MIN_FRAC,
+    window_m: float = WOODLAND_WINDOW_M,
+    min_frac: float = WOODLAND_MIN_FRAC,
 ) -> np.ndarray:
-    """Binary opening with a Euclidean disk via two EDT thresholds.
-
-    ``core = edt(mask) > r``; grow back with ``edt(~core) <= r``; intersect mask.
-    Local fixed-radius op — safe under ``map_overlap`` with halo ``2 * r``.
-    """
-    mask_bool = np.asarray(mask, dtype=bool)
-    if radius_px < 1 or not mask_bool.any():
-        return np.zeros_like(mask_bool, dtype=bool)
-    if distance_px is None:
-        distance_px = canopy_distance_px(mask_bool)
-    core = distance_px > radius_px
-    if not core.any():
-        return np.zeros_like(mask_bool, dtype=bool)
-    return mask_bool & (canopy_distance_px(~core) <= radius_px)
+    """Near-solid box-mean core of canopy (local; safe under ``map_overlap``)."""
+    canopy_bool = np.asarray(canopy, dtype=bool)
+    if not canopy_bool.any():
+        return np.zeros_like(canopy_bool, dtype=bool)
+    dens = canopy_bool.astype(np.float64)
+    close_px = _window_px(close_window_m, resolution_m) if close_window_m > 0 else 0
+    if close_px > 1 and close_min_frac > 0:
+        dens = (
+            ndimage.uniform_filter(dens, size=close_px) >= float(close_min_frac)
+        ).astype(np.float64)
+    win_px = _window_px(window_m, resolution_m)
+    return ndimage.uniform_filter(dens, size=win_px) >= float(min_frac)
 
 
 def woodland_from_canopy(
     canopy: np.ndarray,
     *,
     resolution_m: float = 1.0,
-    erosion_m: float = WOODLAND_EROSION_M,
-    distance_px: Optional[np.ndarray] = None,
+    close_window_m: float = WOODLAND_CLOSE_WINDOW_M,
+    close_min_frac: float = WOODLAND_CLOSE_MIN_FRAC,
+    window_m: float = WOODLAND_WINDOW_M,
+    min_frac: float = WOODLAND_MIN_FRAC,
+    core: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Woodland via Euclidean morphological opening of canopy (no labelling).
+    """Woodland via dense box-mean core + propagation under canopy.
 
-    ``core = edt(canopy) > r`` then grow back by ``r`` and intersect canopy.
-    Thick joined canopy keeps a core after ~10–15 m inward erosion; thin
-    patches and hedges do not. Pass ``distance_px`` to reuse a canopy EDT.
+    No EDT and no connected-component labelling: ``binary_propagation`` fills
+    canopy reachable from the core (same components the labelled path kept).
     """
-    radius_px = max(1, int(round(erosion_m / float(resolution_m))))
-    return _euclidean_opening(
-        canopy, radius_px, distance_px=distance_px
+    canopy_bool = np.asarray(canopy, dtype=bool)
+    if not canopy_bool.any():
+        return np.zeros_like(canopy_bool, dtype=bool)
+    if core is None:
+        core = woodland_core_mask(
+            canopy_bool,
+            resolution_m=resolution_m,
+            close_window_m=close_window_m,
+            close_min_frac=close_min_frac,
+            window_m=window_m,
+            min_frac=min_frac,
+        )
+    core_bool = np.asarray(core, dtype=bool) & canopy_bool
+    if not core_bool.any():
+        return np.zeros_like(canopy_bool, dtype=bool)
+    return ndimage.binary_propagation(
+        core_bool,
+        mask=canopy_bool,
+        structure=np.ones((3, 3), dtype=bool),
     )
 
 
@@ -161,33 +192,23 @@ def linear_woody_mask(
     *,
     woodland: Optional[np.ndarray] = None,
     resolution_m: float = 1.0,
-    max_width_m: float = LINEAR_MAX_WIDTH_M,
-    canopy_distance_px_arr: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Narrow elongated non-woodland canopy (hedges / tree lines).
-
-    Local ops only (no labelling): candidates are canopy outside woodland;
-    keep pixels with ``2 * edt(candidates) <= max_width_m`` that also look
-    elongated under H/V vs square uniform-density windows.
-    """
+    """Narrow elongated non-woodland canopy via box-mean density windows."""
+    del resolution_m  # windows are pixel-sized at the fine grid
     canopy_bool = np.asarray(canopy, dtype=bool)
     if woodland is None:
-        woodland = woodland_from_canopy(
-            canopy_bool,
-            resolution_m=resolution_m,
-            distance_px=canopy_distance_px_arr,
-        )
+        woodland = woodland_from_canopy(canopy_bool)
     candidates = canopy_bool & ~np.asarray(woodland, dtype=bool)
     if not candidates.any():
         return np.zeros_like(canopy_bool, dtype=bool)
 
-    half_width_m = canopy_distance_px(candidates) * float(resolution_m)
-    narrow = candidates & ((2.0 * half_width_m) <= float(max_width_m))
+    dens = candidates.astype(np.float64)
+    local = ndimage.uniform_filter(dens, size=LINEAR_NARROW_WINDOW_PX)
+    narrow = candidates & (local > 0.0) & (local <= LINEAR_NARROW_MAX_DENSITY)
     if not narrow.any():
         return np.zeros_like(canopy_bool, dtype=bool)
 
     short_px, long_px = LINEAR_LINE_WINDOW_PX
-    dens = candidates.astype(np.float64)
     line_h = ndimage.uniform_filter(dens, size=(short_px, long_px))
     line_v = ndimage.uniform_filter(dens, size=(long_px, short_px))
     blob = ndimage.uniform_filter(dens, size=LINEAR_BLOB_WINDOW_PX)
@@ -199,17 +220,11 @@ def linear_woody_mask(
 
 
 def canopy_edge_mask(canopy: np.ndarray) -> np.ndarray:
-    """Canopy pixels that touch a non-canopy neighbour (8-connected edge).
-
-    Uses a 3×3 all-ones structuring element (diagonal neighbours count).
-    Docstring previously said 4-connected; code was always 8-connected —
-    docstring updated to match.
-    """
+    """Canopy pixels with a non-canopy neighbour in the 3×3 box (8-connected)."""
     canopy_bool = np.asarray(canopy, dtype=bool)
-    eroded = ndimage.binary_erosion(
-        canopy_bool, structure=np.ones((3, 3), dtype=bool)
-    )
-    return canopy_bool & ~eroded
+    # Mean < 1 ⇒ at least one of the 9 cells in the 3×3 is False.
+    neigh = ndimage.uniform_filter(canopy_bool.astype(np.float64), size=3)
+    return canopy_bool & (neigh < 1.0 - 1e-12)
 
 
 def build_canopy_masks(
@@ -217,17 +232,10 @@ def build_canopy_masks(
     *,
     resolution_m: float = 1.0,
 ) -> CanopyMasks:
-    """Derive all 1 m canopy / patch / band masks from a height array.
-
-    Reuses one canopy EDT for woodland opening; linear uses a second EDT on
-    non-woodland candidates. Both are local fixed-radius ops.
-    """
+    """Derive all 1 m canopy / patch / band masks from a height array."""
     canopy = canopy_mask(height)
     low, mid, high = height_band_masks(height, canopy=canopy)
-    canopy_edt = canopy_distance_px(canopy)
-    woodland = woodland_from_canopy(
-        canopy, resolution_m=resolution_m, distance_px=canopy_edt
-    )
+    woodland = woodland_from_canopy(canopy, resolution_m=resolution_m)
     linear = linear_woody_mask(
         canopy, woodland=woodland, resolution_m=resolution_m
     )
@@ -295,7 +303,7 @@ def summarise_masks_to_grid(
     fine_resolution_m: float = 1.0,
     summary_resolution_m: int = DEFAULT_SUMMARY_RESOLUTION_M,
 ) -> dict[str, np.ndarray]:
-    """Aggregate 1 m masks to summary cells (share or length per hectare).
+    """Aggregate 1 m masks to summary cells via reshape-mean (no Python loops).
 
     Share layers are the fraction of the summary cell covered by the mask.
     Length layers count skeleton (linear) or edge pixels × fine resolution,
@@ -333,7 +341,6 @@ def summarise_masks_to_grid(
         ),
     }
 
-    # Linear length: skeleton of linear mask × resolution / hectares.
     linear_skel = skeletonize(np.asarray(masks.linear, dtype=bool))
     linear_length_m = _block_reduce_sum(linear_skel, factor) * fine_resolution_m
     edge_length_m = (
@@ -478,33 +485,36 @@ def summarise_masks_by_coordinates(
     h_sumsq = _sum(h_filled ** 2)
 
     expected_pixels = (res / fine) ** 2
-    out: dict[tuple[int, int], dict[str, float]] = {}
-    for i in range(n_cells):
-        denom = (
-            expected_pixels
-            if n_pix[i] >= expected_pixels * 0.99
-            else float(n_pix[i])
+    # Vectorised cell stats (no per-cell Python body beyond zip into dict).
+    denom = np.where(
+        n_pix >= expected_pixels * 0.99, expected_pixels, n_pix
+    ).astype(np.float64)
+    valid = denom > 0
+    with np.errstate(invalid="ignore", divide="ignore"):
+        std = np.full(n_cells, np.nan, dtype=np.float64)
+        ok2 = h_n >= 2
+        mean = np.where(ok2, h_sum / np.maximum(h_n, 1), 0.0)
+        std = np.where(
+            ok2,
+            np.sqrt(np.maximum(h_sumsq / np.maximum(h_n, 1) - mean * mean, 0.0)),
+            std,
         )
-        if denom <= 0:
-            continue
-        if h_n[i] >= 2:
-            mean = h_sum[i] / h_n[i]
-            std = float(np.sqrt(max(h_sumsq[i] / h_n[i] - mean * mean, 0.0)))
-        elif h_n[i] == 1:
-            std = 0.0
-        else:
-            std = float("nan")
+        std = np.where(h_n == 1, 0.0, std)
+
+    out: dict[tuple[int, int], dict[str, float]] = {}
+    for i in np.flatnonzero(valid):
+        d = float(denom[i])
         key = (int(uniq[i, 0]), int(uniq[i, 1]))
         out[key] = {
-            "vom_canopy_share": float(sum_canopy[i] / denom),
-            "vom_woodland_from_canopy_share": float(sum_wood[i] / denom),
-            "vom_trees_outside_woodland_share": float(sum_tow[i] / denom),
-            "vom_canopy_height_band_2p5_5_share": float(sum_low[i] / denom),
-            "vom_canopy_height_band_5_15_share": float(sum_mid[i] / denom),
-            "vom_canopy_height_band_gt15_share": float(sum_high[i] / denom),
+            "vom_canopy_share": float(sum_canopy[i] / d),
+            "vom_woodland_from_canopy_share": float(sum_wood[i] / d),
+            "vom_trees_outside_woodland_share": float(sum_tow[i] / d),
+            "vom_canopy_height_band_2p5_5_share": float(sum_low[i] / d),
+            "vom_canopy_height_band_5_15_share": float(sum_mid[i] / d),
+            "vom_canopy_height_band_gt15_share": float(sum_high[i] / d),
             "vom_linear_woody_length_ha": float(sum_skel[i] / cell_area_ha),
             "vom_canopy_edge_length_ha": float(sum_edge[i] / cell_area_ha),
-            "vom_canopy_height_std": std,
+            "vom_canopy_height_std": float(std[i]),
         }
     return out
 
@@ -553,12 +563,10 @@ def compare_narrow_canopy_retention(
         }
 
     h_trim = h[:ny_c, :nx_c]
-    # Nodata-aware block mean: nanmean so empty blocks stay empty.
     blocks = h_trim.reshape(ny_c // factor, factor, nx_c // factor, factor)
     with np.errstate(all="ignore"):
         coarse = np.nanmean(blocks, axis=(1, 3))
 
-    # Upsample coarse canopy decision back to 1 m for pixel-wise retention.
     coarse_canopy = canopy_mask(coarse)
     coarse_canopy_1m = np.repeat(np.repeat(coarse_canopy, factor, axis=0), factor, axis=1)
 
@@ -613,11 +621,12 @@ __all__ = [
     "HEIGHT_BAND_HIGH_MIN",
     "HEIGHT_BAND_LOW",
     "HEIGHT_BAND_MID",
-    "LINEAR_MAX_WIDTH_M",
-    "WOODLAND_EROSION_M",
+    "WOODLAND_CLOSE_MIN_FRAC",
+    "WOODLAND_CLOSE_WINDOW_M",
+    "WOODLAND_MIN_FRAC",
+    "WOODLAND_WINDOW_M",
     "CanopyMasks",
     "build_canopy_masks",
-    "canopy_distance_px",
     "canopy_edge_mask",
     "canopy_mask",
     "compare_narrow_canopy_retention",
@@ -628,6 +637,7 @@ __all__ = [
     "masks_to_dataarrays",
     "summarise_masks_by_coordinates",
     "summarise_masks_to_grid",
+    "woodland_core_mask",
     "woodland_from_canopy",
     "woodland_halo_px",
 ]
