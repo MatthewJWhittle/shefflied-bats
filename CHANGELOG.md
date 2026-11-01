@@ -16,6 +16,7 @@ All notable changes to this project are documented here. Format loosely follows 
 
 ### Changed
 
+- Raise `topojson` lower bound to `>=1.10` (lock resolves 2.2) so train boundary simplify no longer calls removed `numpy.in1d` under locked numpy 2.4.6.
 - Live train reads `background.sample_weight_n_neighbors` (default **10**, matching the previous CLI default). YAML `sampling.sample_weight_n_neighbors: 5` is no longer the live source of truth ([#103](https://github.com/MatthewJWhittle/shefflied-bats/issues/103)).
 - Prediction publish root moved out of library defaults into `prediction_publish.root` in `config.yml` (`--publish-root` / `PREDICTION_PUBLISH_ROOT` still win); `--publish` with no root fails early.
 - Prediction publish file names are built from each model's full Latin binomial (snake case) + behaviour; the short-name → Latin species map is removed. Publishing fails clearly when `latin_name` is missing.

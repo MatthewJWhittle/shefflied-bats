@@ -5095,7 +5095,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "shap", specifier = ">=0.49.1" },
     { name = "tilearray", git = "https://github.com/MatthewJWhittle/tilearray.git" },
-    { name = "topojson", specifier = ">=1.9" },
+    { name = "topojson", specifier = ">=1.10" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = ">=0.15.4" },
     { name = "xarray", specifier = ">=2025.3.1" },
@@ -5391,17 +5391,16 @@ wheels = [
 
 [[package]]
 name = "topojson"
-version = "1.9"
+version = "2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "packaging" },
     { name = "shapely" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/c5/41006f71491f29428f1c72713ad26225434a2dd7225bbeb8e3e9a82bceb3/topojson-1.9.tar.gz", hash = "sha256:5a8389ff576d5540660d4430dab56fcadef7c1f90b9f1aa486b1cb140033ff3b", size = 25451372, upload-time = "2024-05-15T06:35:55.605Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/2e/ce0e8c236b933970a155dfb38a8c0c3d82b88589694c9ebfb73dfa02bee1/topojson-2.2.tar.gz", hash = "sha256:82ba0f40c24c302fa866b04d453b0318518c93dd01eb21eb07ee3e4a7f8fabb0", size = 102084, upload-time = "2026-10-14T21:20:09.122Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/67/bf9a1786862565b12798fd6d9b7aa72ec2b4d6a10e82fb9936ac01f39d97/topojson-1.9-py3-none-any.whl", hash = "sha256:122e6e91fb422549644504580eee86f8a37703dc5ccb1a8e6d8928b750706fe7", size = 82680, upload-time = "2024-05-15T06:35:49.473Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/4d/6dd7eb3b78ded112efd8762aba834a99e9f8cad67e395290af34182f6c3c/topojson-2.2-py3-none-any.whl", hash = "sha256:2ddc017f88d8ee2e8b3deff3d34a03b78146a2227f94a498c0f0ed62f1df839c", size = 106619, upload-time = "2026-10-14T21:20:07.505Z" },
 ]
 
 [[package]]
