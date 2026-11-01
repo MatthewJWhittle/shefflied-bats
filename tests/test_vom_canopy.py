@@ -12,6 +12,7 @@ from sdm.commands.data_preparation.rebuild_steps import (
 from sdm.raster.vom_canopy import (
     CANOPY_MIN_HEIGHT_M,
     COMPONENT_LAYER_IDS,
+    CanopyMasks,
     build_canopy_masks,
     canopy_mask,
     compare_narrow_canopy_retention,
@@ -82,6 +83,72 @@ def test_linear_woody_detects_narrow_strip() -> None:
     linear = linear_woody_mask(grid, woodland=np.zeros_like(grid), resolution_m=1.0)
     assert linear.sum() > 0
     assert linear.sum() == grid.sum()
+
+
+def test_summarise_masks_by_coordinates_mismatched_shapes_raise() -> None:
+    """Coord/mask shape mismatch → clear ValueError (not numpy bincount)."""
+    height = np.zeros((16, 16), dtype=np.float64)
+    height[4:12, 4:12] = 8.0
+    masks = build_canopy_masks(height, resolution_m=1.0)
+    x_coords = np.arange(16, dtype=np.float64) + 0.5
+    # Shorter y vector → broadcast (8, 16) != canopy (16, 16).
+    y_coords = np.arange(8, dtype=np.float64) + 0.5
+    with pytest.raises(ValueError, match=r"mismatched:.*row.*\(8, 16\)") as exc:
+        summarise_masks_by_coordinates(
+            masks,
+            height,
+            x_coords=x_coords,
+            y_coords=y_coords,
+            fine_resolution_m=1.0,
+            summary_resolution_m=10,
+            tile_id="unit-mismatch",
+        )
+    msg = str(exc.value)
+    assert "tile unit-mismatch" in msg
+    assert "(16, 16)" in msg
+
+
+def test_summarise_masks_by_coordinates_cli_tile_1d_coords() -> None:
+    """1 m WCS-sized tile with 1-D x/y vectors as the tiled CLI passes.
+
+    Without broadcast, row/col flatten lengths would not match ny×nx and
+    bincount would raise; the guard + broadcast path must succeed.
+    """
+    # Default WCS request_tile_pixels is 1024×1024.
+    ny = nx = 1024
+    height = np.zeros((ny, nx), dtype=np.float64)
+    height[200:220, 100:900] = 6.0  # thin elongated strip
+    height[400:520, 400:520] = 12.0  # compact patch
+    x_coords = 500000.5 + np.arange(nx, dtype=np.float64)
+    y_coords = 400000.5 - np.arange(ny, dtype=np.float64)
+    # Hand-built masks (same shapes) — skip expensive woodland/linear morphology.
+    canopy = height >= CANOPY_MIN_HEIGHT_M
+    empty = np.zeros_like(canopy, dtype=bool)
+    masks = CanopyMasks(
+        canopy=canopy,
+        band_2p5_5=canopy & (height < 5.0),
+        band_5_15=canopy & (height >= 5.0) & (height <= 15.0),
+        band_gt15=empty,
+        woodland=empty,
+        trees_outside_woodland=canopy,
+        linear=canopy.copy(),
+        canopy_edge=canopy.copy(),
+    )
+    got = summarise_masks_by_coordinates(
+        masks,
+        height,
+        x_coords=x_coords,
+        y_coords=y_coords,
+        fine_resolution_m=1.0,
+        summary_resolution_m=100,
+        tile_id="wcs-1024",
+    )
+    assert got
+    # Full 100 m cells use denom 10000; canopy share × 10000 recovers pixel counts.
+    canopy_pixels_recovered = sum(
+        vals["vom_canopy_share"] * 10_000.0 for vals in got.values()
+    )
+    assert canopy_pixels_recovered == pytest.approx(float(canopy.sum()), rel=0, abs=1e-6)
 
 
 def test_summarise_masks_by_coordinates_matches_brute_force_64x64() -> None:

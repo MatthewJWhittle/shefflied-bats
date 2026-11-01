@@ -318,51 +318,127 @@ def summarise_masks_by_coordinates(
     y_coords: np.ndarray,
     fine_resolution_m: float = 1.0,
     summary_resolution_m: int = DEFAULT_SUMMARY_RESOLUTION_M,
+    tile_id: Optional[str] = None,
 ) -> dict[tuple[int, int], dict[str, float]]:
     """Aggregate fine masks into national-grid 100 m cells by coordinates.
 
     Keys are ``(floor(y / res), floor(x / res))`` in CRS metres. Partial tile
     overlap is normalised by observed fine pixels; full cells use the expected
     pixel count so shares stay on ``[0, 1]``.
+
+    After broadcasting 1-D coordinate vectors to the fine grid, ``row`` / ``col``
+    and every mask or weights array must share the same ``(ny, nx)`` shape, and
+    flattened index length must match before ``np.bincount``. Mismatches raise
+    ``ValueError`` with shapes (and optional ``tile_id``) rather than numpy's
+    opaque weights-length error.
     """
     res = float(summary_resolution_m)
     fine = float(fine_resolution_m)
     cell_area_ha = (res ** 2) / 10_000.0
     xs = np.asarray(x_coords, dtype=np.float64)
     ys = np.asarray(y_coords, dtype=np.float64)
+    h = _finite_height(height)
+    canopy = np.asarray(masks.canopy, dtype=bool)
+    expected_shape = canopy.shape
+    if h.shape != expected_shape:
+        where = f" (tile {tile_id})" if tile_id else ""
+        raise ValueError(
+            f"height shape {h.shape} != canopy shape {expected_shape}{where}"
+        )
+
     col = np.floor(xs[None, :] / res).astype(np.int64)
     row = np.floor(ys[:, None] / res).astype(np.int64)
     # Broadcast (ny, 1) × (1, nx) to (ny, nx) before flatten — otherwise
     # keys/inv have ny (or nx) entries and bincount weights fail on real tiles.
     row, col = np.broadcast_arrays(row, col)
-    keys = np.stack([row.ravel(), col.ravel()], axis=1)
-    uniq, inv = np.unique(keys, axis=0, return_inverse=True)
-    n_cells = uniq.shape[0]
 
-    def _sum(mask: np.ndarray) -> np.ndarray:
-        return np.bincount(
-            inv, weights=np.asarray(mask, dtype=np.float64).ravel(), minlength=n_cells
-        )
-
-    canopy = np.asarray(masks.canopy, dtype=bool)
-    h = _finite_height(height)
+    linear_skel = skeletonize(np.asarray(masks.linear, dtype=bool))
+    woodland = np.asarray(masks.woodland, dtype=bool)
+    tow = np.asarray(masks.trees_outside_woodland, dtype=bool)
+    band_low = np.asarray(masks.band_2p5_5, dtype=bool)
+    band_mid = np.asarray(masks.band_5_15, dtype=bool)
+    band_high = np.asarray(masks.band_gt15, dtype=bool)
+    edge = np.asarray(masks.canopy_edge, dtype=bool)
     canopy_vals = np.where(canopy & np.isfinite(h), h, np.nan)
     canopy_weight = np.isfinite(canopy_vals).astype(np.float64)
     h_filled = np.where(np.isfinite(canopy_vals), canopy_vals, 0.0)
 
-    linear_skel = skeletonize(np.asarray(masks.linear, dtype=bool))
+    shape_sources: dict[str, tuple[int, ...]] = {
+        "row": row.shape,
+        "col": col.shape,
+        "height": h.shape,
+        "canopy": canopy.shape,
+        "woodland": woodland.shape,
+        "trees_outside_woodland": tow.shape,
+        "band_2p5_5": band_low.shape,
+        "band_5_15": band_mid.shape,
+        "band_gt15": band_high.shape,
+        "linear_skel": linear_skel.shape,
+        "canopy_edge": edge.shape,
+        "canopy_weight": canopy_weight.shape,
+        "h_filled": h_filled.shape,
+    }
+    mismatched = {
+        name: shape
+        for name, shape in shape_sources.items()
+        if shape != expected_shape
+    }
+    if mismatched:
+        where = f" (tile {tile_id})" if tile_id else ""
+        raise ValueError(
+            "summarise_masks_by_coordinates: after broadcast, row/col and all "
+            f"mask/weights arrays must share shape {expected_shape}; "
+            f"mismatched: {mismatched}{where}"
+        )
+
+    keys = np.stack([row.ravel(), col.ravel()], axis=1)
+    n_pixels = int(np.prod(expected_shape))
+    if keys.shape[0] != n_pixels:
+        where = f" (tile {tile_id})" if tile_id else ""
+        raise ValueError(
+            "summarise_masks_by_coordinates: flattened index length "
+            f"{keys.shape[0]} != fine-grid size {n_pixels} "
+            f"(shape {expected_shape}){where}"
+        )
+
+    uniq, inv = np.unique(keys, axis=0, return_inverse=True)
+    n_cells = uniq.shape[0]
+    if inv.size != n_pixels:
+        where = f" (tile {tile_id})" if tile_id else ""
+        raise ValueError(
+            "summarise_masks_by_coordinates: bincount index length "
+            f"{inv.size} != fine-grid size {n_pixels}{where}"
+        )
+    if inv.size and (int(inv.min()) < 0 or int(inv.max()) >= n_cells):
+        where = f" (tile {tile_id})" if tile_id else ""
+        raise ValueError(
+            "summarise_masks_by_coordinates: bincount indices outside "
+            f"[0, {n_cells}) (min={int(inv.min())}, max={int(inv.max())})"
+            f"{where}"
+        )
+
+    def _sum(mask: np.ndarray) -> np.ndarray:
+        weights = np.asarray(mask, dtype=np.float64).ravel()
+        if weights.size != inv.size:
+            where = f" (tile {tile_id})" if tile_id else ""
+            raise ValueError(
+                "summarise_masks_by_coordinates: bincount weights length "
+                f"{weights.size} != index length {inv.size}{where}"
+            )
+        return np.bincount(inv, weights=weights, minlength=n_cells)
+
     n_pix = np.bincount(inv, minlength=n_cells).astype(np.float64)
     sum_canopy = _sum(canopy)
-    sum_wood = _sum(masks.woodland)
-    sum_tow = _sum(masks.trees_outside_woodland)
-    sum_low = _sum(masks.band_2p5_5)
-    sum_mid = _sum(masks.band_5_15)
-    sum_high = _sum(masks.band_gt15)
+    sum_wood = _sum(woodland)
+    sum_tow = _sum(tow)
+    sum_low = _sum(band_low)
+    sum_mid = _sum(band_mid)
+    sum_high = _sum(band_high)
     sum_skel = _sum(linear_skel) * fine
-    sum_edge = _sum(masks.canopy_edge) * fine
-    h_n = np.bincount(inv, weights=canopy_weight.ravel(), minlength=n_cells)
-    h_sum = np.bincount(inv, weights=h_filled.ravel(), minlength=n_cells)
-    h_sumsq = np.bincount(inv, weights=(h_filled ** 2).ravel(), minlength=n_cells)
+    sum_edge = _sum(edge) * fine
+    h_n = _sum(canopy_weight)
+    h_sum = _sum(h_filled)
+    h_sumsq = _sum(h_filled ** 2)
 
     expected_pixels = (res / fine) ** 2
     out: dict[tuple[int, int], dict[str, float]] = {}
