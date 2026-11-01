@@ -243,6 +243,23 @@ def build_data_plan(
         )
     )
 
+    steps.append(
+        _maybe_skip(
+            "vom_canopy",
+            PlanStep(
+                name=_REGISTRY_TO_PLAN_NAME["vom_canopy"],
+                source=VOM_WCS_ENDPOINT,
+                local_path=None,
+                present=None,
+                required=False,
+                notes=(
+                    "Opt-in 1 m VOM canopy components → vom_canopy/ "
+                    "(not merged into EV stack; use --only vom_canopy)"
+                ),
+            ),
+        )
+    )
+
     if skip_coastal:
         steps.append(
             PlanStep(

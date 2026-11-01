@@ -36,8 +36,10 @@ def test_resolve_active_steps_skip_and_only() -> None:
     assert "coastal" not in active
     assert "merge" in active
     assert "alan" in active
+    assert "vom_canopy" not in active  # opt-in; excluded from default / --skip paths
     assert resolve_active_steps(only=["merge"]) == frozenset({"merge"})
     assert resolve_active_steps(only=["alan"]) == frozenset({"alan"})
+    assert resolve_active_steps(only=["vom_canopy"]) == frozenset({"vom_canopy"})
     with pytest.raises(ValueError, match="only one"):
         resolve_active_steps(skip=["ceh"], only=["merge"])
 

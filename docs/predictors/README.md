@@ -60,9 +60,12 @@ linked from that parent).
 
 ## Scope
 
-- Document **only** layers already produced by the public pipeline on `main`.
-- Do not add proposed or planned predictors here.
+- Document layers produced by the public `sdm data` pipeline on `main`
+  (including opt-in steps such as `vom_canopy`).
+- Stage-one VOM canopy components are documented here but are not selected into
+  the live EV model stack yet.
 - Licence and access terms for upstream datasets live under `sources/`.
+- Licensed source rasters stay out of git; these docs describe them.
 
 ## Code entry points
 

@@ -157,7 +157,8 @@ def data(
         "--skip",
         help=(
             "Comma-separated rebuild step names to skip "
-            "(registry: terrain,terrain_stats,climate,ceh,vom,coastal,os,alan,merge). "
+            "(registry: terrain,terrain_stats,climate,ceh,vom,vom_canopy,"
+            "coastal,os,alan,merge). "
             "Example: --skip ceh,coastal"
         ),
     ),
@@ -166,7 +167,9 @@ def data(
         "--only",
         help=(
             "Comma-separated rebuild step names to run exclusively "
-            "(same registry as --skip). Mutually exclusive with --skip."
+            "(same registry as --skip). Mutually exclusive with --skip. "
+            "Opt-in vom_canopy is excluded from a default full rebuild — "
+            "use --only vom_canopy for 1 m canopy components."
         ),
     ),
     ceh_path: Optional[Path] = typer.Option(

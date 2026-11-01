@@ -39,6 +39,7 @@ dependencies = [
     "psutil>=5.9.0",
     "google-cloud-secret-manager>=2.20.0",
     "psycopg[binary]>=3.1.0",
+    "scikit-image>=0.24.0",
     "tilearray",
 ]
 

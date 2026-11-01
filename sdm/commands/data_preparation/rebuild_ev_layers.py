@@ -21,6 +21,9 @@ from sdm.commands.data_preparation.environmental.generate_terrain_data import (
 from sdm.commands.data_preparation.environmental.generate_terrain_stats import (
     generate_terrain_stats,
 )
+from sdm.commands.data_preparation.environmental.generate_vom_canopy_features import (
+    generate_vom_canopy_features,
+)
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
     generate_vom_data,
 )
@@ -202,6 +205,18 @@ def rebuild_environmental_layers(
             "generate_vom_data",
             lambda: generate_vom_data(
                 output_dir=evs_dir / "vom",
+                boundary_path=boundary_path,
+                buffer_distance_m=buffer_distance_m,
+                verbose=verbose,
+            ),
+        )
+
+        # Opt-in 1 m canopy components only — never fed into merge / model stack.
+        _run_or_skip(
+            "vom_canopy",
+            "generate_vom_canopy_features",
+            lambda: generate_vom_canopy_features(
+                output_dir=evs_dir / "vom_canopy",
                 boundary_path=boundary_path,
                 buffer_distance_m=buffer_distance_m,
                 verbose=verbose,
