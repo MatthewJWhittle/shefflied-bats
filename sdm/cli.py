@@ -312,18 +312,34 @@ def train(
         2,
         help="Maximum threads per model.",
     ),
-    # Species-specific processing parameters
-    d_min: float = typer.Option(
-        500,
-        help="Minimum distance from presence for background (meters).",
+    # Species-specific processing parameters (None → config.yml / model_config.yml)
+    d_min: Optional[float] = typer.Option(
+        None,
+        help=(
+            "Minimum distance from presence for background (meters). "
+            "Overrides background.presence_exclusion_m when set; 0 disables exclusion."
+        ),
     ),
     d_max: Optional[float] = typer.Option(
         None,
-        help="Maximum distance from presence for background (meters, None = no limit).",
+        help=(
+            "Maximum distance from presence for background (meters). "
+            "Overrides background.presence_exclusion_max_m when set."
+        ),
     ),
-    sample_weight_n_neighbors: int = typer.Option(
-        10,
-        help="Number of neighbors for sample weighting.",
+    sample_weight_n_neighbors: Optional[int] = typer.Option(
+        None,
+        help=(
+            "Neighbors for distance sample weights. "
+            "Overrides background.sample_weight_n_neighbors when set (config default 10)."
+        ),
+    ),
+    n_background_points: Optional[int] = typer.Option(
+        None,
+        help=(
+            "Shared background pool size. "
+            "Overrides background.n_background_points when set."
+        ),
     ),
     allow_config_fallback: bool = typer.Option(
         False,
@@ -366,15 +382,12 @@ def train(
 ) -> None:
     """Train SDM models using the new modular approach.
     
-    Background point generation parameters are loaded from model_config.yml.
+    Background knobs come from config.yml / model_config.yml
+    (see docs/background-points.md). CLI flags override when set.
     """
     from sdm.commands.modelling.train_sdm_models import train_sdm_models
-    import numpy as np
     
     setup_logging(verbose=verbose)
-    
-    # Convert d_max: None means np.inf
-    d_max_value = d_max if d_max is not None else np.inf
     
     train_sdm_models(
         model_config_path=model_config_path,
@@ -390,8 +403,9 @@ def train(
         activity_types=activity_types,
         verbose=verbose,
         d_min=d_min,
-        d_max=d_max_value,
+        d_max=d_max,
         sample_weight_n_neighbors=sample_weight_n_neighbors,
+        n_background_points=n_background_points,
         allow_config_fallback=allow_config_fallback,
         cv_method=cv_method,
         cv_n_folds=cv_n_folds,

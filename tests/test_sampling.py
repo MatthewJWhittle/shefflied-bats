@@ -149,6 +149,24 @@ def test_generate_background_points_from_data(sample_occurrences, sample_boundar
     assert all(bg_points["presence"] == 0)
 
 
+def test_generate_background_points_uniform_surface(sample_occurrences, sample_boundary):
+    """``surface=uniform`` draws N points without using occurrence density."""
+    n_points = 25
+    bg_points, density = generate_background_points_from_data(
+        occurrence_data=sample_occurrences,
+        boundary=sample_boundary,
+        n_background_points=n_points,
+        surface="uniform",
+        seed=7,
+        clip_to_boundary=False,
+    )
+    assert len(bg_points) == n_points
+    # Uniform surface is constant before sampling weights.
+    assert float(np.nanmax(density.values)) == pytest.approx(
+        float(np.nanmin(density.values))
+    )
+
+
 
 def test_orientation_of_density_array(sample_boundary):
     """Density peaks stay with geographic occurrence cells (no y-flip).

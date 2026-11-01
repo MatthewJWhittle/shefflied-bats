@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Union, Tuple, Optional, Literal
+from typing import Union, Tuple, Optional, Literal, Any
 import logging
 from enum import StrEnum
 import json
@@ -14,6 +14,13 @@ import rioxarray as rxr  # Required for .rio accessor, even if not directly call
 
 from sdm.utils.io import load_boundary, load_spatial_config
 from sdm.raster import generate_model_grid
+
+
+def _normalize_surface(surface: Any) -> str:
+    if surface is None:
+        return "all_bat"
+    value = getattr(surface, "value", surface)
+    return str(value).lower()
 
 
 class TransformMethod(StrEnum):
@@ -331,6 +338,7 @@ def generate_background_points_from_data(
     clip_to_boundary: bool = True,
     *,
     seed: int,
+    surface: Any = "all_bat",
 ) -> Tuple[gpd.GeoDataFrame, xr.DataArray]:
     """Generate background points based on density-smoothed occurrence data.
 
@@ -347,9 +355,12 @@ def generate_background_points_from_data(
         cap_percentile: Percentile for 'cap' transform_method.
         region_weighting_factor: Factor to weight the density array by the number of occurrences in each region.
         reverse_weights: Whether to reverse the weights. If True, regions with higher weights will have lower density.
+        surface: ``all_bat`` (bias-weighted density) or ``uniform`` (equal weight).
     Returns:
         GeoDataFrame of background points.
     """
+
+    surface_name = _normalize_surface(surface)
 
     # Load occurrence data
     logging.info(f"Loading occurrence data from: {occurrence_data}")
@@ -357,9 +368,6 @@ def generate_background_points_from_data(
     # Load spatial config and boundary to determine target CRS for the grid
     spatial_config = load_spatial_config()
     project_crs = spatial_config["crs"]
-    # Load boundary without buffer first, just to get its CRS if needed or for context
-    # The grid generation will use its own boundary loading with project_crs
-    # occurrences = occurrences.to_crs(project_crs) # Ensure occurrences match project CRS early
 
     logging.info(
         f"Generating model grid at {grid_resolution or spatial_config.get('resolution', 'default')}m resolution, CRS: {project_crs}"
@@ -368,129 +376,140 @@ def generate_background_points_from_data(
         boundary, project_crs=project_crs, resolution=grid_resolution
     )
 
-    # Ensure occurrences are in the same CRS as the grid for histogramming
-    if occurrence_data.crs != grid.rio.crs:
-        logging.info(
-            f"Re-projecting occurrences from {occurrence_data.crs} to {grid.rio.crs}"
+    if surface_name == "uniform":
+        logging.info("Using uniform background surface (ignoring occurrence density)")
+        ones = np.ones((grid.sizes["y"], grid.sizes["x"]), dtype=float)
+        density_array = xr.DataArray(
+            ones,
+            coords=grid.coords,
+            dims=grid.dims,
+            name="occurrence_density",
         )
-        occurrence_data = occurrence_data.to_crs(grid.rio.crs)
-
-    # Check Geometry of occurrence_data is point
-    if not all(occurrence_data.geometry.type == "Point"):
-        logging.warning(
-            "Occurrence data is not a point geometry. Converting to point geometry."
-        )
-        raise ValueError(
-            "Occurrence data is not a point geometry. Converting to point geometry."
-        )
-
-    # Filter occurrences to those within the (potentially larger) grid bounds
-    bbox_poly = box(*grid_bounds)
-    occurrences_in_grid = occurrence_data[
-        occurrence_data.intersects(bbox_poly)
-    ].copy()  # Use .copy() to avoid SettingWithCopyWarning
-
-    logging.info(
-        f"Using {len(occurrences_in_grid)} occurrence points (within grid bounds) to generate density surface."
-    )
-    if len(occurrences_in_grid) == 0:
-        logging.error(
-            "No occurrence points found within the grid bounds. Cannot generate background points."
-        )
-        # Return an empty GeoDataFrame or raise an error
-        raise ValueError(
-            "No occurrence points found within the grid bounds. Cannot generate background points."
-        )
-
-    # Generate density array based on histogram of occurrences
-    # Bins for histogram2d need to be edges. Grid coords are centers. Adjust.
-    res_x = grid.rio.resolution()[0]
-    res_y = grid.rio.resolution()[1]  # Usually negative
-
-    # Histogram bins should be pixel edges
-    hist_bins_x = np.arange(
-        grid.x.min() - res_x / 2, grid.x.max() + res_x / 2 + abs(res_x) / 2, res_x
-    )
-    # For y, which is usually descending, adjust accordingly for edges
-    hist_bins_y = np.arange(
-        grid.y.min() - abs(res_y) / 2,
-        grid.y.max() + abs(res_y) / 2 + abs(res_y) / 2,
-        abs(res_y),
-    )
-    # Ensure y bins are in ascending order for np.histogram2d if y coords were descending
-    if grid.y.values[0] > grid.y.values[-1]:  # y is descending
-        hist_bins_y = np.sort(hist_bins_y)  # ascending for histogram2d
-
-    point_counts, _, _ = np.histogram2d(
-        occurrences_in_grid.geometry.x.values,
-        occurrences_in_grid.geometry.y.values,
-        bins=(hist_bins_x, hist_bins_y),
-    )
-    # Always transpose to (y, x) for raster alignment
-    point_counts = point_counts.T
-
-    # Only flip if y-coordinates are descending (i.e., north is at the bottom)
-    if grid.y.values[0] > grid.y.values[-1]:
-        point_counts = np.flipud(point_counts)
-
-    # Transform counts
-    point_counts = transform_point_counts(
-        point_counts, transform_method, cap_percentile
-    )
-
-    # Apply Gaussian smoothing
-    logging.info(f"Applying Gaussian smoothing with sigma={sigma}")
-    smoothed_counts = gaussian_filter(point_counts, sigma=sigma)
-
-    # Convert to xarray DataArray, aligning with the model grid
-    density_array = xr.DataArray(
-        smoothed_counts,
-        coords=grid.coords,  # Use the model grid's coordinates
-        dims=grid.dims,
-        name="occurrence_density",
-    )
-    density_array = density_array.rio.write_crs(grid.rio.crs)
-    density_array.rio.write_transform(grid.rio.transform(), inplace=True)
-    density_array.rio.write_nodata(
-        np.nan, inplace=True
-    )  # Ensure nodata for consistency
-
-    floor_probability = calculate_floor_probability(
-        density_array, background_method, background_value
-    )
-
-    # Apply floor and normalize to create sampling probability surface
-    prob_surface = density_array.clip(min=floor_probability)
-
-
-    if regions is not None:
-        density_array = weight_density_array_by_regions(
-            density_array, regions, weight=region_weighting_factor, reverse_weights=reverse_weights
-        )
-    
-    # Handle sum == 0 case for normalization
-    sum_probs = prob_surface.sum()
-    if sum_probs > 1e-9:  # Check if sum is effectively non-zero
-        prob_surface = prob_surface / sum_probs
+        density_array = density_array.rio.write_crs(grid.rio.crs)
+        density_array.rio.write_transform(grid.rio.transform(), inplace=True)
+        density_array.rio.write_nodata(np.nan, inplace=True)
+        prob_surface = density_array / float(density_array.sum())
     else:
-        logging.warning(
-            "Sum of probabilities is near zero. Sampling will be uniform over valid cells if any, or fail."
-        )
-        # If all probabilities are zero, make it uniform over the valid grid cells (where density_array was not NaN)
-        # This is a fallback to prevent division by zero if all values are clipped to zero or near zero.
-        valid_cells_mask = ~np.isnan(density_array.data)
-        if np.any(valid_cells_mask):
-            prob_surface = xr.where(
-                valid_cells_mask, 1.0, 0.0
-            )  # Uniform over valid cells
-            prob_surface = prob_surface / prob_surface.sum()  # Normalize again
-        else:
-            logging.error(
-                "No valid cells to sample from after applying probability floor. Returning empty GeoDataFrame."
+        # Ensure occurrences are in the same CRS as the grid for histogramming
+        if occurrence_data.crs != grid.rio.crs:
+            logging.info(
+                f"Re-projecting occurrences from {occurrence_data.crs} to {grid.rio.crs}"
+            )
+            occurrence_data = occurrence_data.to_crs(grid.rio.crs)
+
+        # Check Geometry of occurrence_data is point
+        if not all(occurrence_data.geometry.type == "Point"):
+            logging.warning(
+                "Occurrence data is not a point geometry. Converting to point geometry."
             )
             raise ValueError(
-                "No valid cells to sample from after applying probability floor. Returning empty GeoDataFrame."
+                "Occurrence data is not a point geometry. Converting to point geometry."
             )
+
+        # Filter occurrences to those within the (potentially larger) grid bounds
+        bbox_poly = box(*grid_bounds)
+        occurrences_in_grid = occurrence_data[
+            occurrence_data.intersects(bbox_poly)
+        ].copy()  # Use .copy() to avoid SettingWithCopyWarning
+
+        logging.info(
+            f"Using {len(occurrences_in_grid)} occurrence points (within grid bounds) to generate density surface."
+        )
+        if len(occurrences_in_grid) == 0:
+            logging.error(
+                "No occurrence points found within the grid bounds. Cannot generate background points."
+            )
+            raise ValueError(
+                "No occurrence points found within the grid bounds. Cannot generate background points."
+            )
+
+        # Generate density array based on histogram of occurrences
+        # Bins for histogram2d need to be edges. Grid coords are centers. Adjust.
+        res_x = grid.rio.resolution()[0]
+        res_y = grid.rio.resolution()[1]  # Usually negative
+
+        # Histogram bins should be pixel edges
+        hist_bins_x = np.arange(
+            grid.x.min() - res_x / 2, grid.x.max() + res_x / 2 + abs(res_x) / 2, res_x
+        )
+        # For y, which is usually descending, adjust accordingly for edges
+        hist_bins_y = np.arange(
+            grid.y.min() - abs(res_y) / 2,
+            grid.y.max() + abs(res_y) / 2 + abs(res_y) / 2,
+            abs(res_y),
+        )
+        # Ensure y bins are in ascending order for np.histogram2d if y coords were descending
+        if grid.y.values[0] > grid.y.values[-1]:  # y is descending
+            hist_bins_y = np.sort(hist_bins_y)  # ascending for histogram2d
+
+        point_counts, _, _ = np.histogram2d(
+            occurrences_in_grid.geometry.x.values,
+            occurrences_in_grid.geometry.y.values,
+            bins=(hist_bins_x, hist_bins_y),
+        )
+        # Always transpose to (y, x) for raster alignment
+        point_counts = point_counts.T
+
+        # Only flip if y-coordinates are descending (i.e., north is at the bottom)
+        if grid.y.values[0] > grid.y.values[-1]:
+            point_counts = np.flipud(point_counts)
+
+        # Transform counts
+        point_counts = transform_point_counts(
+            point_counts, transform_method, cap_percentile
+        )
+
+        # Apply Gaussian smoothing
+        logging.info(f"Applying Gaussian smoothing with sigma={sigma}")
+        smoothed_counts = gaussian_filter(point_counts, sigma=sigma)
+
+        # Convert to xarray DataArray, aligning with the model grid
+        density_array = xr.DataArray(
+            smoothed_counts,
+            coords=grid.coords,  # Use the model grid's coordinates
+            dims=grid.dims,
+            name="occurrence_density",
+        )
+        density_array = density_array.rio.write_crs(grid.rio.crs)
+        density_array.rio.write_transform(grid.rio.transform(), inplace=True)
+        density_array.rio.write_nodata(
+            np.nan, inplace=True
+        )  # Ensure nodata for consistency
+
+        floor_probability = calculate_floor_probability(
+            density_array, background_method, background_value
+        )
+
+        # Apply floor and normalize to create sampling probability surface
+        prob_surface = density_array.clip(min=floor_probability)
+
+        if regions is not None:
+            density_array = weight_density_array_by_regions(
+                density_array,
+                regions,
+                weight=region_weighting_factor,
+                reverse_weights=reverse_weights,
+            )
+
+        # Handle sum == 0 case for normalization
+        sum_probs = prob_surface.sum()
+        if sum_probs > 1e-9:  # Check if sum is effectively non-zero
+            prob_surface = prob_surface / sum_probs
+        else:
+            logging.warning(
+                "Sum of probabilities is near zero. Sampling will be uniform over valid cells if any, or fail."
+            )
+            valid_cells_mask = ~np.isnan(density_array.data)
+            if np.any(valid_cells_mask):
+                prob_surface = xr.where(valid_cells_mask, 1.0, 0.0)
+                prob_surface = prob_surface / prob_surface.sum()
+            else:
+                logging.error(
+                    "No valid cells to sample from after applying probability floor. Returning empty GeoDataFrame."
+                )
+                raise ValueError(
+                    "No valid cells to sample from after applying probability floor. Returning empty GeoDataFrame."
+                )
 
     background_x, background_y, probabilities = sample_probability_surface(
         prob_surface, n_background_points, seed=seed

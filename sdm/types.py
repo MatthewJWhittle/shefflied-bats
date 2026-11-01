@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Any, TYPE_CHECKING, Union
 
 import geopandas as gpd
 import numpy as np
@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:
     from sdm.occurrence.sampling import BackgroundMethod, TransformMethod
+
 
 class PathsConfig(BaseModel):
     raw_data: str
@@ -52,14 +53,6 @@ class PredictionPublishConfig(BaseModel):
     root: Optional[str] = None
 
 
-class ProjectConfig(BaseModel):
-    paths: PathsConfig
-    spatial: SpatialConfig
-    crs: str
-    mlflow: MlflowConfig
-    prediction_publish: Optional[PredictionPublishConfig] = None
-
-
 class MaxentConfigModel(BaseModel):
     feature_types: List[str]
     beta_multiplier: float
@@ -79,46 +72,83 @@ class MaxentConfigModel(BaseModel):
 
 
 class SamplingBackgroundConfig(BaseModel):
+    """Legacy absolute/ratio caps (older ``generate_training_data`` path).
+
+    Live ``sdm train`` reads ``background.cap_ratio`` /
+    ``background.min_background`` / ``background.max_background`` instead.
+    ``factor`` is still accepted as a fallback for ``cap_ratio`` when the
+    background section omits it.
+    """
+
     factor: int = 10
     min_bg: int = 1000
     max_bg: int = 10000
 
 
 class BackgroundConfig(BaseModel):
-    """Configuration for background point generation with typed enum properties."""
-    
-    n_background_points: int = 4000
-    background_value: float = 0.00
+    """Background generation and per-model preparation (see docs/background-points.md).
+
+    Defaults match today's live ``sdm train`` behaviour. Every field is a
+    separate knob; the #103 trial is a ready-made YAML that sets them.
+    """
+
+    n_background_points: int = 8000
+    # all_bat = bias-weighted density surface; uniform = equal weight over grid.
+    surface: str = "all_bat"
+    background_value: float = 0.025
     sigma: float = 6.5
     background_method: Any = Field(default="contrast")  # type: ignore[assignment]
     transform_method: Any = Field(default="presence")  # type: ignore[assignment]
-    
+    # Density-surface cell size (m); None → project spatial.resolution.
+    surface_resolution_m: Optional[int] = None
+
+    # Per-model preparation (0 / null turns a step off).
+    presence_exclusion_m: float = 500.0
+    presence_exclusion_max_m: Optional[float] = None  # None = no max (inf)
+    background_thin_m: float = 2000.0
+    presence_thin_m: float = 2000.0
+    cap_ratio: Optional[float] = 10.0
+    min_background: Optional[int] = None
+    max_background: Optional[int] = None
+
+    distance_weights: bool = True
+    background_distance_weights: bool = True
+    # Live train default was CLI 10 (YAML sampling.sample_weight_n_neighbors: 5
+    # was ignored). This key is now the source of truth.
+    sample_weight_n_neighbors: int = 10
+    class_balance: bool = True
+
     @field_validator("background_method", mode="before")
     @classmethod
     def validate_background_method(cls, v: Any) -> Any:
         """Normalize and convert background_method string to enum."""
-        # Lazy import to avoid circular dependency
         from sdm.occurrence.sampling import BackgroundMethod
-        
+
         if isinstance(v, BackgroundMethod):
             return v
         if isinstance(v, str):
             return BackgroundMethod(v.lower())
         return v
-    
+
     @field_validator("transform_method", mode="before")
     @classmethod
     def validate_transform_method(cls, v: Any) -> Any:
         """Normalize and convert transform_method string to enum."""
-        # Lazy import to avoid circular dependency
         from sdm.occurrence.sampling import TransformMethod
-        
+
         if isinstance(v, TransformMethod):
             return v
         if isinstance(v, str):
             return TransformMethod(v.lower())
         return v
-    
+
+    @field_validator("surface", mode="before")
+    @classmethod
+    def validate_surface(cls, v: Any) -> Any:
+        if v is None:
+            return "all_bat"
+        return str(v).lower()
+
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -127,8 +157,11 @@ class SamplingConfig(BaseModel):
     subset_occurrence: Optional[int] = None
     subset_background: bool = True
     order_by_density_for_subset: bool = True
-    sample_weight_n_neighbors: int = 5
+    # Deprecated for live train: use background.sample_weight_n_neighbors (10).
+    sample_weight_n_neighbors: int = 10
     background: SamplingBackgroundConfig = SamplingBackgroundConfig()
+    # Deprecated for live train: use background.presence_thin_m /
+    # background.background_thin_m. Still used as fallback when those are unset.
     grid_size_m: float = 2000
 
 
@@ -144,6 +177,16 @@ class CvConfig(BaseModel):
     buffer_m: float = 10_000.0
     # Warn (never block) when buffered_loo presence count exceeds this (thin-species guidance).
     buffered_loo_warn_above: int = 25
+
+
+class ProjectConfig(BaseModel):
+    paths: PathsConfig
+    spatial: SpatialConfig
+    crs: str
+    mlflow: MlflowConfig
+    prediction_publish: Optional[PredictionPublishConfig] = None
+    # Global background defaults (overridden by model_config.yml / CLI).
+    background: Optional[BackgroundConfig] = None
 
 
 class ModelConfig(BaseModel):
@@ -198,6 +241,3 @@ class VariablesConfig(BaseModel):
         if not set(self.variables).issubset(set(features)):
             raise ValueError(f"Variables config contains features that are not in the features list: {set(self.variables) - set(features)}")
         return self
-
-
-
