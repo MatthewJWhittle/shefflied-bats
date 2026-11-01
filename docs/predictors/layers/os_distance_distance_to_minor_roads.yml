@@ -1,0 +1,32 @@
+id: os_distance_distance_to_minor_roads
+title: Distance to minor roads
+kind: source
+family: os
+selection: included
+summary: Euclidean distance to the nearest OS Vector Map District minor roads feature on the
+  model grid.
+shows:
+- Distance to nearest mapped minor roads (metres)
+does_not_show:
+- Traffic volume, road class detail beyond the VMD split, or barrier permeability
+units: metres
+model_resolution_m: 100.0
+crs: EPSG:27700
+source:
+  provider: Ordnance Survey
+  product: OS Vector Map District — minor roads
+  licence: OGL-UK-3.0
+  licence_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+  access_url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
+  citation: Contains OS data © Crown copyright and database right
+pipeline:
+  rebuild_step: os
+  code: sdm/commands/data_preparation/processing/process_os_data.py
+processing:
+- Distance raster from OS VMD features on the model grid
+caveats:
+- VMD completeness and update lag limit precision near new development
+references:
+- title: OS VectorMap District
+  url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
+markdown: os_distance_distance_to_minor_roads.md
