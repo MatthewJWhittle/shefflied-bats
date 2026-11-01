@@ -20,6 +20,7 @@ def build_ev_dataset_inputs(
     skip_ceh: bool = False,
     skip_coastal: bool = False,
     skip_alan: bool = False,
+    skip_vom_bands: bool = False,
 ) -> List[str]:
     """Build name=path merge inputs for standard ``sdm data`` pipeline outputs.
 
@@ -39,6 +40,10 @@ def build_ev_dataset_inputs(
         f"os_cover={evs_dir / 'os-feature-cover.tif'}",
         f"os_distance={evs_dir / 'os-distance-to-feature.tif'}",
     ]
+    vom_bands_path = evs_dir / "vom" / f"vom_height_bands_{resolution}m.tif"
+    if not skip_vom_bands and vom_bands_path.exists():
+        # Short stems in the GeoTIFF → ``vom_<stem>`` band ids after merge.
+        inputs.append(f"vom={vom_bands_path}")
     if not skip_ceh:
         inputs.insert(
             4,

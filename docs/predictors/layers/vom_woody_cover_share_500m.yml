@@ -1,0 +1,32 @@
+id: vom_woody_cover_share_500m
+title: Woody canopy cover (500 m neighbourhood)
+kind: derived
+family: vegetation
+summary: >-
+  Box-mean of vom_woody_cover_share over a 10-cell (500 m) neighbourhood on the 100 m grid
+  so small woody patches near the cell count.
+shows:
+- Neighbourhood-average woody canopy share around each cell
+does_not_show:
+- Anything the parent in-cell layer does not show
+units: fraction
+model_resolution_m: 100.0
+crs: EPSG:27700
+pipeline:
+  rebuild_step: vom_bands
+  code: sdm/commands/data_preparation/environmental/generate_vom_height_bands.py
+derived_from:
+- vom_woody_cover_share
+processing:
+- Focal / box mean at window 10 cells (500 m at 100 m resolution)
+caveats:
+- >-
+  Inherits VOM threshold, leaf-off limits, and #121 scope from the parent — do not
+  re-copy; open the parent doc
+- Edge cells use whatever neighbourhood exists inside the raster extent
+references:
+- title: Predictor docs — vom_woody_cover_share
+  url: vom_woody_cover_share.md
+- title: Product review — simpler woody vegetation layers (#121)
+  url: https://github.com/MatthewJWhittle/shefflied-bats/issues/121
+markdown: vom_woody_cover_share_500m.md

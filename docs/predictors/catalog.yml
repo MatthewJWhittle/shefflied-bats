@@ -69,6 +69,10 @@ layers:
 - terrain_stats_slope
 - terrain_stats_tpi
 - terrain_stats_twi
+- vom_canopy_height_std
+- vom_height_band_2p5_5_share
+- vom_height_band_5_15_share
+- vom_height_band_gt15_share
 - vom_vegetation_height_max
 - vom_vegetation_height_max_1000m
 - vom_vegetation_height_max_500m
@@ -79,3 +83,5 @@ layers:
 - vom_vegetation_height_std
 - vom_vegetation_height_std_1500m
 - vom_vegetation_height_std_500m
+- vom_woody_cover_share
+- vom_woody_cover_share_500m
