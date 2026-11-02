@@ -29,12 +29,23 @@ def cap_vegetation_heights(
     Values above ``max_height_m`` are clipped; NaNs and values at or below the
     cap are unchanged. Applied on the fine-resolution VOM so mean/min/max/std
     all reflect the capped heights.
+
+    Lazy Dask arrays are clipped without an eager count (the #121 height-band
+    path keeps the mosaic lazy until ``map_blocks``).
     """
-    n_above = int((data_array > max_height_m).sum().item())
-    if n_above:
+    data = data_array.data
+    is_lazy = hasattr(data, "chunks") and data.chunks is not None
+    if not is_lazy:
+        n_above = int((data_array > max_height_m).sum().item())
+        if n_above:
+            logging.info(
+                "Capping %d VOM cells above %.0f m vegetation height (structures)",
+                n_above,
+                max_height_m,
+            )
+    else:
         logging.info(
-            "Capping %d VOM cells above %.0f m vegetation height (structures)",
-            n_above,
+            "Capping VOM cells above %.0f m vegetation height (lazy; count deferred)",
             max_height_m,
         )
     return data_array.clip(max=max_height_m)

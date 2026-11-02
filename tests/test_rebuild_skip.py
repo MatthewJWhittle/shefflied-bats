@@ -73,6 +73,7 @@ def test_rebuild_alan_auto_skips_without_source(tmp_path, monkeypatch):
         "generate_climate_data",
         "generate_ceh_lc_data",
         "generate_vom_data",
+        "generate_vom_height_bands",
         "generate_coastal_distance",
         "process_os_data",
         "merge_ev_layers",
@@ -210,6 +211,7 @@ def test_rebuild_only_merge_uses_existing_ceh_and_coastal(tmp_path, monkeypatch)
         "generate_climate_data",
         "generate_ceh_lc_data",
         "generate_vom_data",
+        "generate_vom_height_bands",
         "generate_coastal_distance",
         "process_os_data",
         "generate_alan_data",
@@ -270,6 +272,7 @@ def test_rebuild_explicit_skip_still_omits_ceh_from_merge(tmp_path, monkeypatch)
         "generate_climate_data",
         "generate_ceh_lc_data",
         "generate_vom_data",
+        "generate_vom_height_bands",
         "generate_coastal_distance",
         "process_os_data",
         "generate_alan_data",
@@ -320,6 +323,7 @@ def test_rebuild_only_step_skips_model_stack(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "generate_terrain_stats", _ok)
     monkeypatch.setattr(mod, "generate_ceh_lc_data", _ok)
     monkeypatch.setattr(mod, "generate_vom_data", _ok)
+    monkeypatch.setattr(mod, "generate_vom_height_bands", _ok)
     monkeypatch.setattr(mod, "generate_coastal_distance", _ok)
     monkeypatch.setattr(mod, "process_os_data", _ok)
     monkeypatch.setattr(mod, "generate_alan_data", _ok)
@@ -409,6 +413,7 @@ def test_rebuild_passes_coastline_path_to_coastal_step(tmp_path, monkeypatch):
         "generate_climate_data",
         "generate_ceh_lc_data",
         "generate_vom_data",
+        "generate_vom_height_bands",
         "process_os_data",
         "generate_alan_data",
         "merge_ev_layers",

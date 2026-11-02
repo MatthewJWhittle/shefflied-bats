@@ -126,6 +126,7 @@ def test_rebuild_metrics_include_provenance_on_orchestrator(
     monkeypatch.setattr(mod, "generate_climate_data", _ok)
     monkeypatch.setattr(mod, "generate_ceh_lc_data", _ok)
     monkeypatch.setattr(mod, "generate_vom_data", _ok)
+    monkeypatch.setattr(mod, "generate_vom_height_bands", _ok)
     monkeypatch.setattr(mod, "generate_coastal_distance", _ok)
     monkeypatch.setattr(mod, "process_os_data", _ok)
     monkeypatch.setattr(mod, "generate_alan_data", _ok)

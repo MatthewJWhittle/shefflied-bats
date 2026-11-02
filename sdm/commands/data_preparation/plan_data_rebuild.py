@@ -242,6 +242,22 @@ def build_data_plan(
             ),
         )
     )
+    steps.append(
+        _maybe_skip(
+            "vom_bands",
+            PlanStep(
+                name=_REGISTRY_TO_PLAN_NAME["vom_bands"],
+                source=VOM_WCS_ENDPOINT,
+                local_path=None,
+                present=None,
+                required=False,
+                notes=(
+                    "EA VOM 1 m → height-band shares, canopy height std, "
+                    "woody cover (+ 500 m box mean); issue #121"
+                ),
+            ),
+        )
+    )
 
     if skip_coastal:
         steps.append(

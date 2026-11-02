@@ -24,6 +24,9 @@ from sdm.commands.data_preparation.environmental.generate_terrain_stats import (
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
     generate_vom_data,
 )
+from sdm.commands.data_preparation.environmental.generate_vom_height_bands import (
+    generate_vom_height_bands,
+)
 from sdm.data.alan import (
     ALAN_BAND_NAME,
     ALAN_OUTPUT_NAME,
@@ -209,6 +212,17 @@ def rebuild_environmental_layers(
         )
 
         _run_or_skip(
+            "vom_bands",
+            "generate_vom_height_bands",
+            lambda: generate_vom_height_bands(
+                output_dir=evs_dir / "vom",
+                boundary_path=boundary_path,
+                buffer_distance_m=buffer_distance_m,
+                verbose=verbose,
+            ),
+        )
+
+        _run_or_skip(
             "coastal",
             "generate_coastal_distance",
             lambda: generate_coastal_distance(
@@ -287,6 +301,10 @@ def rebuild_environmental_layers(
         skip_ceh = "ceh" in explicit_skip
         skip_coastal = "coastal" in explicit_skip
         skip_alan = "alan" in explicit_skip or not alan_output.exists()
+        # Opt-in file: omit when skipped or when the height-bands GeoTIFF is absent
+        # (existing rebuild folders without a vom_bands run stay valid).
+        vom_bands_tif = evs_dir / "vom" / f"vom_height_bands_{resolution}m.tif"
+        skip_vom_bands = "vom_bands" in explicit_skip or not vom_bands_tif.exists()
         _run_or_skip(
             "merge",
             "merge_ev_layers",
@@ -297,6 +315,7 @@ def rebuild_environmental_layers(
                     skip_ceh=skip_ceh,
                     skip_coastal=skip_coastal,
                     skip_alan=skip_alan,
+                    skip_vom_bands=skip_vom_bands,
                 ),
                 boundary_path=boundary_path,
                 output_path=merged_output,

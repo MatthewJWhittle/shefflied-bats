@@ -27,6 +27,11 @@ REBUILD_STEPS: tuple[RebuildStep, ...] = (
     RebuildStep("ceh", "generate_ceh_lc_data", "CEH land cover → landcover/"),
     RebuildStep("vom", "generate_vom_data", "Vegetation Object Model → vom/"),
     RebuildStep(
+        "vom_bands",
+        "generate_vom_height_bands",
+        "VOM height bands + woody cover → vom/ (#121)",
+    ),
+    RebuildStep(
         "coastal",
         "generate_coastal_distance",
         "Coastal distance → coastal_distance.tif",

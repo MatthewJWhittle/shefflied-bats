@@ -39,6 +39,7 @@ dependencies = [
     "psutil>=5.9.0",
     "psycopg[binary]>=3.1.0",
     "tilearray",
+    "zarr>=3.1.5",
 ]
 
 [project.optional-dependencies]
@@ -64,6 +65,13 @@ members = ["sdm"]
 
 [tool.uv.sources]
 tilearray = { git = "https://github.com/MatthewJWhittle/tilearray.git" }
+
+# Override tilearray's zarr<2.13 pin: one-tile full-area failure hit the
+# geotiff fallback, which opens tifffile.aszarr stores that require zarr 3.
+[tool.uv]
+override-dependencies = [
+    "zarr>=3.1.5",
+]
 
 [tool.pytest.ini_options]
 markers = [

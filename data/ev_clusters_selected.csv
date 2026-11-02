@@ -40,6 +40,12 @@ cluster_id,column_name,include
 14,climate_bioclim_bio_3,1
 15,vom_vegetation_height_max,1
 15,vom_vegetation_height_std,1
+15,vom_canopy_height_std,1
+15,vom_woody_cover_share,1
+15,vom_woody_cover_share_500m,1
+15,vom_height_band_2p5_5_share,1
+15,vom_height_band_5_15_share,1
+15,vom_height_band_gt15_share,1
 16,ceh_landcover_broadleaved_woodland,1
 16,os_cover_woodland,0
 16,vom_vegetation_height_mean,1
