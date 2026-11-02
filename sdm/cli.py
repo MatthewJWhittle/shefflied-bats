@@ -64,6 +64,9 @@ def run_data_rebuild(
     only: Optional[str] = None,
     ceh_path: Optional[Path] = None,
     coastline_path: Optional[Path] = None,
+    alan_source_path: Optional[str] = None,
+    alan_cf_cvg_path: Optional[str] = None,
+    alan_template_raster: Optional[str] = None,
     verbose: bool = False,
 ) -> Path:
     """Core EV rebuild used by ``sdm data`` and ``sdm pipeline``.
@@ -81,6 +84,7 @@ def run_data_rebuild(
         parse_step_name_list,
         resolve_active_steps,
     )
+    from sdm.data.alan import AlanUriAuthError
     from sdm.utils.rebuild_provenance import DEFAULT_CEH_PATH
 
     try:
@@ -103,11 +107,18 @@ def run_data_rebuild(
             fresh=fresh,
             ceh_data_path=Path(ceh_path) if ceh_path is not None else DEFAULT_CEH_PATH,
             coastline_path=Path(coastline_path) if coastline_path is not None else None,
+            alan_source_path=alan_source_path,
+            alan_cf_cvg_path=alan_cf_cvg_path,
+            alan_template_raster=alan_template_raster,
             config_evs=PROJECT_CONFIG.paths.evs,
             config_ev_tiff=PROJECT_CONFIG.paths.ev_tiff,
             verbose=verbose,
         )
     except ForbiddenEvOutputError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    except (AlanUriAuthError, FileNotFoundError) as exc:
+        # Surface ALAN source / auth failures from --only alan clearly.
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
 
@@ -186,6 +197,32 @@ def data(
             "When set, skips the Boundary-Line download and uses this path."
         ),
     ),
+    alan_source_path: Optional[str] = typer.Option(
+        None,
+        "--alan-source-path",
+        help=(
+            "VIIRS radiance GeoTIFF for the alan step (local path or gs:// URI). "
+            "Overrides the local cache and bucket default. Taken as a string so "
+            "gs:// URIs are not collapsed by pathlib."
+        ),
+    ),
+    alan_cf_cvg_path: Optional[str] = typer.Option(
+        None,
+        "--alan-cf-cvg-path",
+        help=(
+            "Matching EOG cf_cvg GeoTIFF for the alan step (local path or "
+            "gs:// URI). Optional; when omitted, local cache then bucket are tried."
+        ),
+    ),
+    alan_template_raster: Optional[str] = typer.Option(
+        None,
+        "--alan-template-raster",
+        help=(
+            "GeoTIFF whose grid (CRS, transform, extent) the alan layer must "
+            "match. Defaults to paths.ev_tiff when that file exists so ALAN "
+            "aligns with the training stack."
+        ),
+    ),
     verbose: bool = False,
 ) -> None:
     """Rebuild all environmental layers into a caller-chosen output folder."""
@@ -232,6 +269,9 @@ def data(
         only=only,
         ceh_path=ceh_path,
         coastline_path=coastline_path,
+        alan_source_path=alan_source_path,
+        alan_cf_cvg_path=alan_cf_cvg_path,
+        alan_template_raster=alan_template_raster,
         verbose=verbose,
     )
 

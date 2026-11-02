@@ -102,6 +102,111 @@ def test_rebuild_alan_auto_skips_without_source(tmp_path, monkeypatch):
     assert captured_inputs.get("kwargs", {}).get("skip_alan") is True
 
 
+def test_rebuild_alan_uses_bucket_when_local_missing(tmp_path, monkeypatch):
+    """``sdm data`` must reach bucket fallback — not gate on Path.exists() alone."""
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+    from sdm.data.alan import DEFAULT_ALAN_SOURCE_URI
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "evs-rebuild"
+    alan_kwargs: dict = {}
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    def _alan(*_args, **kwargs):
+        alan_kwargs.update(kwargs)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / "alan_viirs_radiance.tif"
+        path.write_bytes(b"alan")
+        return path
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    for name in (
+        "generate_terrain_data",
+        "generate_terrain_stats",
+        "generate_climate_data",
+        "generate_ceh_lc_data",
+        "generate_vom_data",
+        "generate_vom_height_bands",
+        "generate_coastal_distance",
+        "process_os_data",
+        "merge_ev_layers",
+    ):
+        monkeypatch.setattr(mod, name, _ok)
+    monkeypatch.setattr(mod, "generate_alan_data", _alan)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: ["terrain=x.tif"])
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+    monkeypatch.setattr(
+        mod,
+        "resolve_alan_source_uri",
+        lambda override=None: DEFAULT_ALAN_SOURCE_URI,
+    )
+    monkeypatch.setattr(mod, "resolve_alan_cf_cvg_uri", lambda *a, **k: None)
+
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        only=["alan"],
+        config_ev_tiff=tmp_path / "missing-stack.tif",
+    )
+    assert alan_kwargs.get("alan_source_path") == DEFAULT_ALAN_SOURCE_URI
+    assert alan_kwargs.get("template_raster") == tmp_path / "missing-stack.tif"
+
+
+def test_cli_alan_source_path_flag_reaches_rebuild(tmp_path: Path) -> None:
+    out = tmp_path / "safe"
+    captured: dict = {}
+
+    def _stub(output_dir, **kwargs):  # type: ignore[no-untyped-def]
+        captured["kwargs"] = kwargs
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        return Path(output_dir)
+
+    runner = CliRunner()
+    with patch(
+        "sdm.commands.data_preparation.rebuild_ev_layers.rebuild_environmental_layers",
+        _stub,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "data",
+                "--output-dir",
+                str(out),
+                "--only",
+                "alan",
+                "--alan-source-path",
+                "gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_annual.tif",
+                "--alan-cf-cvg-path",
+                "/tmp/viirs_cf_cvg.tif",
+                "--alan-template-raster",
+                "/tmp/evs-to-model.tif",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        captured["kwargs"]["alan_source_path"]
+        == "gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_annual.tif"
+    )
+    assert captured["kwargs"]["alan_cf_cvg_path"] == "/tmp/viirs_cf_cvg.tif"
+    assert captured["kwargs"]["alan_template_raster"] == "/tmp/evs-to-model.tif"
+
+
 def test_cli_skip_ceh_coastal_reaches_rebuild(tmp_path: Path) -> None:
     out = tmp_path / "safe"
     captured: dict = {}
