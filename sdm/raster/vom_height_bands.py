@@ -174,40 +174,6 @@ def summarise_height_block(
         return _nan_out(np.asarray(block).shape)
 
 
-def fill_canopy_std_where_no_woody(
-    canopy_height_std: np.ndarray,
-    woody_cover_share: np.ndarray,
-) -> np.ndarray:
-    """Set canopy SD to 0 where woody cover share is 0 (open land)."""
-    std = np.asarray(canopy_height_std, dtype=np.float64).copy()
-    woody = np.asarray(woody_cover_share, dtype=np.float64)
-    open_land = np.isfinite(woody) & (woody <= 0.0)
-    std[open_land] = 0.0
-    return std
-
-
-def summaries_to_dataset(
-    layers: Mapping[str, np.ndarray],
-    *,
-    y: np.ndarray,
-    x: np.ndarray,
-    crs: str,
-    transform,
-) -> xr.Dataset:
-    """Build a CRS-aware Dataset from stem → 2-D arrays."""
-    data_vars = {
-        stem: (("y", "x"), np.asarray(values, dtype=np.float32))
-        for stem, values in layers.items()
-    }
-    ds = xr.Dataset(data_vars, coords={"y": y, "x": x})
-    ds = ds.rio.write_crs(crs)
-    ds = ds.rio.write_transform(transform)
-    for stem in ds.data_vars:
-        ds[stem].attrs["long_name"] = stem
-        ds[stem].rio.write_nodata(np.nan, inplace=True)
-    return ds
-
-
 def pairwise_pearson(
     layers: Mapping[str, np.ndarray],
 ) -> dict[tuple[str, str], float]:
@@ -239,10 +205,8 @@ __all__ = [
     "HEIGHT_BAND_MID",
     "LAYER_IDS",
     "canopy_mask",
-    "fill_canopy_std_where_no_woody",
     "height_band_masks",
     "pairwise_pearson",
-    "summaries_to_dataset",
     "summarise_height_block",
     "summarise_height_to_grid",
 ]

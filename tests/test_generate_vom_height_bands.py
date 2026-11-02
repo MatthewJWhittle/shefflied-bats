@@ -13,10 +13,9 @@ from shapely.geometry import Polygon
 
 from sdm.commands.data_preparation.environmental.generate_vom_height_bands import (
     generate_vom_height_bands,
-    process_height_array_block_aligned,
 )
 from sdm.data.wcs_tilearray import EA_VOM_COVERAGE_ID
-from sdm.raster.vom_height_bands import CELL_LAYER_STEMS
+from sdm.raster.vom_height_bands import CELL_LAYER_STEMS, summarise_height_to_grid
 
 
 @pytest.fixture
@@ -43,9 +42,9 @@ def temp_boundary_file(tmp_path, sample_boundary):
     return boundary_file
 
 
-def test_process_height_array_block_aligned_matches_stems() -> None:
+def test_summarise_height_to_grid_matches_stems() -> None:
     h = np.full((100, 100), 8.0, dtype=np.float64)
-    layers = process_height_array_block_aligned(h)
+    layers = summarise_height_to_grid(h)
     assert set(layers) == set(CELL_LAYER_STEMS)
     assert layers["woody_cover_share"][0, 0] == pytest.approx(1.0)
 
