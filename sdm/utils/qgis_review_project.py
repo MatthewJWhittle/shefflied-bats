@@ -152,12 +152,30 @@ def behaviour_label(model_id: str) -> str:
     raise ValueError(f"model_id must end with _roost or _in_flight; got {model_id!r}")
 
 
-def suitability_layer_name(model_id: str) -> str:
-    return f"{behaviour_label(model_id)} — modelled suitability (0–1)"
+def model_display_name(model_id: str) -> str:
+    """``myotis_brandtii_roost`` → ``Myotis brandtii Roost``."""
+    return f"{species_group_name(model_id)} {behaviour_label(model_id)}"
 
 
-def cutoff_layer_name(model_id: str) -> str:
-    return f"{behaviour_label(model_id)} — cut-off (p10)"
+def version_short_tag(version_id: str) -> str:
+    """Map version id to the short tag used in layer / theme names."""
+    if version_id == "main":
+        return "Main"
+    if version_id == "compare":
+        return "Compare"
+    raise ValueError(f"Unknown version_id for layer naming: {version_id!r}")
+
+
+def suitability_layer_name(model_id: str, version_id: str) -> str:
+    """Distinct per-version name, e.g. ``Myotis brandtii Roost — Main``."""
+    return f"{model_display_name(model_id)} — {version_short_tag(version_id)}"
+
+
+def cutoff_layer_name(model_id: str, version_id: str) -> str:
+    return (
+        f"{model_display_name(model_id)} cut-off (p10) — "
+        f"{version_short_tag(version_id)}"
+    )
 
 
 def version_group_title(version: VersionSpec) -> str:
@@ -424,7 +442,7 @@ def build_layers(manifest: ReviewManifest) -> list[BuiltLayer]:
                     layer_id=_stable_layer_id(
                         version.version_id, model.model_id, "suitability"
                     ),
-                    name=suitability_layer_name(model.model_id),
+                    name=suitability_layer_name(model.model_id, version.version_id),
                     datasource=vsigs_path(model.run_folder, model.prediction_file),
                     provider="gdal",
                     kind="suitability",
@@ -440,7 +458,7 @@ def build_layers(manifest: ReviewManifest) -> list[BuiltLayer]:
                         layer_id=_stable_layer_id(
                             version.version_id, model.model_id, "cutoff"
                         ),
-                        name=cutoff_layer_name(model.model_id),
+                        name=cutoff_layer_name(model.model_id, version.version_id),
                         datasource=vsigs_path(model.run_folder, model.cutoff_file),
                         provider="gdal",
                         kind="cutoff",
@@ -617,32 +635,37 @@ def _build_themes(
         )
         names.append("Compare")
 
-        # Per-model pair themes: Main + Compare suitability for one model.
+        # Per-model themes: one version at a time (Pair stacked both and hid one).
         compare_models = {model.model_id for model in compare.models}
         for model in main.models:
             if model.model_id not in compare_models:
                 continue
             species = species_group_name(model.model_id)
-            theme_name = f"Pair: {species} ({behaviour_label(model.model_id)})"
-            pair_ids = {
-                _stable_layer_id("main", model.model_id, "suitability"),
-                _stable_layer_id("compare", model.model_id, "suitability"),
-            } | basemap_ids
-            themes.append(
-                _theme_visibility(
-                    name=theme_name,
-                    layers=layers,
-                    visible_ids=pair_ids,
-                    checked_groups=[
-                        main_title,
-                        f"{main_title}/{species}",
-                        compare_title,
-                        f"{compare_title}/{species}",
-                        "Basemaps",
-                    ],
+            display = model_display_name(model.model_id)
+            for version_id, vtitle in (
+                ("main", main_title),
+                ("compare", compare_title),
+            ):
+                theme_name = f"{display} — {version_short_tag(version_id)}"
+                model_ids = {
+                    layer.layer_id
+                    for layer in layers
+                    if layer.version_id == version_id
+                    and layer.model_id == model.model_id
+                } | basemap_ids
+                themes.append(
+                    _theme_visibility(
+                        name=theme_name,
+                        layers=layers,
+                        visible_ids=model_ids,
+                        checked_groups=[
+                            vtitle,
+                            f"{vtitle}/{species}",
+                            "Basemaps",
+                        ],
+                    )
                 )
-            )
-            names.append(theme_name)
+                names.append(theme_name)
 
     return themes, names
 

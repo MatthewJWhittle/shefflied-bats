@@ -10,8 +10,10 @@ import yaml
 from sdm.utils.qgis_review_project import (
     DEFAULT_MANIFEST_REL,
     DEFAULT_PROJECT_REL,
+    _stable_layer_id,
     assert_no_credentials,
     assert_project_paths_allowed,
+    build_project_xml,
     find_credential_hits,
     generate_project_text,
     load_manifest,
@@ -84,10 +86,11 @@ def test_empty_compare_yields_main_only_project(tmp_path: Path) -> None:
     assert 'name="Main"' in built_text
     assert_no_credentials(built_text)
     assert_project_paths_allowed(built_text, manifest)
-    # Themes: Main only (no Compare / Pair).
+    # Themes: Main only (no Compare / per-model Compare themes).
     assert built_text.count('name="Main"') >= 1
     assert 'name="Compare"' not in built_text
     assert "Pair:" not in built_text
+    assert "— Compare" not in built_text
 
 
 def test_compare_groups_and_themes_present() -> None:
@@ -96,13 +99,56 @@ def test_compare_groups_and_themes_present() -> None:
     assert 'name="Main"' in text
     assert "Compare: Retrain 2 Nov" in text
     assert 'name="Compare"' in text
-    assert "Pair: Myotis brandtii (Roost)" in text
+    assert "Pair:" not in text
+    assert 'name="Myotis brandtii Roost — Main"' in text
+    assert 'name="Myotis brandtii Roost — Compare"' in text
     assert "/vsigs/habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain/" in text
     assert "myotis_brandtii_roost__suitability.tif" in text
     assert "myotis_brandtii_roost__cutoff_p10.tif" in text
     # Google Satellite must stay out.
     assert "google.cn" not in text.lower()
     assert "Google Satellite" not in text
+
+
+def test_layer_names_include_species_and_version() -> None:
+    """Suitability layers must not share a generic name across versions."""
+    manifest = load_manifest(REPO_ROOT / DEFAULT_MANIFEST_REL)
+    text = generate_project_text(manifest)
+    assert "<layername>Myotis brandtii Roost — Main</layername>" in text
+    assert "<layername>Myotis brandtii Roost — Compare</layername>" in text
+    assert "modelled suitability (0–1)" not in text
+
+
+def test_per_model_themes_show_one_version_only() -> None:
+    """Per-model themes must not stack Main and Compare suitability."""
+    manifest = load_manifest(REPO_ROOT / DEFAULT_MANIFEST_REL)
+    text = build_project_xml(manifest).xml
+    main_suit = _stable_layer_id("main", "myotis_brandtii_roost", "suitability")
+    compare_suit = _stable_layer_id(
+        "compare", "myotis_brandtii_roost", "suitability"
+    )
+
+    def _preset_body(theme_name: str) -> str:
+        marker = f'<visibility-preset name="{theme_name}"'
+        assert marker in text
+        return text.split(marker, 1)[1].split("</visibility-preset>", 1)[0]
+
+    def _visible(theme_body: str, layer_id: str) -> str:
+        marker = f'id="{layer_id}"'
+        assert marker in theme_body
+        attrs = theme_body.split(marker, 1)[1].split("/>", 1)[0]
+        if 'visible="1"' in attrs:
+            return "1"
+        if 'visible="0"' in attrs:
+            return "0"
+        raise AssertionError(f"missing visible attr for {layer_id}")
+
+    main_theme = _preset_body("Myotis brandtii Roost — Main")
+    compare_theme = _preset_body("Myotis brandtii Roost — Compare")
+    assert _visible(main_theme, main_suit) == "1"
+    assert _visible(main_theme, compare_suit) == "0"
+    assert _visible(compare_theme, compare_suit) == "1"
+    assert _visible(compare_theme, main_suit) == "0"
 
 
 def test_write_project_round_trip(tmp_path: Path) -> None:

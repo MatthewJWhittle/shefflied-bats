@@ -20,7 +20,7 @@ In-repo QGIS project for reviewing citizen-science model maps straight from the 
 - **Main** paths use the prediction-version layout from [#104](https://github.com/MatthewJWhittle/shefflied-bats/pull/104): `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/prediction__…__suitability.tif`.
 - **Groups** in the project: one top-level group per version (`Main`, `Compare: <label>`), then the same per-species subgroups and layer names so maps line up.
 - **Basemaps**: OpenStreetMap and Carto only (no Google Satellite).
-- **Map Themes** (QGIS *View → Map Themes*): `Main` (default), `Compare` when the compare block is present, and `Pair: …` themes that show one model’s main + compare suitability together.
+- **Map Themes** (QGIS *View → Map Themes*): `Main` (default), `Compare` when the compare block is present, and per-model themes (`Myotis brandtii Roost — Main` / `… — Compare`) that show only that model’s layers from one version plus the basemap. Layer names include species and version so Main and Compare stay distinguishable in the legend.
 
 ## Point compare at another run
 
