@@ -6,7 +6,7 @@ General principles for work on this project. Setup, CLI preference, and PR check
 
 - Understand the existing code and docs before changing anything.
 - Prefer libraries we already use, or the standard library, over hand-rolled code. When you don't, say why.
-- Keep changes small and focused, with tests.
+- Keep changes small and focused, with tests that guard behaviour the pipeline or a user relies on ([docs/testing.md](docs/testing.md)).
 - Never skip or bypass CI.
 - Follow the issue's brief; say so in the PR when you depart from it.
 - State root causes. Prefer shared fixes over one-off patches.

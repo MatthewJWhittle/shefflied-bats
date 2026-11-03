@@ -6,6 +6,9 @@ import logging
 from pathlib import Path
 from typing import Iterable
 
+from sdm.commands.data_preparation.environmental.generate_alan_data import (
+    generate_alan_data,
+)
 from sdm.commands.data_preparation.environmental.generate_ceh_lc_data import (
     generate_ceh_lc_data,
 )
@@ -21,9 +24,23 @@ from sdm.commands.data_preparation.environmental.generate_terrain_stats import (
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
     generate_vom_data,
 )
+from sdm.commands.data_preparation.environmental.generate_vom_height_bands import (
+    generate_vom_height_bands,
+)
+from sdm.data.alan import (
+    ALAN_BAND_NAME,
+    ALAN_OUTPUT_NAME,
+    DEFAULT_ALAN_CF_CVG_PATH,
+    DEFAULT_ALAN_SOURCE_PATH,
+    AlanUriAuthError,
+    resolve_alan_cf_cvg_uri,
+    resolve_alan_source_uri,
+)
 from sdm.commands.data_preparation.processing.build_model_ev_stack import (
+    DEFAULT_SELECTED_VARIABLES_CSV,
     build_model_ev_stack,
     build_settings_from_config,
+    load_selected_variable_names,
 )
 from sdm.commands.data_preparation.processing.merge_ev_layers import (
     build_ev_dataset_inputs,
@@ -77,7 +94,10 @@ def rebuild_environmental_layers(
     fresh: bool = False,
     ceh_data_path: Path = DEFAULT_CEH_PATH,
     coastline_path: Path | None = None,
-    buffer_distance_m: float = 7000,
+    alan_source_path: str | Path | None = None,
+    alan_cf_cvg_path: str | Path | None = None,
+    alan_template_raster: str | Path | None = None,
+    buffer_distance_m: float = 0,
     config_evs: str | Path | None = None,
     config_ev_tiff: str | Path | None = None,
     metrics_stem: str = "rebuild_metrics",
@@ -179,6 +199,7 @@ def rebuild_environmental_layers(
                 output_dir=evs_dir / "landcover",
                 boundary_path=boundary_path,
                 ceh_data_path=ceh_data_path,
+                buffer_distance_m=buffer_distance_m,
                 verbose=verbose,
             ),
         )
@@ -187,6 +208,17 @@ def rebuild_environmental_layers(
             "vom",
             "generate_vom_data",
             lambda: generate_vom_data(
+                output_dir=evs_dir / "vom",
+                boundary_path=boundary_path,
+                buffer_distance_m=buffer_distance_m,
+                verbose=verbose,
+            ),
+        )
+
+        _run_or_skip(
+            "vom_bands",
+            "generate_vom_height_bands",
+            lambda: generate_vom_height_bands(
                 output_dir=evs_dir / "vom",
                 boundary_path=boundary_path,
                 buffer_distance_m=buffer_distance_m,
@@ -223,13 +255,63 @@ def rebuild_environmental_layers(
             ),
         )
 
+        alan_output = evs_dir / ALAN_OUTPUT_NAME
+        only_set = frozenset(only)
+        # Prefer an explicit template; otherwise the live training stack so
+        # --only alan matches other layers' extent (issue #37).
+        alan_template = (
+            alan_template_raster
+            if alan_template_raster is not None
+            else config_ev_tiff
+        )
+        if "alan" in active:
+            # Resolve via local cache → bucket (sdm.data.alan). Do not gate on
+            # Path.exists() alone — that skipped the documented bucket fallback.
+            try:
+                resolved_source = resolve_alan_source_uri(alan_source_path)
+                resolved_cf_cvg = resolve_alan_cf_cvg_uri(
+                    alan_cf_cvg_path, required=False
+                )
+            except AlanUriAuthError as exc:
+                if only_set and "alan" in only_set:
+                    raise
+                logging.warning("Skipping alan (GCS auth): %s", exc)
+            except FileNotFoundError as exc:
+                if only_set and "alan" in only_set:
+                    raise
+                logging.warning(
+                    "Skipping alan: %s (use --skip alan to silence, or pass "
+                    "--alan-source-path / sync the bucket object)",
+                    exc,
+                )
+            else:
+                recorder.run(
+                    "generate_alan_data",
+                    lambda: generate_alan_data(
+                        output_dir=evs_dir,
+                        boundary_path=boundary_path,
+                        alan_source_path=resolved_source,
+                        alan_cf_cvg_path=resolved_cf_cvg,
+                        template_raster=alan_template,
+                        buffer_distance_m=buffer_distance_m,
+                        verbose=verbose,
+                    ),
+                )
+
         # Omit CEH/coastal from merge only when explicitly ``--skip``'d.
         # ``--only merge`` leaves those steps inactive for generation but must
         # still consume existing outputs in the folder (otherwise all-evs.tif
         # is rewritten without them and the model stack KeyErrors).
+        # ALAN is omitted when explicitly skipped or when the output is absent
+        # (auto-skip when the local VIIRS source has not been supplied yet).
         explicit_skip = frozenset(skip)
         skip_ceh = "ceh" in explicit_skip
         skip_coastal = "coastal" in explicit_skip
+        skip_alan = "alan" in explicit_skip or not alan_output.exists()
+        # Opt-in file: omit when skipped or when the height-bands GeoTIFF is absent
+        # (existing rebuild folders without a vom_bands run stay valid).
+        vom_bands_tif = evs_dir / "vom" / f"vom_height_bands_{resolution}m.tif"
+        skip_vom_bands = "vom_bands" in explicit_skip or not vom_bands_tif.exists()
         _run_or_skip(
             "merge",
             "merge_ev_layers",
@@ -239,6 +321,8 @@ def rebuild_environmental_layers(
                     resolution,
                     skip_ceh=skip_ceh,
                     skip_coastal=skip_coastal,
+                    skip_alan=skip_alan,
+                    skip_vom_bands=skip_vom_bands,
                 ),
                 boundary_path=boundary_path,
                 output_path=merged_output,
@@ -250,12 +334,39 @@ def rebuild_environmental_layers(
         # Model stack needs the merge product. Skip it for --only/--skip paths
         # that did not select merge so a successful single step exits 0.
         if "merge" in active:
+            stack_settings = dict(build_settings)
+            if skip_alan:
+                selected_csv = Path(
+                    stack_settings.get(
+                        "selected_variables_csv", DEFAULT_SELECTED_VARIABLES_CSV
+                    )
+                )
+                try:
+                    selected = load_selected_variable_names(selected_csv)
+                except (OSError, ValueError, FileNotFoundError):
+                    selected = []
+                if ALAN_BAND_NAME in selected:
+                    filtered = [name for name in selected if name != ALAN_BAND_NAME]
+                    filtered_csv = evs_dir / "ev_clusters_selected_without_alan.csv"
+                    filtered_csv.write_text(
+                        "column_name,include\n"
+                        + "".join(f"{name},1\n" for name in filtered),
+                        encoding="utf-8",
+                    )
+                    stack_settings["selected_variables_csv"] = str(filtered_csv)
+                    logging.warning(
+                        "Omitting %s from model stack (alan layer not built); "
+                        "using %s",
+                        ALAN_BAND_NAME,
+                        filtered_csv,
+                    )
+
             def _build_stack() -> Path:
                 nonlocal applied_build_settings
                 path, used_settings = build_model_ev_stack(
                     merged_output,
                     model_stack_output,
-                    build_settings=build_settings,
+                    build_settings=stack_settings,
                     verbose=verbose,
                 )
                 applied_build_settings = used_settings
@@ -274,7 +385,9 @@ def rebuild_environmental_layers(
                 extra={
                     "build_settings": applied_build_settings,
                     "provenance": collect_rebuild_provenance(
-                        ceh_data_path=ceh_data_path
+                        ceh_data_path=ceh_data_path,
+                        alan_source_path=alan_source_path or DEFAULT_ALAN_SOURCE_PATH,
+                        alan_cf_cvg_path=alan_cf_cvg_path or DEFAULT_ALAN_CF_CVG_PATH,
                     ),
                 },
             )

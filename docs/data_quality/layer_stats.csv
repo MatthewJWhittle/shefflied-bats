@@ -1,0 +1,78 @@
+band,variable,n_valid,pct_missing,min,p1,p5,median,p95,p99,max,mean,n_at_max,verdict,reason
+1,climate_stats_temp_ann_var,1737385,7.973,3.99468,4.06181,4.11363,4.31519,4.5049,4.55364,4.65569,4.30875,1,check,7.97% missing inside study area
+2,climate_bioclim_bio_4,1737385,7.973,417.984,424.274,429.781,450.672,470.518,475.569,487.14,450.039,1,check,7.97% missing inside study area
+3,climate_bioclim_bio_7,1737385,7.973,17.4,17.8733,18.0256,19.1184,20.5819,21,21.4906,19.1503,1,check,7.97% missing inside study area
+4,climate_bioclim_bio_2,1737385,7.973,5.73333,6.21853,6.35547,7.04716,7.9049,8.17474,8.432,7.07543,1,check,7.97% missing inside study area
+5,climate_stats_prec_ann_var,1737385,7.973,4.46281,4.90465,5.29675,8.53913,29.9902,35.8797,45.2923,12.6247,1,check,7.97% missing inside study area
+6,terrain_dtm,1759315,6.812,-9.01463,-2.32335,1.96809,88.5403,440.444,556.913,730.266,141.088,1,flag,43915 inland cells below 0 m (min -9.0 m); no land below sea level expected here
+7,climate_stats_prec_ann_avg,1737385,7.973,45.0833,46,47.8333,61.5,131.917,150,177.667,74.0057,1,check,7.97% missing inside study area
+8,climate_stats_temp_ann_avg,1737385,7.973,5.86567,6.55361,7.13013,8.86166,9.5098,9.71869,10.1165,8.64172,1,check,7.97% missing inside study area
+9,climate_stats_temp_mat_avg,1737385,7.973,7.24205,7.93749,8.48244,10.1694,10.9623,11.1729,11.5326,9.99554,1,check,7.97% missing inside study area
+10,ceh_landcover_wetland,1887895,0.001,0,0,0,0,3400,10000,10000,460.409,48476,ok,cover in 0-10000 units (percent x100); in range
+11,os_distance_distance_to_buildings,1887918,0,0,0.665556,9.96448,283.883,2395.21,6122.52,7000,594.116,4621,flag,capped at 7000 m: 4621 cells (0.24%) sit at the cap
+12,os_distance_distance_to_minor_roads,1887918,0,0.271343,10.0026,24.2495,314.78,3079.18,6387.39,8917.73,713.279,1,ok,within expected range
+13,climate_bioclim_bio_9,1737385,7.973,4.02831,4.68593,5.19915,6.68817,13.4042,13.8188,14.6511,8.07295,1,check,7.97% missing inside study area
+14,bgs_coast_distance_to_coast,1887770,0.008,0,0,0,7000,7000,7000,7000,6227.6,1609979,flag,"85.3% of cells at the 7000 m cap; layer is near-constant inland, only 277791 cells carry information"
+15,ceh_landcover_upland_heathland,1887895,0.001,0,0,0,0,7800,10000,10000,694.401,61726,ok,cover in 0-10000 units (percent x100); in range
+16,terrain_stats_roughness,1760469,6.751,0,0.000164,0.000667268,0.0105188,0.0552402,0.090586,0.269226,0.01687,1,check,6.75% missing inside study area
+17,ceh_landcover_grassland,1887895,0.001,0,0,0,0,6800,10000,10000,668.228,38172,ok,cover in 0-10000 units (percent x100); in range
+18,climate_bioclim_bio_8,1737385,7.973,1.87316,2.50503,3.05362,4.67341,6.63961,15.4825,15.7462,4.7981,1,check,7.97% missing inside study area
+19,os_distance_distance_to_major_roads,1887918,0,1.50263,47.0669,209.252,3270.27,7000,7000,7000,3673.11,479040,flag,capped at 7000 m: 479040 cells (25.37%) sit at the cap
+20,ceh_landcover_arable,1887895,0.001,0,0,0,0,10000,10000,10000,2804.44,307919,ok,cover in 0-10000 units (percent x100); in range
+21,terrain_stats_slope,1755985,6.988,0,0.00018824,0.00112976,0.0350366,0.192618,0.299931,0.736716,0.0570835,1,ok,"range 0.00-0.74; reads as radians (max ~42 deg), plausible for gritstone edges at 100 m; confirm unit in code"
+22,climate_stats_wind_ann_avg,1737385,7.973,3.84763,3.94502,4.00262,4.70357,6.12665,6.64203,7.91345,4.85819,1,check,7.97% missing inside study area
+23,climate_bioclim_bio_3,1737385,7.973,32.9502,34.2585,34.9475,36.9577,38.6743,39.1357,39.613,36.9177,9,check,7.97% missing inside study area
+24,vom_vegetation_height_max,1699738,9.968,0,0,0,3.74588,19.4896,25.2199,61.4548,5.93694,1,flag,"37 cells >40 m (max 61.5 m); tallest UK trees ~40-50 m, likely pylons/buildings/chimneys in the vegetation model"
+25,vom_vegetation_height_std,1699738,9.968,0,0,0,0.503177,5.18593,7.50585,12.5352,1.24943,1,check,9.97% missing inside study area
+26,ceh_landcover_broadleaved_woodland,1887895,0.001,0,0,0,0,3700,9100,10000,489.003,8217,ok,cover in 0-10000 units (percent x100); in range
+27,vom_vegetation_height_mean,1699738,9.968,0,0,0,0.0848859,3.97849,10.1299,28.4728,0.75475,1,check,9.97% missing inside study area
+28,ceh_landcover_suburban,1887895,0.001,0,0,0,0,5800,9700,10000,633.671,10265,ok,cover in 0-10000 units (percent x100); in range
+29,os_cover_buildings,1887895,0.001,0,0,0,0,31,55,100,3.31348,119,ok,within expected range
+30,terrain_stats_tpi,1759315,6.812,-41.9172,-7.38083,-3.2874,0.00151348,3.22375,6.49163,29.9021,0.000421083,1,check,6.81% missing inside study area
+31,os_cover_water,1887895,0.001,0,0,0,0,100,100,100,9.66208,137979,flag,"mean 9.7% cover, 7.3% of cells at 100%; inland UK open water is typically ~1-3% of land area"
+32,terrain_stats_twi,1755985,6.988,4.97244,6.32086,6.92582,9.04908,14.8999,18.483,30.952,9.73466,1,check,"range 5.0-31.0; typical 5-20, a few high values on flats/channels are expected"
+33,ceh_landcover_coniferous_woodland,1887895,0.001,0,0,0,0,100,8200,10000,177.874,10071,ok,cover in 0-10000 units (percent x100); in range
+34,ceh_landcover_urban,1887895,0.001,0,0,0,0,1200,7200,10000,246.878,4138,ok,cover in 0-10000 units (percent x100); in range
+35,ceh_landcover_improved_grassland,1887895,0.001,0,0,0,300,10000,10000,10000,2954.75,203618,ok,cover in 0-10000 units (percent x100); in range
+36,os_distance_distance_to_water,1887918,0,0,0,0,112.579,750,2128.34,4376.37,221.112,1,ok,within expected range
+37,terrain_stats_aspect_northness_slope,1754788,7.052,-0.57993,-0.197144,-0.101924,0.000228288,0.0972838,0.18656,0.474427,-0.000325159,1,check,7.05% missing inside study area
+38,terrain_stats_aspect_eastness_slope,1754788,7.052,-0.510239,-0.183668,-0.0895738,-0.00108625,0.0988965,0.198617,0.522021,-0.00205705,1,check,7.05% missing inside study area
+39,ceh_landcover_wetland_500m,1852130,1.896,0,0,0,0,3961,9618,10000,463.157,3518,ok,cover in 0-10000 units (percent x100); in range
+40,ceh_landcover_upland_heathland_500m,1852130,1.896,0,0,0,1,5464,9734,10000,697.621,2091,ok,cover in 0-10000 units (percent x100); in range
+41,ceh_landcover_grassland_500m,1852130,1.896,0,0,0,0,5063,8391,10000,669.123,1,ok,cover in 0-10000 units (percent x100); in range
+42,ceh_landcover_arable_500m,1852130,1.896,0,0,0,973,8877,9700,10000,2830.28,271,ok,cover in 0-10000 units (percent x100); in range
+43,vom_vegetation_height_max_500m,1652061,12.493,0,0,0,5.60286,13.9086,17.7527,28.8386,5.99445,1,check,12.49% missing inside study area
+44,vom_vegetation_height_std_500m,1652061,12.493,0,0,0,1.04246,3.40893,4.73291,8.26948,1.2612,1,check,12.49% missing inside study area
+45,ceh_landcover_broadleaved_woodland_500m,1852130,1.896,0,0,0,166,2129,3678,9016,491.776,1,ok,cover in 0-10000 units (percent x100); in range
+46,vom_vegetation_height_mean_500m,1652061,12.493,0,0,0,0.396686,2.8388,5.43982,14.2931,0.760393,1,check,12.49% missing inside study area
+47,ceh_landcover_suburban_500m,1852130,1.896,0,0,0,85,4079,6844,9472,635.975,1,ok,cover in 0-10000 units (percent x100); in range
+48,os_cover_water_500m,1852130,1.896,0,0,0,2.05,100,100,100,9.34145,107021,flag,"mean 9.3% cover, 5.8% of cells at 100%; inland UK open water is typically ~1-3% of land area"
+49,ceh_landcover_coniferous_woodland_500m,1852130,1.896,0,0,0,0,718,4623,9959,179.728,1,ok,cover in 0-10000 units (percent x100); in range
+50,ceh_landcover_urban_500m,1852130,1.896,0,0,0,24,1281,4152,9733,243.717,1,ok,cover in 0-10000 units (percent x100); in range
+51,ceh_landcover_improved_grassland_500m,1852130,1.896,0,0,0,2307,8418,9496,10000,2963.89,10,ok,cover in 0-10000 units (percent x100); in range
+52,ceh_landcover_wetland_1000m,1812662,3.986,0,0,0,0,3891.75,8930.35,10000,466,431,ok,cover in 0-10000 units (percent x100); in range
+53,ceh_landcover_upland_heathland_1000m,1812662,3.986,0,0,0,6.25,4876.25,8803.25,10000,700.085,2,ok,cover in 0-10000 units (percent x100); in range
+54,ceh_landcover_grassland_1000m,1812662,3.986,0,0,0,8.75,4690.75,7480.5,9878.25,670.078,1,ok,cover in 0-10000 units (percent x100); in range
+55,ceh_landcover_arable_1000m,1812662,3.986,0,0,0,1689.5,8219,9219.25,9954.5,2859.09,2,ok,cover in 0-10000 units (percent x100); in range
+56,vom_vegetation_height_max_1000m,1602299,15.129,0,0,0.175349,5.91166,12.5328,15.2843,23.9138,6.03982,1,check,15.13% missing inside study area
+57,vom_vegetation_height_std_1000m,1602299,15.129,0,0,0.0256959,1.13606,2.99795,3.90679,7.18738,1.27042,1,check,15.13% missing inside study area
+58,ceh_landcover_broadleaved_woodland_1000m,1812662,3.986,0,0,0,275,1751.5,2709.75,5547.5,494.939,1,ok,cover in 0-10000 units (percent x100); in range
+59,vom_vegetation_height_mean_1000m,1602299,15.129,0,0,0.00574786,0.493991,2.45194,4.20326,10.3904,0.765042,1,check,15.13% missing inside study area
+60,ceh_landcover_suburban_1000m,1812662,3.986,0,0,0,141.5,3541.5,5670.75,8382,639.74,1,ok,cover in 0-10000 units (percent x100); in range
+61,os_cover_water_1000m,1812662,3.986,0,0,0.1775,2.2525,93.5725,100,100,8.92812,77943,flag,"mean 8.9% cover, 4.3% of cells at 100%; inland UK open water is typically ~1-3% of land area"
+62,ceh_landcover_coniferous_woodland_1000m,1812662,3.986,0,0,0,5.75,821.75,3865,9653.75,181.987,1,ok,cover in 0-10000 units (percent x100); in range
+63,ceh_landcover_urban_1000m,1812662,3.986,0,0,0,45.75,1214,3331.25,7989.75,241.618,1,ok,cover in 0-10000 units (percent x100); in range
+64,ceh_landcover_improved_grassland_1000m,1812662,3.986,0,0,0,2578.25,7773.75,9085.5,9944.5,2974.12,1,ok,cover in 0-10000 units (percent x100); in range
+65,ceh_landcover_wetland_1500m,1773502,6.06,0,0,0,0,3746.66,8338.55,10000,467.905,18,ok,cover in 0-10000 units (percent x100); in range
+66,ceh_landcover_upland_heathland_1500m,1773502,6.06,0,0,0,10.4444,4607.22,7940.22,9937.67,702.697,1,ok,cover in 0-10000 units (percent x100); in range
+67,ceh_landcover_grassland_1500m,1773502,6.06,0,0,0,18,4484.67,6975.11,9621.56,670.256,1,ok,cover in 0-10000 units (percent x100); in range
+68,ceh_landcover_arable_1500m,1773502,6.06,0,0,0,2064.22,7922.56,8960.67,9797.56,2889.21,1,ok,cover in 0-10000 units (percent x100); in range
+69,vom_vegetation_height_max_1500m,1555582,17.603,0,0.0213992,0.538629,6.02388,11.8833,14.2079,18.3134,6.07683,1,check,17.60% missing inside study area
+70,vom_vegetation_height_std_1500m,1555582,17.603,0,0.00250183,0.0992196,1.17599,2.79838,3.55216,5.02254,1.27818,1,check,17.60% missing inside study area
+71,ceh_landcover_broadleaved_woodland_1500m,1773502,6.06,0,0,0,331.222,1562.44,2248.33,3731.11,498.425,1,ok,cover in 0-10000 units (percent x100); in range
+72,vom_vegetation_height_mean_1500m,1555582,17.603,0,0.000313089,0.0365937,0.545709,2.26182,3.62447,7.35797,0.769584,1,check,17.60% missing inside study area
+73,ceh_landcover_suburban_1500m,1773502,6.06,0,0,0,182.667,3266.89,5124.67,7848.89,643.695,1,ok,cover in 0-10000 units (percent x100); in range
+74,os_cover_water_1500m,1773502,6.06,0,0,0.344444,2.33778,74.92,100,100,8.45282,52142,flag,"mean 8.5% cover, 3.0% of cells at 100%; inland UK open water is typically ~1-3% of land area"
+75,ceh_landcover_coniferous_woodland_1500m,1773502,6.06,0,0,0,13,881.222,3523.55,9492.56,184.351,1,ok,cover in 0-10000 units (percent x100); in range
+76,ceh_landcover_urban_1500m,1773502,6.06,0,0,0,56.1111,1169.33,2876,6549.67,240.803,1,ok,cover in 0-10000 units (percent x100); in range
+77,ceh_landcover_improved_grassland_1500m,1773502,6.06,0,0,4,2675.11,7319.33,8889,9667.22,2985.29,1,ok,cover in 0-10000 units (percent x100); in range

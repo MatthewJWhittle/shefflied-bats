@@ -1,0 +1,32 @@
+id: climate_bioclim_bio_3
+title: Isothermality (BIO3)
+kind: source
+family: climate
+summary: >-
+  WorldClim bioclimatic variable BIO3 on the model grid: 100 × (mean diurnal range) / (annual
+  temperature range); BIO2/BIO7 × 100.
+shows:
+- 100 × (mean diurnal range) / (annual temperature range); BIO2/BIO7 × 100
+does_not_show:
+- Year-matched weather for occurrence records
+- Microclimate
+units: degrees_C
+native_resolution_m: 1000.0
+model_resolution_m: 100.0
+crs: EPSG:27700
+temporal:
+  label: WorldClim 2.1 1970–2000 normals
+source_id: worldclim_2_1
+pipeline:
+  rebuild_step: climate
+  code: sdm/commands/data_preparation/environmental/generate_climate_data.py
+processing:
+- BIO stack downloaded and reprojected to the model grid
+- Band renamed to climate_bioclim_bio_3 at merge / canonicalize
+caveats:
+- Same licence and temporal limits as other WorldClim layers
+- Upsampled from ~30 arc-sec; cell-to-cell detail at 100 m is not native
+references:
+- title: WorldClim bioclimatic variables
+  url: https://www.worldclim.org/data/bioclim.html
+markdown: climate_bioclim_bio_3.md

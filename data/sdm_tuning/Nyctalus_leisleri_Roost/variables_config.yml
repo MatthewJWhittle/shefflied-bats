@@ -3,7 +3,6 @@ variables:
 - climate_stats_prec_ann_var
 - os_distance_distance_to_buildings
 - climate_bioclim_bio_9
-- bgs_coast_distance_to_coast
 - ceh_landcover_broadleaved_woodland
 - vom_vegetation_height_mean
 - ceh_landcover_suburban

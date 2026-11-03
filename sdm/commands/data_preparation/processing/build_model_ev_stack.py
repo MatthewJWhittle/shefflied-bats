@@ -12,6 +12,10 @@ import numpy as np
 import rioxarray as rxr
 import xarray as xr
 
+from sdm.predictors.associate import (
+    attach_predictor_docs,
+    write_predictor_sidecar,
+)
 from sdm.raster.processing import calculate_multiscale_variables
 from sdm.utils.text_utils import tidy_variable_name
 
@@ -26,12 +30,16 @@ DEFAULT_MULTISCALE_WINDOWS_CELLS: tuple[int, ...] = (10, 20, 30)
 DEFAULT_RESOLUTION_M = 100
 
 # Layer-level clipping: settled ON; limits live in config / rebuild_metrics.
+# Vegetation height 0–40 m: ecology review / #73 (masts/pylons above ~40 m).
 DEFAULT_LAYER_CLIPPING: dict[str, dict[str, float]] = {
     "bgs_coast_distance_to_coast": {"min": 0.0, "max": 7000.0},
     "os_distance_distance_to_buildings": {"min": 0.0, "max": 7000.0},
     "os_distance_distance_to_major_roads": {"min": 0.0, "max": 7000.0},
     "os_distance_distance_to_woodland": {"min": 0.0, "max": 7000.0},
     "terrain_stats_curvature": {"quantile_min": 0.05, "quantile_max": 0.95},
+    "vom_vegetation_height_max": {"min": 0.0, "max": 40.0},
+    "vom_vegetation_height_mean": {"min": 0.0, "max": 40.0},
+    "vom_vegetation_height_min": {"min": 0.0, "max": 40.0},
 }
 
 _PREFIX_ALIASES: tuple[tuple[str, str], ...] = (
@@ -159,10 +167,11 @@ def apply_layer_clipping(
     clipping: Mapping[str, Mapping[str, float]] | None = None,
     enabled: bool = True,
 ) -> tuple[xr.Dataset, dict[str, dict[str, float]]]:
-    """Apply notebook layer-level clipping (distances and curvature quantiles).
+    """Apply notebook layer-level clipping (distances, curvature, vegetation height).
 
     Clipping is settled ON by the architecture review. ``enabled`` exists so the
     option is explicit in config/metrics; turning it off is out of scope for #38.
+    Vegetation height mean/min/max are capped at 40 m (#73).
 
     Returns
     -------
@@ -405,9 +414,19 @@ def build_model_ev_stack(
         dataset[var].attrs["long_name"] = str(var)
     dataset = _restore_nodata(dataset, source_nodata)
 
+    # Stamp predictor-doc attrs where docs exist (partial catalog is OK).
+    stamped = attach_predictor_docs(dataset)
+    if stamped:
+        logging.info(
+            "Attached predictor docs to %d / %d bands",
+            len(stamped),
+            len(dataset.data_vars),
+        )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     logging.info("Writing model EV stack (%d bands) to %s", len(dataset.data_vars), output_path)
     dataset.rio.to_raster(output_path)
+    write_predictor_sidecar(output_path, list(dataset.data_vars))
     return output_path, settings
 
 

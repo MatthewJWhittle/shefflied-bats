@@ -23,6 +23,8 @@ spatial:
   left: 313000
   crs: "EPSG:27700"
   resolution: 100
+  # Applied once by `sdm setup` (buffer ∩ ONS BFC land) into paths.boundary.
+  # EV builders load that file with no extra buffer.
   study_area_buffer: 7000
 
 # Coordinate reference system
@@ -58,8 +60,50 @@ ev_stack:
       terrain_stats_curvature:
         quantile_min: 0.05
         quantile_max: 0.95
+      # #73: cap VOM height bands (masts/pylons); std left unclipped
+      vom_vegetation_height_max:
+        min: 0
+        max: 40
+      vom_vegetation_height_mean:
+        min: 0
+        max: 40
+      vom_vegetation_height_min:
+        min: 0
+        max: 40
 
-# MLflow configuration
+# MLflow run tracking (#93). Secrets and connection details live in the
+# gitignored mlflow.settings.yml (see mlflow.settings.example.yml). Tracking
+# stays off until that file is filled in and cloud resources are approved.
 mlflow:
-  tracking_uri: "sqlite:///mlflow.db"
+  enabled: false
+  settings_file: "mlflow.settings.yml"
   experiment_name: "species_sdm_experiment"
+
+# Versioned prediction publish (`sdm predict --publish`). Library code has no
+# project bucket default: set root here, or pass --publish-root / PREDICTION_PUBLISH_ROOT.
+# Publish file names come from each model's full Latin name (snake case) + behaviour;
+# there is no short-name → Latin translation map.
+prediction_publish:
+  root: "gs://habitat-suitability-modelling-data/predictions"
+
+# Global background defaults for `sdm train` (overridden by model_config.yml
+# `model.background`, then by CLI). Values match today's live-train behaviour.
+# Trial packaging: model_config.background-as-drawn.yml (#103).
+# See docs/background-points.md.
+background:
+  n_background_points: 8000
+  surface: all_bat
+  background_method: contrast
+  background_value: 0.025
+  sigma: 6.5
+  transform_method: presence
+  presence_exclusion_m: 500
+  background_thin_m: 2000
+  presence_thin_m: 2000
+  cap_ratio: 10
+  min_background: null
+  max_background: null
+  distance_weights: true
+  background_distance_weights: true
+  sample_weight_n_neighbors: 10
+  class_balance: true

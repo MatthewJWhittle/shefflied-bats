@@ -17,7 +17,7 @@ from sdm.raster.utils import construct_transform_shift_bounds, reproject_data, s
 def process_os_data(
     output_dir: Path,
     boundary_path: Path,
-    buffer_distance: float = 7000,
+    buffer_distance: float = 0,
     load_from_shp: bool = False,
     verbose: bool = False,
     *,

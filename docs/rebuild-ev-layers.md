@@ -16,7 +16,7 @@ Alias: `sdm data -o <folder>`.
 | `--plan` | Print each step, source URL or local path, whether that input is present, and OS 100 km tiles. No downloads, no writes. Exits non-zero if required CEH LCM 2023 10 m GeoTIFF is missing (unless `ceh` is skipped). |
 | `--cache-dir` | Download caches (WorldClim, OS tiles + parquets, Boundary-Line). Default: `<output-dir>/cache`. |
 | `--fresh` | Ignore stale OS parquet and Boundary-Line caches; rebuild them from sources under `--cache-dir`. |
-| `--skip` | Comma-separated registry step names to skip (e.g. `--skip ceh,coastal`). Valid names: `terrain`, `terrain_stats`, `climate`, `ceh`, `vom`, `coastal`, `os`, `merge`. Unknown names exit 2 and list valid names. |
+| `--skip` | Comma-separated registry step names to skip (e.g. `--skip ceh,coastal`). Valid names: `terrain`, `terrain_stats`, `climate`, `ceh`, `vom`, `vom_bands`, `coastal`, `os`, `alan`, `merge`. Unknown names exit 2 and list valid names. |
 | `--only` | Comma-separated registry step names to run exclusively (same names as `--skip`). Mutually exclusive with `--skip`. |
 | `--ceh-path` | Manual CEH LCM 2023 10 m GeoTIFF (default: git-ignored path under `data/raw/big-files/CEH/`). |
 | `--no-live-download` | Offline mode for live OS / Boundary-Line downloads. |
@@ -45,6 +45,7 @@ flowchart TD
   climate["climate<br/>generate_climate_data → climate/"]
   ceh["ceh<br/>generate_ceh_lc_data → landcover/"]
   vom["vom<br/>generate_vom_data → vom/"]
+  vom_bands["vom_bands<br/>generate_vom_height_bands → vom/ (#121)"]
   coastal["coastal<br/>generate_coastal_distance → coastal_distance.tif"]
   os["os<br/>process_os_data → os-feature-cover.tif<br/>os-distance-to-feature.tif"]
   merge["merge<br/>merge_ev_layers → all-evs.tif"]
@@ -54,36 +55,41 @@ flowchart TD
   sources --> climate
   sources --> ceh
   sources --> vom
+  sources --> vom_bands
   sources --> coastal
   sources --> os
   terrain_stats --> merge
   climate --> merge
   ceh --> merge
   vom --> merge
+  vom_bands --> merge
   coastal --> merge
   os --> merge
+  alan --> merge
   merge --> stack
 ```
 
-Execution order (registry / `--skip` names for steps 1–8; model stack always follows a successful merge):
+Execution order (registry / `--skip` names; model stack always follows a successful merge):
 
 1. `terrain` — `generate_terrain_data` → `<folder>/terrain/`
 2. `terrain_stats` — `generate_terrain_stats` → `<folder>/terrain_stats.tif`
 3. `climate` — `generate_climate_data` → `<folder>/climate/` (WorldClim cache under `--cache-dir`/worldclim)
 4. `ceh` — `generate_ceh_lc_data` → `<folder>/landcover/` (unless skipped; **manual** CEH LCM 2023 10 m GeoTIFF)
 5. `vom` — `generate_vom_data` → `<folder>/vom/`
-6. `coastal` — `generate_coastal_distance` → `<folder>/coastal_distance.tif` (unless skipped; Boundary-Line under `--cache-dir`/boundary-line). Optional BGS GeoCoast shapefile for a like-for-like coastal layer: `data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp`
-7. `os` — `process_os_data` → `<folder>/os-feature-cover.tif`, `os-distance-to-feature.tif` (OS raw + parquets under `--cache-dir`)
-8. `merge` — `merge_ev_layers` → `<folder>/all-evs.tif`
-9. `build_model_ev_stack` → `<folder>/evs-to-model.tif` (notebook feature-engineering order: rename → clip → subset → multiscale)
+6. `vom_bands` — `generate_vom_height_bands` → `<folder>/vom/vom_height_bands_100m.tif` (1 m VOM height-band shares, canopy height std, woody cover + 500 m box mean; issue #121). Merge omits it when the file is absent.
+7. `coastal` — `generate_coastal_distance` → `<folder>/coastal_distance.tif` (unless skipped; Boundary-Line under `--cache-dir`/boundary-line). Optional BGS GeoCoast shapefile for a like-for-like coastal layer: `data/raw/big-files/BGS GeoCoast/GeoCoast_v1_Authority_Area_Inundation.shp`
+8. `os` — `process_os_data` → `<folder>/os-feature-cover.tif`, `os-distance-to-feature.tif` (OS raw + parquets under `--cache-dir`)
+9. `alan` — `generate_alan_data` → `<folder>/alan_viirs_radiance.tif` (local yearly VIIRS GeoTIFF; **auto-skips** if the source file is missing — see [alan-layer.md](alan-layer.md))
+10. `merge` — `merge_ev_layers` → `<folder>/all-evs.tif`
+11. `build_model_ev_stack` → `<folder>/evs-to-model.tif` (notebook feature-engineering order: rename → clip → subset → multiscale)
 
 ### Model stack build settings
 
 Configured under `ev_stack` in `config.yml` and copied into `rebuild_metrics.json` as `build_settings`:
 
-- Selected variables: `data/ev_clusters_selected.csv` (`include == 1`)
+- Selected variables: `data/ev_clusters_selected.csv` (`include == 1`). Distance to coast (`bgs_coast_distance_to_coast`) is `include = 0` — see [distance-to-coast.md](modelling/distance-to-coast.md) (#75).
 - Multiscale groups: `ceh_landcover`, `os_cover_water`, `vom_vegetation_height` at windows 10/20/30 cells (500/1000/1500 m at 100 m resolution). CEH 500/1000/1500 m neighbourhood averages use the 1%-of-range rule following the architecture review.
-- Layer clipping **ON** by default following the architecture review: coast / building / major-road / woodland distances 0–7000 m; curvature 5–95% quantiles. Disabling clipping is out of scope for #38. Concrete clip bounds (including resolved curvature 5%/95% values) are stored under `build_settings.layer_clipping.applied`.
+- Layer clipping **ON** by default following the architecture review: coast / building / major-road / woodland distances 0–7000 m; curvature 5–95% quantiles; vegetation height mean/min/max 0–40 m (#73; masts/pylons). Disabling clipping is out of scope for #38. Concrete clip bounds (including resolved curvature 5%/95% values) are stored under `build_settings.layer_clipping.applied`. Coast clipping still applies if the band is present in a merged stack; it is not selected into `evs-to-model.tif` while `include` is 0. Raw VOM heights are also capped at 40 m before summary metrics so std is not inflated by structures.
 - Per-model feature lists: **18** `data/sdm_config/*/variables_config.yml` files (not 33).
 
 ## Write guards (refused destinations)
@@ -118,6 +124,15 @@ Or end-to-end after `sdm setup`:
 ```bash
 sdm pipeline --output-dir data/evs-rebuild --fresh
 ```
+
+`sdm setup` writes `paths.boundary` as the modelling extent: counties dissolved, buffered by `spatial.study_area_buffer`, then clipped to ONS BFC land (keeps inland edge buffers, drops sea / estuary). EV steps load that file with no extra buffer — re-run setup before a rebuild if the boundary is still an unbuffered county dissolve.
+
+## Predictor documentation
+
+Per-band source, caveats, and lineage for pipeline layers:
+[docs/predictors/](predictors/README.md). Building `evs-to-model.tif` stamps
+known doc attrs onto bands and writes a `{raster}.predictors.yml` sidecar for
+documented layers.
 
 ## Implementation notes
 

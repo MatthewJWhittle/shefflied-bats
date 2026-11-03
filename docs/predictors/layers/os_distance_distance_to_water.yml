@@ -1,0 +1,25 @@
+id: os_distance_distance_to_water
+title: Distance to water
+kind: source
+family: os
+summary: >-
+  Euclidean distance to the nearest OS Vector Map District water feature on the model grid.
+shows:
+- Distance to nearest mapped water (metres)
+does_not_show:
+- Water quality or flow; road traffic; feature attributes beyond presence
+units: metres
+model_resolution_m: 100.0
+crs: EPSG:27700
+source_id: os_vector_map_district
+pipeline:
+  rebuild_step: os
+  code: sdm/commands/data_preparation/processing/process_os_data.py
+processing:
+- Distance raster from OS VMD features on the model grid
+caveats:
+- VMD completeness and update lag limit precision
+references:
+- title: OS VectorMap District
+  url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
+markdown: os_distance_distance_to_water.md

@@ -143,6 +143,7 @@ def test_rebuild_enables_climate_run_stats(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "generate_climate_data", _climate)
     monkeypatch.setattr(mod, "generate_ceh_lc_data", _ok)
     monkeypatch.setattr(mod, "generate_vom_data", _ok)
+    monkeypatch.setattr(mod, "generate_vom_height_bands", _ok)
     monkeypatch.setattr(mod, "generate_coastal_distance", _ok)
     monkeypatch.setattr(mod, "process_os_data", _ok)
     monkeypatch.setattr(mod, "merge_ev_layers", _ok)

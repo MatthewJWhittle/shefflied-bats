@@ -14,6 +14,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/MatthewJWhittle/shefflied-bats.git
 cd shefflied-bats
 uv sync
+# Optional GCS / Secret Manager support: uv sync --extra gcp
 ```
 
 ### Workflow
@@ -64,6 +65,9 @@ sdm data -o /tmp/evs-smoke --skip ceh,coastal
 
 Each run writes `rebuild_metrics.json` and `rebuild_metrics.csv` next to the layers (wall time and per-step peak RSS, plus git commit and source version/date provenance). Use `--ceh-path` when the CEH LCM GeoTIFF is not at the default git-ignored location. Point train/predict at the rebuilt stack explicitly, e.g. `--ev-file data/evs-rebuild/evs-to-model.tif`.
 
+Predictor-layer sources, caveats, and lineage:
+[docs/predictors/](docs/predictors/README.md).
+
 Full command list: [sdm/README.md](sdm/README.md).
 
 ## What you get
@@ -88,6 +92,18 @@ package.json   # schema_version 1, ordered feature_names, metrics, …
 ```bash
 sdm config
 ```
+
+## MLflow run tracking
+
+Training and tuning can log parameters, held-out scores, cut-offs, plots, and
+model files to a **shared** store so runs from either computer are comparable.
+There is no tracking server: clients talk to Neon Postgres for metadata and to a
+private GCS prefix for artefacts. The database password lives in Google Secret
+Manager (or `MLFLOW_DB_PASSWORD` for cloud agents), never in git.
+
+Tracking stays **off** until you copy `mlflow.settings.example.yml` to the
+gitignored `mlflow.settings.yml` and cloud resources are approved. Exact create
+steps for Matt: [docs/mlflow-tracking.md](docs/mlflow-tracking.md).
 
 ## Occurrence data
 

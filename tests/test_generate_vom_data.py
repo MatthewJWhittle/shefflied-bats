@@ -12,9 +12,90 @@ from shapely.geometry import Polygon
 import geopandas as gpd
 
 from sdm.commands.data_preparation.environmental.generate_vom_data import (
-    generate_vom_data
+    VEGETATION_HEIGHT_MAX_M,
+    cap_vegetation_heights,
+    generate_vom_data,
 )
 from sdm.data import WCSDownloader
+from sdm.data.wcs_tilearray import EA_VOM_COVERAGE_ID
+
+
+class TestCapVegetationHeights:
+    """Synthetic-data checks for the ecology review 40 m vegetation height cap (#73)."""
+
+    def test_caps_values_above_max(self):
+        data = xr.DataArray(
+            np.array([[10.0, 40.0], [41.0, 61.5]], dtype=np.float32),
+            dims=("y", "x"),
+        )
+        capped = cap_vegetation_heights(data)
+        assert float(capped.max()) == VEGETATION_HEIGHT_MAX_M
+        np.testing.assert_allclose(
+            capped.values, np.array([[10.0, 40.0], [40.0, 40.0]], dtype=np.float32)
+        )
+
+    def test_preserves_nan_and_values_at_or_below_max(self):
+        data = xr.DataArray(
+            np.array([[np.nan, 0.0], [39.9, 40.0]], dtype=np.float32),
+            dims=("y", "x"),
+        )
+        capped = cap_vegetation_heights(data)
+        assert np.isnan(capped.values[0, 0])
+        np.testing.assert_allclose(
+            capped.values[0, 1:], np.array([0.0], dtype=np.float32)
+        )
+        np.testing.assert_allclose(
+            capped.values[1, :], np.array([39.9, 40.0], dtype=np.float32)
+        )
+
+    def test_generate_vom_data_caps_outlier_heights(
+        self, temp_boundary_file, tmp_path
+    ):
+        """End-to-end: WCS heights above 40 m must not survive into the summary TIFF."""
+        output_dir = tmp_path / "output"
+        vom_coverage_id = (
+            "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
+        )
+
+        with patch(
+            "sdm.commands.data_preparation.environmental.generate_vom_data.fetch_wcs_dataset"
+        ) as mock_fetch:
+
+            test_data = np.full((80, 80), 15.0, dtype=np.float32)
+            test_data[30, 30] = 61.5  # mast / pylon outlier
+            test_data[31, 31] = 45.0
+
+            vom_data = xr.DataArray(
+                test_data,
+                dims=("y", "x"),
+                coords={
+                    "y": np.linspace(381000, 380000, 80),
+                    "x": np.linspace(420000, 421000, 80),
+                },
+                name=vom_coverage_id,
+            ).rio.write_crs("EPSG:27700")
+
+            mock_fetch.return_value = xr.Dataset(
+                {vom_coverage_id: vom_data}
+            )
+
+            result = generate_vom_data(
+                output_dir=output_dir,
+                boundary_path=temp_boundary_file,
+                wcs_download_resolution_m=10,
+                summary_target_resolution_m=100,
+                max_concurrent_downloads=1,
+                verbose=False,
+            )
+
+            with rxr.open_rasterio(result) as processed:
+                for band_idx in range(processed.sizes["band"]):
+                    band = processed.isel(band=band_idx)
+                    valid = band.where(
+                        (band != band.rio.nodata) & np.isfinite(band)
+                    )
+                    if valid.count() > 0:
+                        assert float(valid.max()) <= VEGETATION_HEIGHT_MAX_M
 
 
 @pytest.fixture
@@ -47,10 +128,8 @@ class TestVomDataWorkflow:
         output_dir = tmp_path / "nonexistent" / "output"
         
         # Only mock the WCS downloader to avoid external network calls
-        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.WCSDownloader') as mock_wcs_class:
+        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.fetch_wcs_dataset') as mock_fetch:
             # Create a mock WCS downloader that returns realistic VOM data
-            mock_wcs_downloader = mock_wcs_class.return_value
-            mock_wcs_downloader.get_coverage = AsyncMock()
             
             # Create realistic VOM data structure
             vom_coverage_id = "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
@@ -70,7 +149,7 @@ class TestVomDataWorkflow:
             ).rio.write_crs("EPSG:27700")
             
             mock_vom_dataset = xr.Dataset({vom_coverage_id: vom_data})
-            mock_wcs_downloader.get_coverage.return_value = mock_vom_dataset
+            mock_fetch.return_value = mock_vom_dataset
             
             # Run the function
             result = generate_vom_data(
@@ -100,9 +179,7 @@ class TestVomDataWorkflow:
         output_dir = tmp_path / "output"
         
         # Only mock the WCS downloader
-        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.WCSDownloader') as mock_wcs_class:
-            mock_wcs_downloader = mock_wcs_class.return_value
-            mock_wcs_downloader.get_coverage = AsyncMock()
+        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.fetch_wcs_dataset') as mock_fetch:
             
             # Create test VOM data
             vom_coverage_id = "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
@@ -119,7 +196,7 @@ class TestVomDataWorkflow:
             ).rio.write_crs("EPSG:27700")
             
             mock_vom_dataset = xr.Dataset({vom_coverage_id: vom_data})
-            mock_wcs_downloader.get_coverage.return_value = mock_vom_dataset
+            mock_fetch.return_value = mock_vom_dataset
             
             # Run with custom parameters
             result = generate_vom_data(
@@ -139,16 +216,12 @@ class TestVomDataWorkflow:
             assert result.exists()
             assert result.name == "vom_summary_metrics_50m.tif"
             
-            # Verify WCS downloader was called with correct parameters
-            mock_wcs_class.assert_called_once()
-            wcs_call_args = mock_wcs_class.call_args[1]
-            assert wcs_call_args['request_tile_pixels'] == (512, 512)
-            assert wcs_call_args['use_temp_storage'] is False
-            
-            # Verify get_coverage was called with correct parameters
-            get_coverage_call = mock_wcs_downloader.get_coverage.call_args[1]
-            assert get_coverage_call['resolution'] == 5.0
-            assert get_coverage_call['max_concurrent'] == 2
+            mock_fetch.assert_called()
+            fetch_kwargs = mock_fetch.call_args.kwargs
+            assert fetch_kwargs["resolution_m"] == 5.0
+            assert fetch_kwargs["max_concurrent"] == 2
+            assert fetch_kwargs["chunk_size"] == (512, 512)
+            assert fetch_kwargs["coverage_id"] == EA_VOM_COVERAGE_ID
     
     def test_generate_vom_data_file_not_found(self, tmp_path):
         """Test error handling when boundary file doesn't exist."""
@@ -163,9 +236,7 @@ class TestVomDataWorkflow:
         output_dir = tmp_path / "output"
         
         # Only mock the WCS downloader to avoid external calls
-        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.WCSDownloader') as mock_wcs_class:
-            mock_wcs_downloader = mock_wcs_class.return_value
-            mock_wcs_downloader.get_coverage = AsyncMock()
+        with patch('sdm.commands.data_preparation.environmental.generate_vom_data.fetch_wcs_dataset') as mock_fetch:
             
             # Create realistic VOM data with known characteristics
             vom_coverage_id = "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
@@ -187,7 +258,7 @@ class TestVomDataWorkflow:
             ).rio.write_crs("EPSG:27700")
             
             mock_vom_dataset = xr.Dataset({vom_coverage_id: vom_data})
-            mock_wcs_downloader.get_coverage.return_value = mock_vom_dataset
+            mock_fetch.return_value = mock_vom_dataset
             
             # Run the processing pipeline
             result = generate_vom_data(
@@ -217,9 +288,9 @@ class TestVomDataWorkflow:
                     valid_data = band_data.where(band_data != band_data.rio.nodata)
                     
                     if valid_data.count() > 0:
-                        # Vegetation height should be reasonable (0-50m)
+                        # Vegetation height capped at VEGETATION_HEIGHT_MAX_M (#73)
                         assert valid_data.min() >= 0
-                        assert valid_data.max() <= 50
+                        assert valid_data.max() <= VEGETATION_HEIGHT_MAX_M
 
 
 class TestVomDataRealWCS:

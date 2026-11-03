@@ -48,6 +48,17 @@ def test_canonicalize_band_names() -> None:
         canonicalize_band_name("vom_vegetation_height_mean_500m")
         == "vom_vegetation_height_mean_500m"
     )
+    # #121 simple height-band / woody-cover ids must not be rewritten.
+    assert canonicalize_band_name("vom_woody_cover_share") == "vom_woody_cover_share"
+    assert (
+        canonicalize_band_name("vom_woody_cover_share_500m")
+        == "vom_woody_cover_share_500m"
+    )
+    assert canonicalize_band_name("vom_canopy_height_std") == "vom_canopy_height_std"
+    assert (
+        canonicalize_band_name("vom_height_band_5_15_share")
+        == "vom_height_band_5_15_share"
+    )
 
 
 def test_apply_layer_clipping_fixed_and_quantile() -> None:
@@ -57,6 +68,9 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
         {
             "bgs_coast_distance_to_coast": (("y", "x"), np.full((4, 4), 9000.0)),
             "os_distance_distance_to_woodland": (("y", "x"), np.full((4, 4), 8500.0)),
+            "vom_vegetation_height_max": (("y", "x"), np.full((4, 4), 61.5)),
+            "vom_vegetation_height_mean": (("y", "x"), np.full((4, 4), 45.0)),
+            "vom_vegetation_height_min": (("y", "x"), np.full((4, 4), 41.0)),
             "terrain_stats_curvature": (
                 ("y", "x"),
                 np.linspace(-10, 10, 16).reshape(4, 4),
@@ -71,6 +85,9 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     clipped, applied = apply_layer_clipping(ds)
     assert float(clipped["bgs_coast_distance_to_coast"].max()) == 7000.0
     assert float(clipped["os_distance_distance_to_woodland"].max()) == 7000.0
+    assert float(clipped["vom_vegetation_height_max"].max()) == 40.0
+    assert float(clipped["vom_vegetation_height_mean"].max()) == 40.0
+    assert float(clipped["vom_vegetation_height_min"].max()) == 40.0
     assert float(clipped["terrain_stats_curvature"].min()) > original_min
     assert float(clipped["terrain_stats_curvature"].max()) < original_max
     assert applied["terrain_stats_curvature"]["min"] == expected_lo
@@ -79,21 +96,15 @@ def test_apply_layer_clipping_fixed_and_quantile() -> None:
     assert applied["terrain_stats_curvature"]["quantile_max"] == 0.95
     assert applied["bgs_coast_distance_to_coast"] == {"min": 0.0, "max": 7000.0}
     assert applied["os_distance_distance_to_woodland"] == {"min": 0.0, "max": 7000.0}
+    assert applied["vom_vegetation_height_max"] == {"min": 0.0, "max": 40.0}
+    assert applied["vom_vegetation_height_mean"] == {"min": 0.0, "max": 40.0}
+    assert applied["vom_vegetation_height_min"] == {"min": 0.0, "max": 40.0}
 
 
 def test_woodland_distance_included_in_selected_stack() -> None:
     """#39: OS distance to woodland is kept in the model EV stack."""
     keep = load_selected_variable_names("data/ev_clusters_selected.csv")
     assert "os_distance_distance_to_woodland" in keep
-
-
-def test_plecotus_roost_swaps_broadleaved_for_woodland_distance() -> None:
-    """#39 experiment: BLE roost uses woodland edge distance instead of cover."""
-    path = Path("data/sdm_config/Plecotus_auritus_Roost/variables_config.yml")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    variables = payload.get("variables") or []
-    assert "os_distance_distance_to_woodland" in variables
-    assert "ceh_landcover_broadleaved_woodland_500m" not in variables
 
 
 def _write_synthetic_all_evs(path: Path, band_names: list[str]) -> None:
@@ -196,8 +207,15 @@ def test_build_settings_recorded_shape() -> None:
         "os_distance_distance_to_major_roads",
         "os_distance_distance_to_woodland",
         "terrain_stats_curvature",
+        "vom_vegetation_height_max",
+        "vom_vegetation_height_mean",
+        "vom_vegetation_height_min",
     ):
         assert layer in settings["layer_clipping"]["layers"]
+    assert settings["layer_clipping"]["layers"]["vom_vegetation_height_max"] == {
+        "min": 0.0,
+        "max": 40.0,
+    }
 
 
 def test_selected_csv_include_count() -> None:

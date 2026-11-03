@@ -95,7 +95,8 @@ def test_species_filtered_run_passes_all_records_for_background(monkeypatch, tmp
     )
     monkeypatch.setattr(tsm, "simplify_boundary", lambda b, tolerance=100: b)
     monkeypatch.setattr(tsm, "load_environmental_variables", lambda uri: (None, None))
-    monkeypatch.setattr(tsm, "_configure_mlflow_from_config", lambda cfg: None)
+    monkeypatch.setattr(tsm, "resolve_mlflow_config", lambda cfg: cfg.mlflow)
+    monkeypatch.setattr(tsm, "configure_mlflow", lambda cfg: False)
     monkeypatch.setattr(tsm, "prepare_training_data", fake_prepare)
 
     with pytest.raises(_Stop):

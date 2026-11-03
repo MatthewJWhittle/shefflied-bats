@@ -13,19 +13,25 @@ def create_study_boundary_wrapper(
     target_crs: str = "EPSG:27700",
     simplify_tolerance: Optional[float] = 100.0,
     live_download: bool = True,
+    buffer_distance: float = 0.0,
     verbose: bool = False
 ) -> Path:
     """
     Creates the study area boundary GeoJSON file.
+
+    Pass ``buffer_distance`` (typically ``spatial.study_area_buffer`` from
+    config) so the saved file is the modelling extent: buffered then clipped to
+    ONS BFC land.
     """
     setup_logging(verbose=verbose)
-    
+
     study_area_gdf = create_boundary(
         counties_file=raw_counties_file,
         county_names=None,  # Default to Yorkshire
         target_crs=target_crs,
         simplify_tolerance=simplify_tolerance,
         live_download=live_download,
+        buffer_distance=buffer_distance,
     )
 
     output_geojson.parent.mkdir(parents=True, exist_ok=True)

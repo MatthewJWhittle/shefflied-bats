@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import secrets
@@ -14,6 +15,51 @@ import fsspec
 
 logger = logging.getLogger(__name__)
 
+_GCP_EXTRA_HINT = (
+    "Install the optional 'gcp' extra with: uv sync --extra gcp "
+    "(provides gcsfs and google-cloud-secret-manager)."
+)
+
+# gcloud ADC filename (google.auth._cloud_sdk._CREDENTIALS_FILENAME).
+_ADC_FILENAME = "application_default_credentials.json"
+
+
+def gcs_adc_path_from_cloudsdk_config() -> Path | None:
+    """Return the ADC JSON path under ``CLOUDSDK_CONFIG`` (or the gcloud default).
+
+    ``google-auth`` / gcsfs honour ``CLOUDSDK_CONFIG``. GDAL ``/vsigs/`` does not:
+    it only checks ``GOOGLE_APPLICATION_CREDENTIALS`` or
+    ``~/.config/gcloud/application_default_credentials.json``. Callers that open
+    ``gs://`` with Rasterio should use :func:`ensure_gcs_application_credentials_env`
+    so both stacks see the same credentials.
+    """
+    cloudsdk = os.environ.get("CLOUDSDK_CONFIG", "").strip()
+    if cloudsdk:
+        candidate = Path(cloudsdk) / _ADC_FILENAME
+        return candidate
+    return Path.home() / ".config" / "gcloud" / _ADC_FILENAME
+
+
+def ensure_gcs_application_credentials_env() -> Path | None:
+    """If unset, point ``GOOGLE_APPLICATION_CREDENTIALS`` at the Cloud SDK ADC file.
+
+    Returns the path that was set or already configured when the file exists;
+    otherwise ``None``. Safe to call repeatedly.
+    """
+    existing = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if existing:
+        path = Path(existing)
+        return path if path.is_file() else None
+    adc = gcs_adc_path_from_cloudsdk_config()
+    if adc is not None and adc.is_file():
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(adc)
+        logger.debug(
+            "Set GOOGLE_APPLICATION_CREDENTIALS from CLOUDSDK_CONFIG ADC at %s",
+            adc,
+        )
+        return adc
+    return None
+
 
 def join_uri_path(base: str | Path, *parts: str) -> str:
     base_str = str(base).rstrip("/")
@@ -25,8 +71,32 @@ def join_uri_path(base: str | Path, *parts: str) -> str:
     return str(Path(base_str) / suffix)
 
 
+def _require_gcsfs_for_gs_uri(uri: str) -> None:
+    """Raise a clear ImportError when ``gs://`` is used without the gcp extra."""
+    if not uri.startswith("gs://"):
+        return
+    if importlib.util.find_spec("gcsfs") is not None:
+        return
+    raise ImportError(
+        f"GCS path {uri!r} requires gcsfs from the optional 'gcp' extra. "
+        f"{_GCP_EXTRA_HINT}"
+    )
+
+
 def filesystem_for_uri(uri: str) -> tuple[fsspec.AbstractFileSystem, str]:
-    return fsspec.core.url_to_fs(uri.rstrip("/"))
+    ref = uri.rstrip("/")
+    _require_gcsfs_for_gs_uri(ref)
+    if ref.startswith("gs://"):
+        ensure_gcs_application_credentials_env()
+    try:
+        return fsspec.core.url_to_fs(ref)
+    except ImportError as exc:
+        if ref.startswith("gs://"):
+            raise ImportError(
+                f"GCS path {ref!r} requires gcsfs from the optional 'gcp' extra. "
+                f"{_GCP_EXTRA_HINT}"
+            ) from exc
+        raise
 
 
 def _protocol_name(fs: fsspec.AbstractFileSystem) -> str:
@@ -53,6 +123,7 @@ def uri_for_rasterio(uri_or_path: str | Path) -> str:
     """Map ``gs://`` URIs to GDAL ``/vsigs/`` paths for rasterio/rioxarray."""
     ref = str(uri_or_path)
     if ref.startswith("gs://"):
+        ensure_gcs_application_credentials_env()
         return f"/vsigs/{ref[len('gs://'):]}"
     return ref
 

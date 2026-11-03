@@ -1,0 +1,36 @@
+id: climate_stats_temp_ann_avg
+title: Annual mean temperature
+kind: source
+family: climate
+summary: |
+  Mean of the twelve WorldClim 2.1 monthly average-temperature bands after warp to the model grid.
+shows:
+- Long-term average temperature (°C) across months of the WorldClim normal
+does_not_show:
+- Weather in a particular occurrence year
+- Microclimate under canopy or in urban canyons
+units: degrees_C
+native_resolution_m: 1000
+model_resolution_m: 100
+crs: EPSG:27700
+temporal:
+  label: WorldClim 2.1 1970–2000 normals
+  notes: Climate normal, not matched to bat-record years.
+source_id: worldclim_2_1
+pipeline:
+  rebuild_step: climate
+  code: sdm/commands/data_preparation/environmental/generate_climate_data.py
+processing:
+- Monthly tavg downloaded and reprojected to the model grid
+- Annual mean taken across the twelve months (calculate_climate_statistics)
+caveats:
+- Temporal mismatch with occurrence years — treat as landscape climate context
+- >-
+  Coarse native grid (~30 arc-sec) upsampled to 100 m; fine-scale climate structure is not
+  real
+- >-
+  Coastal / edge missing ring where the climate grid does not cover sea-buffer cells
+references:
+- title: WorldClim about / licence
+  url: https://worldclim.org/about.html
+markdown: climate_stats_temp_ann_avg.md

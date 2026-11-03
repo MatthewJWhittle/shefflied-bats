@@ -34,17 +34,25 @@ def setup(
     
     boundary_path = Path(PROJECT_CONFIG.paths.boundary)
     
+    # Bake study_area_buffer into the saved boundary (buffer ∩ ONS BFC land) so
+    # EV builders load it as-is without a second buffer that would re-enter the sea.
+    buffer_m = float(PROJECT_CONFIG.spatial.study_area_buffer)
     boundary_gdf = create_boundary(
         counties_file=counties_file,
         county_names=None,  # Yorkshire default
         target_crs=PROJECT_CONFIG.crs,
         simplify_tolerance=100.0,
         live_download=live_download,
+        buffer_distance=buffer_m,
     )
-    
+
     boundary_path.parent.mkdir(parents=True, exist_ok=True)
     boundary_gdf.to_file(boundary_path, driver="GeoJSON")
-    logging.info(f"Study boundary saved to: {boundary_path}")
+    logging.info(
+        "Study boundary saved to: %s (buffer=%sm, land-clipped)",
+        boundary_path,
+        buffer_m,
+    )
 
 def run_data_rebuild(
     output_dir: str,
@@ -56,6 +64,9 @@ def run_data_rebuild(
     only: Optional[str] = None,
     ceh_path: Optional[Path] = None,
     coastline_path: Optional[Path] = None,
+    alan_source_path: Optional[str] = None,
+    alan_cf_cvg_path: Optional[str] = None,
+    alan_template_raster: Optional[str] = None,
     verbose: bool = False,
 ) -> Path:
     """Core EV rebuild used by ``sdm data`` and ``sdm pipeline``.
@@ -73,6 +84,7 @@ def run_data_rebuild(
         parse_step_name_list,
         resolve_active_steps,
     )
+    from sdm.data.alan import AlanUriAuthError
     from sdm.utils.rebuild_provenance import DEFAULT_CEH_PATH
 
     try:
@@ -95,11 +107,18 @@ def run_data_rebuild(
             fresh=fresh,
             ceh_data_path=Path(ceh_path) if ceh_path is not None else DEFAULT_CEH_PATH,
             coastline_path=Path(coastline_path) if coastline_path is not None else None,
+            alan_source_path=alan_source_path,
+            alan_cf_cvg_path=alan_cf_cvg_path,
+            alan_template_raster=alan_template_raster,
             config_evs=PROJECT_CONFIG.paths.evs,
             config_ev_tiff=PROJECT_CONFIG.paths.ev_tiff,
             verbose=verbose,
         )
     except ForbiddenEvOutputError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    except (AlanUriAuthError, FileNotFoundError) as exc:
+        # Surface ALAN source / auth failures from --only alan clearly.
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=2) from exc
 
@@ -149,7 +168,8 @@ def data(
         "--skip",
         help=(
             "Comma-separated rebuild step names to skip "
-            "(registry: terrain,terrain_stats,climate,ceh,vom,coastal,os,merge). "
+            "(registry: terrain,terrain_stats,climate,ceh,vom,vom_bands,"
+            "coastal,os,alan,merge). "
             "Example: --skip ceh,coastal"
         ),
     ),
@@ -177,6 +197,32 @@ def data(
             "When set, skips the Boundary-Line download and uses this path."
         ),
     ),
+    alan_source_path: Optional[str] = typer.Option(
+        None,
+        "--alan-source-path",
+        help=(
+            "VIIRS radiance GeoTIFF for the alan step (local path or gs:// URI). "
+            "Overrides the local cache and bucket default. Taken as a string so "
+            "gs:// URIs are not collapsed by pathlib."
+        ),
+    ),
+    alan_cf_cvg_path: Optional[str] = typer.Option(
+        None,
+        "--alan-cf-cvg-path",
+        help=(
+            "Matching EOG cf_cvg GeoTIFF for the alan step (local path or "
+            "gs:// URI). Optional; when omitted, local cache then bucket are tried."
+        ),
+    ),
+    alan_template_raster: Optional[str] = typer.Option(
+        None,
+        "--alan-template-raster",
+        help=(
+            "GeoTIFF whose grid (CRS, transform, extent) the alan layer must "
+            "match. Defaults to paths.ev_tiff when that file exists so ALAN "
+            "aligns with the training stack."
+        ),
+    ),
     verbose: bool = False,
 ) -> None:
     """Rebuild all environmental layers into a caller-chosen output folder."""
@@ -192,9 +238,10 @@ def data(
         )
 
         try:
+            # Boundary from `sdm setup` already includes study_area_buffer ∩ land.
             exit_code = run_data_plan(
                 boundary_path=Path(PROJECT_CONFIG.paths.boundary),
-                buffer_m=float(PROJECT_CONFIG.spatial.study_area_buffer),
+                buffer_m=0.0,
                 ceh_data_path=resolved_ceh,
                 cache_dir=Path(cache_dir) if cache_dir else None,
                 skip=skip,
@@ -222,6 +269,9 @@ def data(
         only=only,
         ceh_path=ceh_path,
         coastline_path=coastline_path,
+        alan_source_path=alan_source_path,
+        alan_cf_cvg_path=alan_cf_cvg_path,
+        alan_template_raster=alan_template_raster,
         verbose=verbose,
     )
 
@@ -303,18 +353,34 @@ def train(
         2,
         help="Maximum threads per model.",
     ),
-    # Species-specific processing parameters
-    d_min: float = typer.Option(
-        500,
-        help="Minimum distance from presence for background (meters).",
+    # Species-specific processing parameters (None → config.yml / model_config.yml)
+    d_min: Optional[float] = typer.Option(
+        None,
+        help=(
+            "Minimum distance from presence for background (meters). "
+            "Overrides background.presence_exclusion_m when set; 0 disables exclusion."
+        ),
     ),
     d_max: Optional[float] = typer.Option(
         None,
-        help="Maximum distance from presence for background (meters, None = no limit).",
+        help=(
+            "Maximum distance from presence for background (meters). "
+            "Overrides background.presence_exclusion_max_m when set."
+        ),
     ),
-    sample_weight_n_neighbors: int = typer.Option(
-        10,
-        help="Number of neighbors for sample weighting.",
+    sample_weight_n_neighbors: Optional[int] = typer.Option(
+        None,
+        help=(
+            "Neighbors for distance sample weights. "
+            "Overrides background.sample_weight_n_neighbors when set (config default 10)."
+        ),
+    ),
+    n_background_points: Optional[int] = typer.Option(
+        None,
+        help=(
+            "Shared background pool size. "
+            "Overrides background.n_background_points when set."
+        ),
     ),
     allow_config_fallback: bool = typer.Option(
         False,
@@ -357,15 +423,12 @@ def train(
 ) -> None:
     """Train SDM models using the new modular approach.
     
-    Background point generation parameters are loaded from model_config.yml.
+    Background knobs come from config.yml / model_config.yml
+    (see docs/background-points.md). CLI flags override when set.
     """
     from sdm.commands.modelling.train_sdm_models import train_sdm_models
-    import numpy as np
     
     setup_logging(verbose=verbose)
-    
-    # Convert d_max: None means np.inf
-    d_max_value = d_max if d_max is not None else np.inf
     
     train_sdm_models(
         model_config_path=model_config_path,
@@ -381,8 +444,9 @@ def train(
         activity_types=activity_types,
         verbose=verbose,
         d_min=d_min,
-        d_max=d_max_value,
+        d_max=d_max,
         sample_weight_n_neighbors=sample_weight_n_neighbors,
+        n_background_points=n_background_points,
         allow_config_fallback=allow_config_fallback,
         cv_method=cv_method,
         cv_n_folds=cv_n_folds,
@@ -505,7 +569,18 @@ def predict(
     ),
     models_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.models),
-        help="Directory containing trained models.",
+        help=(
+            "Models root or a concrete run folder with model_results.csv. "
+            "Default root uses the newest runs/<id>/ unless --run is set."
+        ),
+    ),
+    run: Optional[str] = typer.Option(
+        None,
+        "--run",
+        help=(
+            "Training run id under <models-dir>/runs/ (unique prefix ok, "
+            "e.g. 20261025T2006). Default: newest run."
+        ),
     ),
     output_dir: Path = typer.Option(
         Path(PROJECT_CONFIG.paths.predictions),
@@ -532,25 +607,73 @@ def predict(
         "--cog/--no-cog",
         help="Emit Cloud Optimized GeoTIFF outputs (default: on).",
     ),
+    publish: bool = typer.Option(
+        False,
+        "--publish/--no-publish",
+        help=(
+            "Also publish each model into a versioned folder under --publish-root "
+            "(prediction__<species>_<behaviour>__<version>__suitability.tif, "
+            "…__threshold_<rule>.tif, …__run.json). Opt-in; refuses overwrite."
+        ),
+    ),
+    publish_root: Optional[str] = typer.Option(
+        None,
+        "--publish-root",
+        help=(
+            "Root for versioned prediction maps (local path or gs://). "
+            "Else PREDICTION_PUBLISH_ROOT, else prediction_publish.root in "
+            "config.yml. Required when --publish is set."
+        ),
+    ),
+    publish_label: Optional[str] = typer.Option(
+        None,
+        "--publish-label",
+        help="Optional label stored in each published run.json.",
+    ),
     verbose: bool = False,
 ) -> None:
-    """Generate model predictions."""
+    """Generate model predictions.
+
+    Without ``--models-dir`` pointing at a concrete run, uses the newest
+    ``runs/<id>/`` under the models root (or ``--run <id|prefix>``).
+    """
     from sdm.commands.modelling.predict_sdm_models import predict_sdm_models
     
     setup_logging(verbose=verbose)
-    
-    predict_sdm_models(
-        ev_path=ev_path,
-        models_dir=models_dir,
-        output_dir=output_dir,
-        boundary_path=boundary_path,
-        species=species,
-        activity_types=activity_types,
-        split_files=split_files,
-        prediction_crs=prediction_crs,
-        write_cog=write_cog,
-        verbose=verbose,
-    )
+
+    try:
+        predict_sdm_models(
+            ev_path=ev_path,
+            models_dir=models_dir,
+            output_dir=output_dir,
+            boundary_path=boundary_path,
+            species=species,
+            activity_types=activity_types,
+            split_files=split_files,
+            prediction_crs=prediction_crs,
+            write_cog=write_cog,
+            publish=publish,
+            publish_root=publish_root,
+            publish_label=publish_label,
+            run=run,
+            verbose=verbose,
+        )
+    except FileNotFoundError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    except FileExistsError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    except ValueError as exc:
+        message = str(exc)
+        if (
+            "publish root is not configured" not in message
+            and "Run prefix" not in message
+            and "--run cannot be combined" not in message
+        ):
+            raise
+        typer.secho(message, err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
     
     logging.info("Predictions generated!")
 
@@ -873,13 +996,48 @@ def tune(
         help="Optuna storage URL for distributed tuning (optional).",
     ),
     verbose: bool = False,
-    n_cv_folds: int = typer.Option(
-        3,
-        help="Number of CV folds for evaluation (reduced from 3 for faster tuning).",
-    ),
     n_jobs: int = typer.Option(
         -1,
         help="Number of parallel trials (None = sequential, >1 = parallel).",
+    ),
+    seed_features: Optional[Path] = typer.Option(
+        None,
+        "--seed-features",
+        help=(
+            "YAML/JSON file mapping model id (species_activity) to a list of layer "
+            "names. Enqueues one starting trial per model with only those layers on "
+            "and default MaxEnt settings. Off by default."
+        ),
+    ),
+    top_candidates: int = typer.Option(
+        10,
+        "--top-candidates",
+        help="Write top_candidates.csv per model with the best N trials (0 = off).",
+    ),
+    tune_presence_fraction: float = typer.Option(
+        1.0,
+        "--tune-presence-fraction",
+        help="Share of presences used for tuning (models with few records keep all; see --tune-min-presence).",
+    ),
+    tune_background_fraction: float = typer.Option(
+        1.0,
+        "--tune-background-fraction",
+        help="Share of background points used for tuning (see --tune-min-background).",
+    ),
+    tune_min_presence: int = typer.Option(
+        100,
+        "--tune-min-presence",
+        help="Never subsample presences below this count.",
+    ),
+    tune_min_background: int = typer.Option(
+        1000,
+        "--tune-min-background",
+        help="Never subsample background points below this count.",
+    ),
+    tune_prune_folds: bool = typer.Option(
+        False,
+        "--tune-prune-folds/--no-tune-prune-folds",
+        help="Report AUC after each fold so Optuna's MedianPruner can stop weak trials early.",
     ),
 ) -> None:
     """Tune hyperparameters for SDM models using Optuna.
@@ -905,8 +1063,14 @@ def tune(
         study_name=study_name,
         storage=storage,
         verbose=verbose,
-        n_cv_folds=n_cv_folds,
         n_jobs=n_jobs,
+        seed_features_path=seed_features,
+        top_candidates=top_candidates,
+        tune_presence_fraction=tune_presence_fraction,
+        tune_background_fraction=tune_background_fraction,
+        tune_min_presence=tune_min_presence,
+        tune_min_background=tune_min_background,
+        tune_prune_folds=tune_prune_folds,
     )
     
     logging.info(f"Tuning complete! Best configs written to {output_dir}")

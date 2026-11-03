@@ -27,6 +27,11 @@ REBUILD_STEPS: tuple[RebuildStep, ...] = (
     RebuildStep("ceh", "generate_ceh_lc_data", "CEH land cover → landcover/"),
     RebuildStep("vom", "generate_vom_data", "Vegetation Object Model → vom/"),
     RebuildStep(
+        "vom_bands",
+        "generate_vom_height_bands",
+        "VOM height bands + woody cover → vom/ (#121)",
+    ),
+    RebuildStep(
         "coastal",
         "generate_coastal_distance",
         "Coastal distance → coastal_distance.tif",
@@ -35,6 +40,11 @@ REBUILD_STEPS: tuple[RebuildStep, ...] = (
         "os",
         "process_os_data",
         "OS Vector Map → os-feature-cover.tif / os-distance-to-feature.tif",
+    ),
+    RebuildStep(
+        "alan",
+        "generate_alan_data",
+        "VIIRS night lights → alan_viirs_radiance.tif (local source; auto-skip if missing)",
     ),
     RebuildStep("merge", "merge_ev_layers", "Merge layers → evs-to-model.tif"),
 )

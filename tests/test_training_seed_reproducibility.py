@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 from shapely.geometry import Point, box
 
-from sdm.commands.modelling.train_sdm_models import (
-    save_run_metadata,
+from sdm.commands.modelling.train_sdm_models import save_run_metadata
+from sdm.models.maxent.training import (
+    summarize_cv_scores as _summarize_cv_scores,
     train_single_model,
-    _summarize_cv_scores,
 )
 from sdm.models.maxent.maxent_model import DefaultMaxentConfig, cross_validate_maxent_model
 from sdm.occurrence.sampling import BackgroundMethod, generate_background_points_from_data
@@ -163,6 +163,7 @@ def test_run_metadata_records_seed(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["seed"] == 42
     assert payload["model_config_path"] == "model_config.yml"
+    assert payload["trainer"] == "maxent"
 
 
 def test_run_metadata_records_fold_method(tmp_path: Path) -> None:

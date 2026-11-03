@@ -1,0 +1,26 @@
+id: terrain_stats_aspect_eastness_slope
+title: Slope-weighted eastness
+kind: derived
+family: terrain_stats
+summary: cos(aspect) weighted by sin(slope); emphasises steep east-facing ground.
+shows:
+- East-facing steepness component
+does_not_show:
+- Unweighted aspect alone
+units: dimensionless
+model_resolution_m: 100.0
+crs: EPSG:27700
+pipeline:
+  rebuild_step: terrain_stats
+  code: sdm/commands/data_preparation/environmental/generate_terrain_stats.py
+derived_from:
+- terrain_dtm
+processing:
+- Computed from the model-grid DTM in process_dem_to_terrain_attributes
+caveats:
+- >-
+  Inherits DTM gaps and coastal / estuary artefacts from terrain_dtm — see parent doc
+references:
+- title: Predictor docs — terrain_dtm
+  url: terrain_dtm.md
+markdown: terrain_stats_aspect_eastness_slope.md

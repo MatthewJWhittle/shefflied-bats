@@ -15,7 +15,7 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 | **Live vs manual** | **7 live clients** (terrain DTM/DSM, VOM, climate/WorldClim, **ONS boundaries**, **OS Vector Map District**, **OS Boundary-Line coastline**). **2 manual big-files** (CEH land cover, BGS GeoCoast optional). ONS + OS VMD + Boundary-Line keep manual drops as fallback. |
 | **Likely broken paths** | **Fixed:** `sdm data` now passes explicit `.tif` paths via `build_ev_dataset_inputs`. OS raw path aligned to **`os-vector-map`** (README + `load_os_shps`); parquet cache stays **`data/processed/os-data`**. **Open:** climate **`run_stats=False`** in pipeline but `variables_config.yml` expects `climate_stats_*` bands. |
 | **Orphans** | `ImageTileDownloader`, Sentinel/GEE helpers, legacy `merge_environmental_layers`, duplicate `ceh_processing.py` — not wired to CLI data-prep. |
-| **tilearray** | Not present in this repo. Custom `WCSDownloader` (async tiled WCS 2.0.1) covers the same surface area as a future **tilearray** integration for EA LiDAR/VOM WCS (and potentially WMS/WMTS elsewhere). |
+| **tilearray** | **Wired** for whole-AOI EA WCS mosaics (terrain DTM/DSM + VOM height summary) via `sdm.data.wcs_tilearray` (`create_array` + `compute_with_policy`, AIMD + 403 breaker). Legacy `WCSDownloader` remains for per-tile walkers and #79 mosaic-gap unit tests. |
 
 ---
 
@@ -45,7 +45,7 @@ Audit of environmental-variable and spatial data-prep clients in **sheffield-bat
 
 | Client | CLI | Data source | Implementation | Live API vs manual | Public API feasibility | Tests | Risks |
 |--------|-----|-------------|----------------|--------------------|-------------------------|-------|-------|
-| **Study boundary** | `sdm setup` | ONS BDY_CTYUA counties GeoJSON | **Implemented** — filters Yorkshire CTYUA names, dissolve, simplify | **Live** — FeatureServer fetch to `data/raw/ons-boundaries/`; **manual fallback** — May 2023 GeoJSON under `data/raw/big-files/` | [ONS Open Geography Portal](https://geoportal.statistics.gov.uk/) — December 2024 BFC FeatureServer (no auth) | `tests/test_boundary_simple.py`, `tests/test_ons_download.py` | CTYUA column varies by vintage (`CTYUA24NM` vs `CTYUA23NM`); legacy manual path still honoured |
+| **Study boundary** | `sdm setup` | ONS BDY_CTYUA counties GeoJSON (BFC / coastline-clipped) | **Implemented** — filter CTYUA names, dissolve, simplify; buffer by `study_area_buffer` then `gpd.clip` to ONS land so sea / estuary lobes are dropped (#78) | **Live** — FeatureServer fetch to `data/raw/ons-boundaries/`; **manual fallback** — May 2023 GeoJSON under `data/raw/big-files/` | [ONS Open Geography Portal](https://geoportal.statistics.gov.uk/) — December 2024 BFC FeatureServer (no auth) | `tests/test_boundary_simple.py`, `tests/test_ons_download.py` | CTYUA column varies by vintage (`CTYUA24NM` vs `CTYUA23NM`); legacy manual path still honoured; prefer full-UK BFC cache so inland buffers into neighbouring authorities are retained |
 | **Background points** | `sdm background` | Bat occurrence GeoJSON + boundary | **Implemented** — density-smoothed sampling | N/A (derived) | N/A | `tests/test_generate_background_points.py`, `tests/test_sampling.py` | Depends on `paths.occurence_data` and boundary; not an external download client |
 
 ### Environmental variables (EV pipeline)
@@ -104,14 +104,16 @@ Live caches (auto-created): `data/raw/worldclim/`, `data/raw/boundary-line/`, `d
 
 ---
 
-## tilearray overlap (future — not implemented)
+## tilearray overlap
 
-| Current client | Protocol | tilearray opportunity |
-|----------------|----------|------------------------|
-| `WCSDownloader` (terrain, VOM) | WCS 2.0.1 GetCoverage, custom async tiling | Replace bespoke tiling with tilearray WCS backend; shared retry/cache policy |
-| `ClimateData` | Direct GeoTIFF URL | Could stay as-is or use generic HTTP tile fetch |
-| `ImageTileDownloader` | REST `exportImage` bbox tiles | Closest existing pattern to WMS-like tile arrays; candidate to consolidate under tilearray |
-| CEH / OS / BGS | Manual bulk | WMS/WMTS/WCS from Defra/CEH/OS Data Hub **if** licences and endpoints allow — would need new clients |
+| Client | Protocol | Status |
+|--------|----------|--------|
+| Terrain DTM/DSM (`generate_terrain_data`) | EA WCS 2.0.1 | **Uses** `fetch_wcs_dataset` / `WCSConfig.for_ea_dsp` |
+| VOM height summary (`generate_vom_data`) | EA WCS 2.0.1 | **Uses** `fetch_wcs_dataset` |
+| `WCSDownloader` | Custom async tile mosaic | Kept for per-tile control + #79 gap tests; not the default whole-AOI path |
+| `ClimateData` | Direct GeoTIFF URL | Out of scope (not WCS/tilearray) |
+| `ImageTileDownloader` | REST `exportImage` | Orphan; possible later WMS-like consolidation |
+| CEH / OS / BGS | Manual bulk | No tilearray WCS path without new licensed endpoints |
 
 ---
 

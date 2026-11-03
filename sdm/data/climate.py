@@ -9,6 +9,10 @@ import xarray as xr
 import geopandas as gpd
 
 from sdm.raster.utils import reproject_data
+from sdm.raster.layer_qa import (
+    DEFAULT_NODATA_FILL_MAX_CELLS,
+    fill_xarray_nodata_nearest,
+)
 
 from .loaders import ClimateData
 
@@ -38,19 +42,31 @@ def reproject_climate_datasets(
     target_resolution: float,
     *,
     target_bounds: tuple,
+    fill_edge_nodata_cells: float | None = DEFAULT_NODATA_FILL_MAX_CELLS,
 ) -> Dict[str, xr.DataArray]:
-    """Reproject climate datasets to target CRS and resolution."""
+    """Reproject climate datasets to target CRS and resolution.
+
+    After reproject, optionally fill a thin nodata fringe from nearest valid
+    cells (issue #74). Distance is capped so multi-km sea / coverage holes
+    stay empty — those need the land-clip (#78), not unbounded fill.
+    """
     reprojected = {}
     
     for var, data in datasets.items():
         try:
-            reprojected[var] = reproject_data(
+            layer = reproject_data(
                 data,
                 crs=target_crs,
                 transform=target_transform,
                 resolution=target_resolution,
                 bounds=target_bounds,
             )
+            if fill_edge_nodata_cells is not None:
+                layer = fill_xarray_nodata_nearest(
+                    layer,
+                    max_search_distance_cells=fill_edge_nodata_cells,
+                )
+            reprojected[var] = layer
         except Exception as e:
             print(f"Error reprojecting {var}: {e}")
             continue

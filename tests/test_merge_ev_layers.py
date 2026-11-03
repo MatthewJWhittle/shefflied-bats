@@ -23,16 +23,18 @@ class TestBuildEvDatasetInputs:
         inputs = build_ev_dataset_inputs(evs_dir, resolution=100)
         parsed = parse_dataset_input(inputs)
 
-        assert len(parsed) == 9
+        assert len(parsed) == 10
         assert "ceh_landcover" in parsed
         assert "bgs_coast" in parsed
         assert "terrain" in parsed
         assert "climate_stats" in parsed
         assert "climate_bioclim" in parsed
+        assert "alan_viirs_radiance" in parsed
         assert parsed["vom_vegetation_height"] == (
             evs_dir / "vom" / "vom_summary_metrics_100m.tif"
         )
         assert parsed["terrain"] == evs_dir / "terrain" / "dtm_dsm_100m.tif"
+        assert parsed["alan_viirs_radiance"] == evs_dir / "alan_viirs_radiance.tif"
 
     def test_build_ev_dataset_inputs_skip_ceh_and_coastal(self):
         evs_dir = Path("data/evs")
@@ -40,11 +42,12 @@ class TestBuildEvDatasetInputs:
             evs_dir, resolution=100, skip_ceh=True, skip_coastal=True
         )
         parsed = parse_dataset_input(inputs)
-        assert len(parsed) == 7
+        assert len(parsed) == 8
         assert "ceh_landcover" not in parsed
         assert "bgs_coast" not in parsed
         assert "landcover" not in parsed
         assert "coastal" not in parsed
+        assert "alan_viirs_radiance" in parsed
         for name, path in parsed.items():
             assert path.suffix == ".tif", f"{name} should point to a GeoTIFF, got {path}"
 
@@ -52,6 +55,13 @@ class TestBuildEvDatasetInputs:
             evs_dir / "vom" / "vom_summary_metrics_100m.tif"
         )
         assert parsed["climate_bioclim"] == evs_dir / "climate" / "bio.tif"
+
+    def test_build_ev_dataset_inputs_skip_alan(self):
+        evs_dir = Path("data/evs")
+        inputs = build_ev_dataset_inputs(evs_dir, resolution=100, skip_alan=True)
+        parsed = parse_dataset_input(inputs)
+        assert "alan_viirs_radiance" not in parsed
+        assert len(parsed) == 9
 
 
 class TestParseDatasetInput:
@@ -276,8 +286,8 @@ class TestMergeGridMatchesRelease:
         floored_ymin = raw[1] - (raw[1] % resolution)
         assert snapped[0] != floored_xmin or snapped[1] != floored_ymin
 
-    def test_rebuild_passes_study_area_buffer_to_merge(self, tmp_path, monkeypatch):
-        """Merge inside sdm data must use the 7 km study-area buffer, not 0."""
+    def test_rebuild_passes_buffer_distance_to_merge(self, tmp_path, monkeypatch):
+        """Merge inside sdm data forwards buffer_distance_m (normally 0 after setup)."""
         from sdm.commands.data_preparation import rebuild_ev_layers as mod
 
         boundary = tmp_path / "boundary.geojson"
@@ -301,8 +311,10 @@ class TestMergeGridMatchesRelease:
             "generate_climate_data",
             "generate_ceh_lc_data",
             "generate_vom_data",
+            "generate_vom_height_bands",
             "generate_coastal_distance",
             "process_os_data",
+            "generate_alan_data",
         ):
             monkeypatch.setattr(mod, name, _ok)
         monkeypatch.setattr(mod, "merge_ev_layers", _merge)
@@ -325,10 +337,67 @@ class TestMergeGridMatchesRelease:
             out,
             boundary_path=boundary,
             resolution=100,
-            buffer_distance_m=7000,
+            buffer_distance_m=0,
             only=["merge"],
+            alan_source_path=tmp_path / "no-viirs.tif",
         )
-        assert captured.get("boundary_buffer_m") == 7000
+        assert captured.get("boundary_buffer_m") == 0
+
+    def test_rebuild_default_buffer_is_zero(self, tmp_path, monkeypatch):
+        """Default rebuild buffer is 0; modelling buffer is baked in at setup."""
+        from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+        boundary = tmp_path / "boundary.geojson"
+        boundary.write_text(
+            '{"type":"FeatureCollection","features":[]}',
+            encoding="utf-8",
+        )
+        out = tmp_path / "evs-rebuild"
+        captured: dict = {}
+
+        def _merge(*_args, **kwargs):
+            captured.update(kwargs)
+
+        def _ok(*_args, **_kwargs):
+            return out
+
+        monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+        for name in (
+            "generate_terrain_data",
+            "generate_terrain_stats",
+            "generate_climate_data",
+            "generate_ceh_lc_data",
+            "generate_vom_data",
+            "generate_vom_height_bands",
+            "generate_coastal_distance",
+            "process_os_data",
+            "generate_alan_data",
+        ):
+            monkeypatch.setattr(mod, name, _ok)
+        monkeypatch.setattr(mod, "merge_ev_layers", _merge)
+        monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: ["x=y.tif"])
+        stub_settings = {
+            "layer_clipping": {"enabled": True, "layers": {}, "applied": {}}
+        }
+        monkeypatch.setattr(
+            mod,
+            "build_model_ev_stack",
+            lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+        )
+        monkeypatch.setattr(
+            mod, "build_settings_from_config", lambda *_a, **_k: stub_settings
+        )
+        monkeypatch.setattr(mod, "load_config", lambda: {})
+        monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+        mod.rebuild_environmental_layers(
+            out,
+            boundary_path=boundary,
+            resolution=100,
+            only=["merge"],
+            alan_source_path=tmp_path / "no-viirs.tif",
+        )
+        assert captured.get("boundary_buffer_m") == 0
 
 
 class TestReprojectMatchesTemplate:

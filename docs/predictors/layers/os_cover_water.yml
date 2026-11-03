@@ -1,0 +1,28 @@
+id: os_cover_water
+title: Water feature cover
+kind: source
+family: os
+summary: |
+  Percentage of each 100 m cell covered by Ordnance Survey Vector Map District water features.
+shows:
+- In-cell water polygon cover (%) from OS VMD Water
+does_not_show:
+- Water quality, flow, or permanence beyond the OS mapping
+- Small drains absent from VMD
+units: percent
+model_resolution_m: 100
+crs: EPSG:27700
+source_id: os_vector_map_district
+pipeline:
+  rebuild_step: os
+  code: sdm/commands/data_preparation/processing/process_os_data.py
+processing:
+- Vector water features rasterised to cell cover on the model grid
+caveats:
+- >-
+  Sea / estuary inside a buffered study boundary inflates water cover in QA aggregates
+- Generalised VMD geometry omits many fine watercourses
+references:
+- title: OS VectorMap District
+  url: https://osdatahub.os.uk/downloads/open/VectorMapDistrict
+markdown: os_cover_water.md

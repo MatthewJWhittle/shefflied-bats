@@ -1,0 +1,31 @@
+id: climate_bioclim_bio_2
+title: Mean diurnal temperature range (BIO2)
+kind: source
+family: climate
+summary: |
+  WorldClim bioclimatic variable BIO2 — mean of monthly (max temperature − min temperature) — on the model grid.
+shows:
+- Typical day–night temperature range (°C) in the WorldClim normal
+does_not_show:
+- Extreme single-day ranges
+- Year-specific heatwaves or cold snaps
+units: degrees_C
+native_resolution_m: 1000
+model_resolution_m: 100
+crs: EPSG:27700
+temporal:
+  label: WorldClim 2.1 1970–2000 normals
+source_id: worldclim_2_1
+pipeline:
+  rebuild_step: climate
+  code: sdm/commands/data_preparation/environmental/generate_climate_data.py
+processing:
+- BIO stack downloaded and reprojected to the model grid
+- Band renamed to climate_bioclim_bio_2 at merge / canonicalize
+caveats:
+- Same licence and temporal limits as other WorldClim layers
+- Upsampled from ~30 arc-sec; cell-to-cell detail at 100 m is not native
+references:
+- title: WorldClim bioclimatic variables
+  url: https://www.worldclim.org/data/bioclim.html
+markdown: climate_bioclim_bio_2.md

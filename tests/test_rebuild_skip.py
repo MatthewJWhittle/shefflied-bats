@@ -35,9 +35,176 @@ def test_resolve_active_steps_skip_and_only() -> None:
     assert "ceh" not in active
     assert "coastal" not in active
     assert "merge" in active
+    assert "alan" in active
     assert resolve_active_steps(only=["merge"]) == frozenset({"merge"})
+    assert resolve_active_steps(only=["alan"]) == frozenset({"alan"})
     with pytest.raises(ValueError, match="only one"):
         resolve_active_steps(skip=["ceh"], only=["merge"])
+
+
+def test_rebuild_alan_auto_skips_without_source(tmp_path, monkeypatch):
+    """Missing VIIRS source skips alan and omits it from merge inputs."""
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "evs-rebuild"
+    captured_inputs: dict = {}
+    alan_calls: list = []
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    def _alan(*_args, **_kwargs):
+        alan_calls.append(True)
+        return out / "alan_viirs_radiance.tif"
+
+    def _capture_inputs(*args, **kwargs):
+        captured_inputs["kwargs"] = kwargs
+        return ["terrain=x.tif"]
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    for name in (
+        "generate_terrain_data",
+        "generate_terrain_stats",
+        "generate_climate_data",
+        "generate_ceh_lc_data",
+        "generate_vom_data",
+        "generate_vom_height_bands",
+        "generate_coastal_distance",
+        "process_os_data",
+        "merge_ev_layers",
+    ):
+        monkeypatch.setattr(mod, name, _ok)
+    monkeypatch.setattr(mod, "generate_alan_data", _alan)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", _capture_inputs)
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+
+    missing = tmp_path / "no-viirs.tif"
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        alan_source_path=missing,
+    )
+    assert alan_calls == []
+    assert captured_inputs.get("kwargs", {}).get("skip_alan") is True
+
+
+def test_rebuild_alan_uses_bucket_when_local_missing(tmp_path, monkeypatch):
+    """``sdm data`` must reach bucket fallback — not gate on Path.exists() alone."""
+    from sdm.commands.data_preparation import rebuild_ev_layers as mod
+    from sdm.data.alan import DEFAULT_ALAN_SOURCE_URI
+
+    boundary = tmp_path / "boundary.geojson"
+    boundary.write_text(
+        '{"type":"FeatureCollection","features":[]}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "evs-rebuild"
+    alan_kwargs: dict = {}
+
+    def _ok(*_args, **_kwargs):
+        return out
+
+    def _alan(*_args, **kwargs):
+        alan_kwargs.update(kwargs)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / "alan_viirs_radiance.tif"
+        path.write_bytes(b"alan")
+        return path
+
+    monkeypatch.setattr(mod, "validate_ev_output_dir", lambda *a, **k: Path(out))
+    for name in (
+        "generate_terrain_data",
+        "generate_terrain_stats",
+        "generate_climate_data",
+        "generate_ceh_lc_data",
+        "generate_vom_data",
+        "generate_vom_height_bands",
+        "generate_coastal_distance",
+        "process_os_data",
+        "merge_ev_layers",
+    ):
+        monkeypatch.setattr(mod, name, _ok)
+    monkeypatch.setattr(mod, "generate_alan_data", _alan)
+    monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: ["terrain=x.tif"])
+    stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
+    monkeypatch.setattr(
+        mod,
+        "build_model_ev_stack",
+        lambda *_a, **_k: (out / "evs-to-model.tif", stub_settings),
+    )
+    monkeypatch.setattr(mod, "build_settings_from_config", lambda *_a, **_k: stub_settings)
+    monkeypatch.setattr(mod, "load_config", lambda: {})
+    monkeypatch.setattr(mod, "collect_rebuild_provenance", lambda **_k: {})
+    monkeypatch.setattr(
+        mod,
+        "resolve_alan_source_uri",
+        lambda override=None: DEFAULT_ALAN_SOURCE_URI,
+    )
+    monkeypatch.setattr(mod, "resolve_alan_cf_cvg_uri", lambda *a, **k: None)
+
+    mod.rebuild_environmental_layers(
+        out,
+        boundary_path=boundary,
+        resolution=100,
+        only=["alan"],
+        config_ev_tiff=tmp_path / "missing-stack.tif",
+    )
+    assert alan_kwargs.get("alan_source_path") == DEFAULT_ALAN_SOURCE_URI
+    assert alan_kwargs.get("template_raster") == tmp_path / "missing-stack.tif"
+
+
+def test_cli_alan_source_path_flag_reaches_rebuild(tmp_path: Path) -> None:
+    out = tmp_path / "safe"
+    captured: dict = {}
+
+    def _stub(output_dir, **kwargs):  # type: ignore[no-untyped-def]
+        captured["kwargs"] = kwargs
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        return Path(output_dir)
+
+    runner = CliRunner()
+    with patch(
+        "sdm.commands.data_preparation.rebuild_ev_layers.rebuild_environmental_layers",
+        _stub,
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "data",
+                "--output-dir",
+                str(out),
+                "--only",
+                "alan",
+                "--alan-source-path",
+                "gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_annual.tif",
+                "--alan-cf-cvg-path",
+                "/tmp/viirs_cf_cvg.tif",
+                "--alan-template-raster",
+                "/tmp/evs-to-model.tif",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        captured["kwargs"]["alan_source_path"]
+        == "gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_annual.tif"
+    )
+    assert captured["kwargs"]["alan_cf_cvg_path"] == "/tmp/viirs_cf_cvg.tif"
+    assert captured["kwargs"]["alan_template_raster"] == "/tmp/evs-to-model.tif"
 
 
 def test_cli_skip_ceh_coastal_reaches_rebuild(tmp_path: Path) -> None:
@@ -149,8 +316,10 @@ def test_rebuild_only_merge_uses_existing_ceh_and_coastal(tmp_path, monkeypatch)
         "generate_climate_data",
         "generate_ceh_lc_data",
         "generate_vom_data",
+        "generate_vom_height_bands",
         "generate_coastal_distance",
         "process_os_data",
+        "generate_alan_data",
         "merge_ev_layers",
     ):
         monkeypatch.setattr(mod, name, _ok)
@@ -170,6 +339,7 @@ def test_rebuild_only_merge_uses_existing_ceh_and_coastal(tmp_path, monkeypatch)
         boundary_path=boundary,
         resolution=100,
         only=["merge"],
+        alan_source_path=tmp_path / "no-viirs.tif",
     )
 
     kwargs = captured_inputs.get("kwargs", {})
@@ -207,8 +377,10 @@ def test_rebuild_explicit_skip_still_omits_ceh_from_merge(tmp_path, monkeypatch)
         "generate_climate_data",
         "generate_ceh_lc_data",
         "generate_vom_data",
+        "generate_vom_height_bands",
         "generate_coastal_distance",
         "process_os_data",
+        "generate_alan_data",
         "merge_ev_layers",
     ):
         monkeypatch.setattr(mod, name, _ok)
@@ -228,6 +400,7 @@ def test_rebuild_explicit_skip_still_omits_ceh_from_merge(tmp_path, monkeypatch)
         boundary_path=boundary,
         resolution=100,
         skip=["ceh", "coastal"],
+        alan_source_path=tmp_path / "no-viirs.tif",
     )
     kwargs = captured_inputs.get("kwargs", {})
     assert kwargs.get("skip_ceh") is True
@@ -255,8 +428,10 @@ def test_rebuild_only_step_skips_model_stack(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "generate_terrain_stats", _ok)
     monkeypatch.setattr(mod, "generate_ceh_lc_data", _ok)
     monkeypatch.setattr(mod, "generate_vom_data", _ok)
+    monkeypatch.setattr(mod, "generate_vom_height_bands", _ok)
     monkeypatch.setattr(mod, "generate_coastal_distance", _ok)
     monkeypatch.setattr(mod, "process_os_data", _ok)
+    monkeypatch.setattr(mod, "generate_alan_data", _ok)
     monkeypatch.setattr(mod, "merge_ev_layers", _ok)
     monkeypatch.setattr(mod, "build_ev_dataset_inputs", lambda *a, **k: [])
     stub_settings = {"layer_clipping": {"enabled": True, "layers": {}, "applied": {}}}
@@ -275,6 +450,7 @@ def test_rebuild_only_step_skips_model_stack(tmp_path, monkeypatch):
         boundary_path=boundary,
         resolution=100,
         only=["climate"],
+        alan_source_path=tmp_path / "no-viirs.tif",
     )
     assert stack_calls == [], "model stack must not run when merge was not selected"
 
@@ -342,7 +518,9 @@ def test_rebuild_passes_coastline_path_to_coastal_step(tmp_path, monkeypatch):
         "generate_climate_data",
         "generate_ceh_lc_data",
         "generate_vom_data",
+        "generate_vom_height_bands",
         "process_os_data",
+        "generate_alan_data",
         "merge_ev_layers",
     ):
         monkeypatch.setattr(mod, name, _ok)
@@ -363,5 +541,6 @@ def test_rebuild_passes_coastline_path_to_coastal_step(tmp_path, monkeypatch):
         resolution=100,
         only=["coastal"],
         coastline_path=coast,
+        alan_source_path=tmp_path / "no-viirs.tif",
     )
     assert captured.get("coastline_path") == coast

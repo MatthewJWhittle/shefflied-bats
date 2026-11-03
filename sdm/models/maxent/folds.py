@@ -272,6 +272,20 @@ def _iter_kmeans_splits(
         yield fold_id, np.asarray(train_idx), np.asarray(test_idx)
 
 
+def splits_from_labels(
+    labels: np.ndarray,
+) -> Iterator[tuple[int, np.ndarray, np.ndarray]]:
+    """Yield ``(fold_id, train_idx, test_idx)`` from one fold label per row.
+
+    Rows labelled ``-1`` are never held out. Used by block CV in training and
+    by tuning, which fixes labels once and reuses them on a subsample.
+    """
+    labels = np.asarray(labels)
+    indices = np.arange(len(labels))
+    for fold_id in np.unique(labels[labels >= 0]):
+        yield int(fold_id), indices[labels != fold_id], indices[labels == fold_id]
+
+
 def _iter_block_splits(
     gdf: gpd.GeoDataFrame,
     params: FoldParams,
@@ -283,11 +297,7 @@ def _iter_block_splits(
         n_tries=params.block_n_tries,
         random_state=params.random_state,
     )
-    indices = np.arange(len(gdf))
-    for fold_id in range(params.n_folds):
-        test_idx = indices[labels == fold_id]
-        train_idx = indices[labels != fold_id]
-        yield fold_id, train_idx, test_idx
+    yield from splits_from_labels(labels)
 
 
 def _iter_buffered_loo_splits(

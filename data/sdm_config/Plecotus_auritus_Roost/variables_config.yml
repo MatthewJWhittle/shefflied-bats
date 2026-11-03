@@ -11,15 +11,18 @@
 #   highest, which tracks where surveys happen rather than where bats roost.
 # - ceh_landcover_urban_500m: overlaps urban cover within 1.5 km (r = 0.87),
 #   the scale at which avoidance of built-up land has been measured.
-# - ceh_landcover_suburban_500m: overlaps in-cell building cover (r = 0.81);
-#   urban cover within 1.5 km covers the landscape-scale urban effect.
+#
+# One-change restore (1 Nov 2026) — reason before the edit:
+# - ceh_landcover_suburban_500m: put back. Specialists avoid small towns /
+#   suburban fabric at this neighbourhood scale; Sep25-on-main SHAP showed a
+#   falling response at 6.9% mean |SHAP| (see store docs/ble-roost-shap-
+#   sep25-vs-main.md). The earlier drop treated it as redundant with
+#   buildings + urban 1.5 km; this restore tests the neighbourhood-scale
+#   avoidance signal alone (no other layer changes).
 #
 # Layers added:
-# - os_distance_distance_to_woodland (#39): distance to nearest woodland edge
-#   from OS Vector Map District. Swapped in for broadleaved woodland cover
-#   within 500 m for the one-change roost experiment (closer UK studies point
-#   to edge distance; see issue #39). If the response curve or hotspot checks
-#   fail, roll back to ceh_landcover_broadleaved_woodland_500m.
+# - ceh_landcover_broadleaved_woodland_500m: roosts sit close to broadleaved
+#   woodland (Boughey et al. 2011; Bellamy & Altringham 2015).
 # - ceh_landcover_urban_1500m: avoidance of built-up land around roosts,
 #   at the 1.5 km scale used by Bellamy & Altringham 2015.
 # - vom_vegetation_height_std (put back): variability of vegetation height,
@@ -28,16 +31,33 @@
 #   Pearson 0.87) but adds edge structure. Putting it back raised held-out
 #   AUC on all four seeds and kept urban hotspot counts close to the
 #   11-layer set.
+# ALAN (`alan_viirs_radiance`, #37) is not enabled here yet — species
+# wiring is a separate second pass (Matt, 24 Oct 2026).
+#
+# One-change VOM swap (issue #121) — reason before the edit:
+# - Drop vom_vegetation_height_mean and vom_vegetation_height_std together.
+#   They are the correlated vegetation-height pair (Spearman ≈ 0.99) that
+#   blocked finishing this model; mean’s falling SHAP was largely a
+#   collinearity correction for rising std (see store wrong-direction note).
+# - Add vom_canopy_height_std + vom_woody_cover_share_500m from the #121
+#   rebuild (canopy structure + woody cover in/near the cell). Height-band
+#   shares stay in the EV stack for other models / maps but are not in this
+#   BLE list: box @ Sep25 (seed 42, 10 km×5) gave Sep25 0.899; SD+woody
+#   0.893; +gt15 m 0.892 with a falling curve; +5–15 m 0.893 — so tall /
+#   mid bands add nothing useful here. Hedges / woodland-TOW labelling
+#   left out on purpose.
+# Product review: https://github.com/MatthewJWhittle/shefflied-bats/issues/121
 variables:
 - os_distance_distance_to_minor_roads
 - terrain_stats_slope
 - os_distance_distance_to_major_roads
 - ceh_landcover_arable_1000m
-- vom_vegetation_height_mean
 - os_cover_buildings
 - ceh_landcover_grassland_1000m
 - climate_bioclim_bio_2
 - climate_stats_temp_ann_avg
-- os_distance_distance_to_woodland
+- ceh_landcover_broadleaved_woodland_500m
 - ceh_landcover_urban_1500m
-- vom_vegetation_height_std  # canopy structural variability: edges, tree-shrub mix
+- ceh_landcover_suburban_500m  # neighbourhood-scale avoidance of small-town / suburban fabric
+- vom_canopy_height_std  # #121: canopy structural variability (replaces mean+std pair)
+- vom_woody_cover_share_500m  # #121: woody cover in/near cell

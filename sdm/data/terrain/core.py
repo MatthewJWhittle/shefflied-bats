@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 import requests
 import aiohttp
 
+import numpy as np
 import xarray as xr
 import rioxarray as rxr
 
@@ -79,6 +80,66 @@ class WCSDownloader:
         srs_name = envelope.attrib.get("srsName", "")
         return axis_str.split(), srs_name
         
+    @staticmethod
+    def _failed_tile_message(
+        tiles: List[Tuple[float, float, float, float]],
+        results: List[Union[Optional[str], Optional[bytes]]],
+    ) -> str:
+        """Describe tiles that returned no data (for the incomplete-mosaic error)."""
+        failed = [tile for tile, result in zip(tiles, results) if result is None]
+        preview = ", ".join(repr(tile) for tile in failed[:5])
+        if len(failed) > 5:
+            preview = f"{preview}, ..."
+        return (
+            f"WCS download incomplete: {len(failed)} of {len(tiles)} tiles "
+            f"missing (refusing mosaic with coverage gaps). Failed tiles: "
+            f"{preview}"
+        )
+
+    def _assert_mosaic_covers_tiles(
+        self,
+        merged: xr.Dataset,
+        tiles: List[Tuple[float, float, float, float]],
+        bbox: Tuple[float, float, float, float],
+    ) -> None:
+        """Fail if any requested tile left an empty hole inside the AOI.
+
+        ``open_mfdataset`` keeps full bounds when edge tiles remain, so a
+        dropped north-east tile shows up as a nodata block rather than a
+        shrunk extent (#79). Require at least one finite pixel in each
+        tile∩request overlap (centre sampling would false-fail coastal
+        tiles whose centre sits on water nodata).
+        """
+        da = merged[self.coverage_id]
+        if "band" in da.dims:
+            da = da.isel(band=0)
+        req_minx, req_miny, req_maxx, req_maxy = bbox
+        empty: List[Tuple[float, float, float, float]] = []
+        for tile in tiles:
+            minx, miny, maxx, maxy = tile
+            inter_minx = max(minx, req_minx)
+            inter_miny = max(miny, req_miny)
+            inter_maxx = min(maxx, req_maxx)
+            inter_maxy = min(maxy, req_maxy)
+            if inter_minx >= inter_maxx or inter_miny >= inter_maxy:
+                continue
+            in_overlap = (
+                (da.x >= inter_minx)
+                & (da.x <= inter_maxx)
+                & (da.y >= inter_miny)
+                & (da.y <= inter_maxy)
+            )
+            if not np.isfinite(da.where(in_overlap).values).any():
+                empty.append(tile)
+        if empty:
+            preview = ", ".join(repr(tile) for tile in empty[:5])
+            if len(empty) > 5:
+                preview = f"{preview}, ..."
+            raise ValueError(
+                f"WCS mosaic has nodata holes in {len(empty)} tile(s) inside "
+                f"the request bbox (refusing coverage gaps): {preview}"
+            )
+
     async def get_coverage(
         self,
         bbox: Tuple[float, float, float, float],
@@ -99,36 +160,38 @@ class WCSDownloader:
                     task = self._download_tile(session, tile_bbox, resolution)
                     tasks.append(task)
                 
-                # Process tiles in batches
-                results = []
+                # Keep results aligned with ``tiles``. Silently dropping
+                # ``None`` left nodata blocks (notably the north-east) while
+                # mosaic bounds still covered the study area (#79).
+                results: List[Union[Optional[str], Optional[bytes]]] = []
                 for i in range(0, len(tasks), max_concurrent):
                     batch = tasks[i:i + max_concurrent]
                     batch_results = await asyncio.gather(*batch)
-                    results.extend([r for r in batch_results if r is not None])
-            
-            # Merge tiles using the same approach as old implementation
-            if results:
-                if self.use_temp_storage:
-                    # Use xarray.open_mfdataset for disk-based merging.
-                    # Load before finally deletes tile_*.tif — callers need a
-                    # concrete array, not a lazy view of removed paths.
-                    merged = xr.open_mfdataset(
-                        results,
-                        engine="rasterio",
-                        chunks={"x": self.tile_width, "y": self.tile_height},
-                    )
-                    merged = merged.rename({"band_data": self.coverage_id}).load()
-                else:
-                    # Merge arrays in memory - results are bytes that need to be converted to xarray
-                    arrays = []
-                    for data in results:
-                        if data is not None:  # Skip None results
-                            arr = self._bytes_to_xarray(data)
-                            arrays.append(arr.rename(self.coverage_id))
-                    merged = xr.merge(arrays)
-                return merged
+                    results.extend(batch_results)
+
+            if any(result is None for result in results):
+                raise ValueError(self._failed_tile_message(tiles, results))
+
+            if self.use_temp_storage:
+                # Use xarray.open_mfdataset for disk-based merging.
+                # Load before finally deletes tile_*.tif — callers need a
+                # concrete array, not a lazy view of removed paths.
+                merged = xr.open_mfdataset(
+                    results,
+                    engine="rasterio",
+                    chunks={"x": self.tile_width, "y": self.tile_height},
+                )
+                merged = merged.rename({"band_data": self.coverage_id}).load()
             else:
-                raise ValueError("No valid tiles were downloaded")
+                arrays = [
+                    self._bytes_to_xarray(data).rename(self.coverage_id)
+                    for data in results
+                    if data is not None
+                ]
+                merged = xr.merge(arrays)
+
+            self._assert_mosaic_covers_tiles(merged, tiles, bbox)
+            return merged
                 
         finally:
             if self.use_temp_storage and self.temp_dir:
@@ -195,7 +258,12 @@ class WCSDownloader:
                         return None
                     
                     if self.use_temp_storage and self.temp_dir:
-                        temp_file = self.temp_dir / f"tile_{hash(str(tile_bbox))}.tif"
+                        # Stable names (not hash) so collisions cannot overwrite
+                        # a neighbouring tile and leave a silent coverage gap.
+                        temp_file = (
+                            self.temp_dir
+                            / f"tile_{int(minx)}_{int(miny)}_{int(maxx)}_{int(maxy)}.tif"
+                        )
                         with open(temp_file, "wb") as f:
                             f.write(data)
                         return str(temp_file)

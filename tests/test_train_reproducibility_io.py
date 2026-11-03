@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 from shapely.geometry import Point
 
-from sdm.commands.modelling.train_sdm_models import (
-    _summarize_cv_scores,
-    save_models,
+from sdm.commands.modelling.train_sdm_models import save_models
+from sdm.models.maxent.training import (
+    summarize_cv_scores as _summarize_cv_scores,
     train_single_model,
 )
 from sdm.models.maxent.maxent_model import DefaultMaxentConfig
