@@ -11,13 +11,13 @@ from shapely.geometry import Point
 
 # Import functions directly to avoid importing TrainingSetup which may have dependencies
 from sdm.commands.modelling.train_sdm_models import (
-    _summarize_cv_scores,
     apply_sample_weights,
     drop_duplicate_grid_points,
     generate_training_data,
     get_species_presence_data,
     prepare_species_training_data,
 )
+from sdm.models.maxent.training import summarize_cv_scores as _summarize_cv_scores
 from sdm.models.maxent.maxent_model import ActivityType, DefaultMaxentConfig
 
 

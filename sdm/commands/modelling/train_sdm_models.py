@@ -12,24 +12,18 @@ import math
 import os
 import pickle
 import tempfile
-from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import datetime
 from itertools import product
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TypeVar, cast, Any, Any
-from concurrent.futures import ProcessPoolExecutor
+from typing import Dict, List, Optional, Tuple, TypeVar, cast, Any
 
 import geopandas as gpd
-import mlflow
 import numpy as np
 import pandas as pd
 import xarray as xr
-from mlflow.sklearn import log_model
-from sklearn.metrics import roc_auc_score
-from tqdm import tqdm
 import elapid as ela
-from shapely import distance
+from scipy.spatial import cKDTree
+from tqdm import tqdm
 import topojson as tp
 
 from sdm.data.loaders.vector import load_bat_data, load_background_points
@@ -38,16 +32,18 @@ from sdm.models.maxent.maxent_model import (
     ActivityType,
     DefaultMaxentConfig,
     MaxentConfig,
-    create_maxent_pipeline,
-    evaluate_and_train_maxent_model,
 )
 from sdm.occurrence.sampling import (
     generate_background_points_from_data,
     BackgroundMethod,
     TransformMethod,
 )
+from sdm.occurrence.background_settings import (
+    BackgroundSurface,
+    ResolvedBackgroundSettings,
+    resolve_background_settings,
+)
 from sdm.raster.io import load_environmental_variables
-from sdm.utils.rng import apply_training_seed
 from sdm.utils.io import (
     load_project_config,
     load_model_config,
@@ -68,23 +64,19 @@ from sdm.types import (
     TrainingResults,
     ProjectConfig,
     VariablesConfig,
-    ModelConfig,
-    BackgroundConfig,
-    SamplingConfig,
-    CvConfig,
 )
 from sdm.commands.modelling.utils import get_model_id
+from sdm.models.adapters import ModelAdapter, get_adapter
 from sdm.models.core.threshold import write_run_thresholds
 from sdm.models.maxent.folds import (
     DEFAULT_BUFFERED_LOO_WARN_ABOVE,
     FoldMethod,
     FoldParams,
-    buffered_loo_presence_warning,
     fold_assignments_frame,
-    presence_counts_per_fold,
     resolve_fold_params,
 )
-from sdm.utils.fs import join_uri_path, local_materialized_path, uri_exists
+from sdm.models.maxent.training import summarize_cv_scores as _summarize_cv_scores
+from sdm.utils.fs import local_materialized_path, uri_exists
 from sdm.utils.model_runs import (
     artifact_parent_uri,
     build_run_output_uri,
@@ -92,6 +84,13 @@ from sdm.utils.model_runs import (
     model_run_write_context,
     resolve_data_path,
     resolve_output_root,
+    run_segment_from_uri,
+)
+from sdm.utils.mlflow_tracking import (
+    TrainingSessionMetadata,
+    configure_mlflow,
+    log_models_to_mlflow,
+    resolve_mlflow_config,
 )
 logger = logging.getLogger(__name__)
 
@@ -256,6 +255,8 @@ def prepare_training_data(
     *,
     seed: int,
     background_occurrence_gdf: Optional[gpd.GeoDataFrame] = None,
+    surface: BackgroundSurface | str = BackgroundSurface.ALL_BAT,
+    grid_resolution: int = 100,
 ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, List[str]]:
     """
     Prepare study-level training data shared across all species-activity combinations.
@@ -268,7 +269,7 @@ def prepare_training_data(
     ``background_occurrence_gdf`` is the record set whose density drives background
     sampling. Pass all bat records so that a run filtered to some species or activity
     types samples background exactly as a full run does. When omitted,
-    ``occurrence_gdf`` is used.
+    ``occurrence_gdf`` is used. ``surface="uniform"`` ignores occurrence density.
     """
     logger.info("Preparing shared training data (presence and background with EVs)")
 
@@ -292,8 +293,10 @@ def prepare_training_data(
         background_value=background_value,
         sigma=sigma,
         transform_method=transform_method,
+        grid_resolution=grid_resolution,
         clip_to_boundary=True,
         seed=seed,
+        surface=surface,
     )
 
     # Write EV stack once; annotate presence + background via elapid (no full-grid GDF)
@@ -375,26 +378,6 @@ def drop_duplicate_grid_points(
     return gdf.drop_duplicates(subset=index_cols)
 
 
-def get_distance_matrix(
-    a: gpd.GeoSeries,
-    b: gpd.GeoSeries,
-) -> np.ndarray:
-    """
-    Calculate pairwise distance matrix between two geometry series.
-    
-    Args:
-        a: First geometry series
-        b: Second geometry series
-        
-    Returns:
-        Distance matrix (len(a) x len(b))
-    """
-    A = a.array.to_numpy()
-    B = b.array.to_numpy()
-    dist_mat = distance(A[:, None], B[None, :])
-    return dist_mat
-
-
 def filter_background_by_distance(
     background_data: gpd.GeoDataFrame,
     presence_data: gpd.GeoDataFrame,
@@ -403,6 +386,10 @@ def filter_background_by_distance(
 ) -> gpd.GeoDataFrame:
     """
     Filter background points by distance from presence points.
+
+    Uses ``scipy.spatial.cKDTree`` for nearest presence distance (projected
+    Point XY). Avoids the O(P×B) pairwise matrix previously built with
+    ``shapely.distance``.
     
     Args:
         background_data: Background points
@@ -415,12 +402,23 @@ def filter_background_by_distance(
     """
     if len(presence_data) == 0:
         return background_data
-    
-    p_dist = get_distance_matrix(
-        presence_data.geometry,
-        background_data.geometry,
-    ).min(axis=0)
-    
+    if len(background_data) == 0:
+        return background_data
+
+    presence_xy = np.column_stack(
+        [
+            presence_data.geometry.x.to_numpy(dtype=float),
+            presence_data.geometry.y.to_numpy(dtype=float),
+        ]
+    )
+    background_xy = np.column_stack(
+        [
+            background_data.geometry.x.to_numpy(dtype=float),
+            background_data.geometry.y.to_numpy(dtype=float),
+        ]
+    )
+    p_dist, _ = cKDTree(presence_xy).query(background_xy, k=1)
+
     filtered = background_data[
         (p_dist >= d_min) & (p_dist <= d_max)
     ]
@@ -494,6 +492,9 @@ def apply_sample_weights(
     return gdf
 
 
+_N_MAX_BACKGROUND_UNSET = object()
+
+
 def prepare_species_training_data(
     presence_data: gpd.GeoDataFrame,
     background_data: gpd.GeoDataFrame,
@@ -503,11 +504,18 @@ def prepare_species_training_data(
     grid_size_m: float = 500,
     d_min: float = 500,
     d_max: float = np.inf,
-    n_max_background: Optional[int] = None,
+    n_max_background: Any = _N_MAX_BACKGROUND_UNSET,
     sort_density: bool = False,
     sample_weight_n_neighbors: int = 10,
     *,
     random_state: int,
+    presence_thin_m: Optional[float] = None,
+    background_thin_m: Optional[float] = None,
+    distance_weights: bool = True,
+    background_distance_weights: bool = True,
+    cap_ratio: Any = _N_MAX_BACKGROUND_UNSET,
+    min_background: Optional[int] = None,
+    max_background: Optional[int] = None,
 ) -> gpd.GeoDataFrame:
     """
     Prepare training data for a single species-activity combination.
@@ -515,10 +523,11 @@ def prepare_species_training_data(
     This function composes multiple smaller functions to:
     1. Filter presence data for species/activity
     2. Drop duplicates
-    3. Filter background by distance
-    4. Grid sample both presence and background
-    5. Apply sample weights
-    6. Combine into final training dataset
+    3. Filter background by distance (``d_min`` / ``d_max``; ``d_min=0`` skips min)
+    4. Grid-sample presence and/or background (thin ``0`` skips that class)
+    5. Cap background count when ``n_max_background`` is set
+    6. Apply distance sample weights (per-class flags)
+    7. Combine into final training dataset
     
     Args:
         presence_data: All annotated presence data
@@ -526,17 +535,27 @@ def prepare_species_training_data(
         latin_name: Species latin name
         activity_type: Activity type
         ev_columns: List of environmental variable column names
-        grid_size_m: Grid cell size for sampling (meters)
-        d_min: Minimum distance from presence for background (meters)
+        grid_size_m: Fallback thin distance (m) when presence/background thin unset
+        d_min: Minimum distance from presence for background (meters); 0 = off
         d_max: Maximum distance from presence for background (meters)
-        n_max_background: Maximum number of background points (defaults to 10x presence)
+        n_max_background: Max background points. Unset → ``10 ×`` presence
+            (legacy default). Explicit ``None`` → no cap.
         sort_density: Whether to sort background by density before sampling
         sample_weight_n_neighbors: Number of neighbors for sample weighting
         random_state: Random seed for reproducibility in sampling operations
+        presence_thin_m: Presence grid thin (m); 0 = off; default ``grid_size_m``
+        background_thin_m: Background grid thin (m); 0 = off; default ``grid_size_m``
+        distance_weights: Apply distance weights to presence points
+        background_distance_weights: Apply distance weights to background points
         
     Returns:
         Combined training data GeoDataFrame with class, sample_weight, and EV columns
     """
+    presence_thin = float(grid_size_m if presence_thin_m is None else presence_thin_m)
+    background_thin = float(
+        grid_size_m if background_thin_m is None else background_thin_m
+    )
+
     # Filter presence data
     species_presence = get_species_presence_data(
         presence_data, latin_name, activity_type
@@ -549,42 +568,74 @@ def prepare_species_training_data(
     # Drop duplicates
     species_presence = drop_duplicate_grid_points(species_presence)
     
-    # Filter background by distance
+    # Filter background by distance (d_min=0 keeps points on top of presence)
     species_absence = filter_background_by_distance(
         background_data, species_presence, d_min=d_min, d_max=d_max
     )
     species_absence = drop_duplicate_grid_points(species_absence)
     
-    # Grid sample
-    species_presence = grid_sample_points(
-        species_presence, grid_size_x=grid_size_m, grid_size_y=grid_size_m, random_state=random_state
-    )
-    species_absence = grid_sample_points(
-        species_absence, grid_size_x=grid_size_m, grid_size_y=grid_size_m, random_state=random_state
-    )
-    
-    # Limit background points
-    if n_max_background is None:
-        n_max_background = len(species_presence) * 10
-    
-
-    
-    if sort_density and "density" in species_absence.columns:
-        species_absence = species_absence.sort_values(
-            by="density", ascending=False
-        ).head(n_max_background)
-    else:
-        species_absence = species_absence.sample(
-            n=min(len(species_absence), n_max_background), replace=False, random_state=random_state
+    # Grid sample (0 m = skip thinning for that class)
+    if presence_thin > 0:
+        species_presence = grid_sample_points(
+            species_presence,
+            grid_size_x=presence_thin,
+            grid_size_y=presence_thin,
+            random_state=random_state,
         )
+    if background_thin > 0:
+        species_absence = grid_sample_points(
+            species_absence,
+            grid_size_x=background_thin,
+            grid_size_y=background_thin,
+            random_state=random_state,
+        )
+
+    if n_max_background is _N_MAX_BACKGROUND_UNSET:
+        if cap_ratio is _N_MAX_BACKGROUND_UNSET:
+            # Legacy default: 10× thinned presence.
+            n_max_background = len(species_presence) * 10
+        elif cap_ratio is None and min_background is None and max_background is None:
+            n_max_background = None
+        else:
+            n: Optional[int] = None
+            if cap_ratio is not None:
+                n = int(len(species_presence) * float(cap_ratio))
+            if min_background is not None:
+                n = int(min_background) if n is None else max(n, int(min_background))
+            if max_background is not None:
+                n = int(max_background) if n is None else min(n, int(max_background))
+            n_max_background = n
+    
+    # Limit background points when a cap is configured
+    if n_max_background is not None and len(species_absence) > 0:
+        cap = int(n_max_background)
+        if sort_density and "density" in species_absence.columns:
+            species_absence = species_absence.sort_values(
+                by="density", ascending=False
+            ).head(cap)
+        else:
+            species_absence = species_absence.sample(
+                n=min(len(species_absence), cap),
+                replace=False,
+                random_state=random_state,
+            )
     
     # Apply sample weights
-    species_presence = apply_sample_weights(
-        species_presence, n_neighbors=sample_weight_n_neighbors
-    )
-    species_absence = apply_sample_weights(
-        species_absence, n_neighbors=sample_weight_n_neighbors
-    )
+    if distance_weights:
+        species_presence = apply_sample_weights(
+            species_presence, n_neighbors=sample_weight_n_neighbors
+        )
+    else:
+        species_presence = species_presence.copy()
+        species_presence["sample_weight"] = 1.0
+
+    if background_distance_weights:
+        species_absence = apply_sample_weights(
+            species_absence, n_neighbors=sample_weight_n_neighbors
+        )
+    else:
+        species_absence = species_absence.copy()
+        species_absence["sample_weight"] = 1.0
     
     # Combine and select columns
     species_data = pd.concat([species_presence, species_absence])
@@ -673,309 +724,8 @@ def generate_training_data(
     return training_data
 
 
-# ============================================================================
-# Model training functions
-# ============================================================================
-
-
-def _summarize_cv_scores(
-    cv_scores: Optional[np.ndarray],
-) -> Tuple[float, float, int, int]:
-    """Return (mean, std, n_valid, n_total) for a CV score array, safely handling NaNs."""
-    if cv_scores is None or len(cv_scores) == 0:
-        return np.nan, np.nan, 0, 0
-    
-    valid_scores = cv_scores[~np.isnan(cv_scores)]
-    n_total = len(cv_scores)
-    n_valid = len(valid_scores)
-    
-    if n_valid == 0:
-        return np.nan, np.nan, 0, n_total
-    
-    return float(valid_scores.mean()), float(valid_scores.std()), n_valid, n_total
-
-
-def _configure_mlflow_from_config(project_config: ProjectConfig) -> None:
-    """Configure MLflow tracking URI and experiment from project configuration."""
-    tracking_uri = project_config.mlflow.tracking_uri
-    experiment_name = project_config.mlflow.experiment_name
-    
-    mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment(experiment_name)
-    
-    logger.debug("MLflow tracking URI: %s", tracking_uri)
-    logger.debug("MLflow experiment: %s", experiment_name)
-
-
-def train_single_model(
-    data: TrainingData,
-    max_threads_per_model: int,
-    n_cv_folds: int = 3,
-    min_presence: int = 15,
-    *,
-    seed: int,
-    fold_params: Optional[FoldParams] = None,
-) -> TrainingResults:
-    """Train a single MaxEnt model for a given set of training data."""
-    try:
-        apply_training_seed(seed)
-        activity_type = ActivityType(data.activity_type)
-        latin_name = data.latin_name
-        logger.debug(f"Training model for {latin_name} ({activity_type.value})...")
-
-        resolved_folds = fold_params or resolve_fold_params(CvConfig(), model_seed=seed)
-        model_config = data.maxent_config
-        model_features = data.model_features
-        
-        # Verify features list is not empty
-        if len(model_features) == 0:
-            raise ValueError(
-                f"model_features list is empty for {latin_name} - {activity_type}. "
-                f"At least one feature must be provided."
-            )
-        
-        # Verify all required features are in the data
-        missing_features = list(set(model_features) - set(data.occurrence.columns))
-        if missing_features:
-            raise ValueError(
-                f"Missing features {missing_features} in occurrence data for {latin_name} - {activity_type}. "
-                f"Available columns: {list(data.occurrence.columns)}"
-            )
-        
-        # Create model with appropriate thread count
-        model = create_maxent_pipeline(
-            feature_names=model_features,
-            maxent_n_jobs=max_threads_per_model,
-            model_config=model_config,
-        )
-        logger.info(f"Model features: {model_features}")
-        n_presence = len(data.occurrence[data.occurrence["class"] == 1])
-        if resolved_folds.method is FoldMethod.BUFFERED_LOO:
-            loo_warning = buffered_loo_presence_warning(
-                n_presence,
-                resolved_folds.buffered_loo_warn_above,
-                latin_name=latin_name,
-                activity_type=activity_type.value,
-            )
-            if loo_warning:
-                logger.warning(loo_warning)
-        if resolved_folds.method is FoldMethod.KMEANS:
-            # Prefer explicit fold_params; otherwise honour the n_cv_folds argument.
-            effective_n_folds = (
-                resolved_folds.n_folds if fold_params is not None else n_cv_folds
-            )
-            # do 2 folds if average presence per fold would fall below min_presence
-            if effective_n_folds > 0 and (n_presence // effective_n_folds) < min_presence:
-                effective_n_folds = 2
-                logger.info(
-                    "Using 2 folds for %s - %s because n_presence < %s",
-                    latin_name,
-                    activity_type.value,
-                    min_presence,
-                )
-        elif resolved_folds.method is FoldMethod.BLOCKS:
-            effective_n_folds = resolved_folds.n_folds
-        elif resolved_folds.method is FoldMethod.BUFFERED_LOO:
-            effective_n_folds = int(n_presence)
-        else:
-            raise ValueError(f"unknown fold method: {resolved_folds.method!r}")
-
-        effective_params = FoldParams(
-            method=resolved_folds.method,
-            n_folds=effective_n_folds,
-            random_state=resolved_folds.random_state,
-            block_size_m=resolved_folds.block_size_m,
-            block_n_tries=resolved_folds.block_n_tries,
-            buffer_m=resolved_folds.buffer_m,
-            buffered_loo_warn_above=resolved_folds.buffered_loo_warn_above,
-        )
-        fold_presence = presence_counts_per_fold(data.occurrence, effective_params)
-
-        final_model, cv_models, cv_scores, validation_scores = evaluate_and_train_maxent_model(
-            model=model,
-            occurrence_gdf=data.occurrence,
-            n_cv_folds=effective_n_folds,
-            metric_fn=roc_auc_score,
-            feature_columns=model_features,  # Explicitly pass feature columns to avoid using extra columns as features
-            collect_validation_scores=True,
-            random_state=effective_params.random_state,
-            fold_method=effective_params.method,
-            block_size_m=effective_params.block_size_m,
-            block_n_tries=effective_params.block_n_tries,
-            buffer_m=effective_params.buffer_m,
-        )
-        
-        if final_model is None:
-            raise ValueError("Model training failed - final_model is None")
-        
-        cv_mean, cv_std, n_valid, n_total = _summarize_cv_scores(cv_scores)
-        if n_valid > 0:
-            logger.debug(
-                "✓ %s - %s: CV AUC = %.4f ± %.4f (%d/%d folds valid)",
-                latin_name,
-                activity_type.value,
-                cv_mean,
-                cv_std,
-                n_valid,
-                n_total,
-            )
-        else:
-            logger.debug(
-                "✗ %s - %s: No valid CV scores", latin_name, activity_type.value
-            )
-        logger.info(
-            "%s - %s: fold_method=%s scored %d/%d folds; presence per fold=%s",
-            latin_name,
-            activity_type.value,
-            effective_params.method.value,
-            n_valid,
-            n_total,
-            fold_presence,
-        )
-        
-        return TrainingResults(
-            latin_name=latin_name,
-            activity_type=activity_type.value,
-            final_model=final_model,
-            cv_models=cv_models if cv_models is not None else None,
-            cv_scores=cv_scores,
-            validation_scores=validation_scores,
-            cv_n_folds=effective_n_folds if effective_n_folds else n_total,
-            fold_method=effective_params.method.value,
-            fold_params=effective_params.to_metadata(),
-            fold_presence_counts=fold_presence,
-            success=True,
-            error=None,
-        )
-    except Exception as e:
-        logger.error(
-            f"Error training model for {data.latin_name} - {data.activity_type}: {e}"
-        )
-        return TrainingResults(
-            latin_name=data.latin_name,
-            activity_type=data.activity_type,
-            final_model=None,
-            cv_models=None,
-            cv_scores=None,
-            success=False,
-            error=str(e),
-        )
-
-
-def train_models_parallel(
-    training_data: List[TrainingData],
-    max_threads_per_model: int = 1,
-    n_jobs: Optional[int] = None,
-    *,
-    seed: int,
-    fold_params: Optional[FoldParams] = None,
-) -> List[TrainingResults]:
-    """Train MaxEnt models in parallel for each set of training data.
-    
-    Args:
-        training_data: List of TrainingData objects, one per species-activity combination.
-            Each TrainingData must include maxent_config and model_features.
-        max_threads_per_model: Maximum threads per model (default 1, parallelization handled at higher level)
-        n_jobs: Number of parallel jobs (None = auto)
-        
-    Returns:
-        List of TrainingResults
-    """
-    # Calculate optimal number of jobs if not specified
-    if n_jobs is None:
-        total_cpus = os.cpu_count()
-        if total_cpus is None:
-            total_cpus = 1.0
-        # Use 80% of available CPUs by default
-        n_jobs = max(1, int(total_cpus * 0.8) // max_threads_per_model)
-    
-    logger.debug(
-        f"Training with {n_jobs} parallel jobs, {max_threads_per_model} threads per model"
-    )
-    
-    # Execute training in parallel using ProcessPoolExecutor
-    results: List[TrainingResults] = []
-    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-        # Create a list of futures
-        futures = []
-        for data in training_data:
-            identifier = data.identifier()
-            
-            futures.append(
-                executor.submit(
-                    train_single_model,
-                    data,
-                    max_threads_per_model,
-                    seed=seed,
-                    fold_params=fold_params,
-                )
-            )
-        
-        # Collect results as they complete
-        for future in tqdm(futures, total=len(futures), desc="Training models"):
-            try:
-                result = future.result()
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Error in parallel training: {e}")
-                # Create a failed result
-                results.append(
-                    TrainingResults(
-                        latin_name="unknown",
-                        activity_type="unknown",
-                        final_model=None,
-                        cv_models=None,
-                        cv_scores=None,
-                        success=False,
-                        error=str(e),
-                    )
-                )
-    
-    # Extract successful results
-    successful_results = [r for r in results if r.success]
-    
-    # Report failed models
-    failed_models = [
-        f"{r.latin_name} - {r.activity_type}: {r.error}"
-        for r in results
-        if not r.success
-    ]
-    if failed_models:
-        logger.warning("Failed models:")
-        for failure in failed_models:
-            logger.warning(f"  {failure}")
-    
-    logger.info(
-        f"Successfully trained {len(successful_results)} models out of {len(training_data)} attempts"
-    )
-    
-    # Print summary of model accuracies
-    if successful_results:
-        logger.info("\n" + "=" * 80)
-        logger.info("MODEL PERFORMANCE SUMMARY")
-        logger.info("=" * 80)
-        for result in successful_results:
-            cv_mean, cv_std, n_valid, n_total = _summarize_cv_scores(result.cv_scores)
-            if n_valid > 0:
-                logger.info(
-                    "  %s - %s: AUC = %.4f ± %.4f (%d/%d folds valid)",
-                    f"{result.latin_name:30s}",
-                    f"{result.activity_type:15s}",
-                    cv_mean,
-                    cv_std,
-                    n_valid,
-                    n_total,
-                )
-            else:
-                logger.info(
-                    "  %s - %s: No valid scores",
-                    f"{result.latin_name:30s}",
-                    f"{result.activity_type:15s}",
-                )
-        logger.info("=" * 80 + "\n")
-    
-    return successful_results
-
+# MaxEnt fit helpers (train_single_model / train_models_parallel) live in
+# sdm.models.maxent.training. CV score summary is imported above for save/results.
 
 def _finite_float_or_none(x: Any) -> Any:
     """JSON-friendly float: map NaN/inf to None."""
@@ -1091,6 +841,8 @@ def save_models(
     models: List[TrainingResults],
     training_data: List[TrainingData],
     output_dir: Path,
+    *,
+    trainer: str = "maxent",
 ) -> Dict[str, Path]:
     """
     Save each successful model as a small on-disk package for training outputs and API upload.
@@ -1104,6 +856,7 @@ def save_models(
         models: Training results (only entries with ``final_model`` are written).
         training_data: Parallel list of training data (matched by ``identifier()``).
         output_dir: Root directory for all model packages.
+        trainer: Adapter name written into ``package.json`` (default ``maxent``).
 
     Returns:
         Map from ``TrainingResults.identifier()`` to path of ``model.pkl`` inside the package
@@ -1138,6 +891,7 @@ def save_models(
             "model_id": get_model_id([model.latin_name, model.activity_type]),
             "latin_name": model.latin_name,
             "activity_type": model.activity_type,
+            "trainer": trainer,
             "model_limited": bool(data.model_limited),
             "feature_names": list(data.model_features),
             "maxent_config": _maxent_config_to_dict(data.maxent_config),
@@ -1247,132 +1001,24 @@ def save_run_metadata(
     seed: int,
     model_config_path: str,
     fold_params: Optional[FoldParams] = None,
+    trainer: str = "maxent",
+    background_settings: Optional[ResolvedBackgroundSettings] = None,
 ) -> Path:
     """Write run-level metadata (including the training seed) into the run folder."""
     metadata: Dict[str, Any] = {
         "schema_version": 1,
         "seed": seed,
         "model_config_path": model_config_path,
+        "trainer": trainer,
     }
     if fold_params is not None:
         metadata["cv"] = fold_params.to_metadata()
+    if background_settings is not None:
+        metadata["background"] = background_settings.to_metadata()
     path = output_dir / "run_metadata.json"
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2)
     return path
-
-
-def log_models_to_mlflow(
-    models: List[TrainingResults],
-    training_data: List[TrainingData],
-    results_df: pd.DataFrame,
-) -> None:
-    """
-    Log trained models and results to MLflow.
-    
-    Args:
-        models: List of TrainingResults
-        results_df: DataFrame containing model results
-        
-    Returns:
-        None
-    """
-    # Check if a run is already active (e.g., from tuning script)
-    active_run = mlflow.active_run()
-    
-    if active_run is None:
-        # Start parent run for this training session
-        parent_run_name = f"SDM_Training_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        run_context = mlflow.start_run(run_name=parent_run_name)
-        logger.debug(f"Started MLflow parent run: {parent_run_name}")
-    else:
-        # Use existing run (e.g., from tuning)
-        logger.debug(f"Using existing MLflow run: {active_run.info.run_id}")
-        # Create a context manager that does nothing (we're already in a run)
-        run_context = nullcontext()
-    
-    with run_context:
-        # Log results DataFrame
-        mlflow.log_table(data=results_df, artifact_file="model_results.parquet")
-        logger.debug(f"Logging {len(models)} models to MLflow...")
-        
-        # Log individual models
-        for model in models:
-            data = training_data[models.index(model)]
-            model_identifier = model.identifier()
-            with mlflow.start_run(nested=True, run_name=model_identifier):
-                logger.debug(f"Logging model: {model_identifier}")
-                
-                # Log basic model parameters
-                mlflow.log_params(
-                    {
-                        "latin_name": model.latin_name,
-                        "activity_type": model.activity_type,
-                        "n_presence": len(data.occurrence[data.occurrence["class"] == 1]),
-                        "n_background": len(data.occurrence[data.occurrence["class"] == 0]),
-                    }
-                )
-                # log model parameters
-                if model.final_model is not None:
-                    model_params = model.final_model.get_params()
-                    mlflow.log_params(model_params)
-                else:
-                    logger.error(f"Model is None for {model_identifier}")
-                
-                ## Log model tags
-                mlflow.set_tag("latin_name", model.latin_name)
-                genus = model.latin_name.split(" ")[0]
-                species = model.latin_name.split(" ")[1]
-                species_code = genus[:3] + "_" + species[:3]
-                mlflow.set_tag("species_code", species_code)
-                mlflow.set_tag("activity_type", model.activity_type)
-                
-                # Log model metrics
-                cv_mean, cv_std, n_valid, _ = _summarize_cv_scores(model.cv_scores)
-                if n_valid > 0:
-                    mlflow.log_metric("mean_auc", cv_mean)
-                    mlflow.log_metric("std_auc", cv_std)
-                else:
-                    logger.info(
-                        "Skipping MLflow metric logging for %s (no valid CV scores)",
-                        model_identifier,
-                    )
-                
-                # Log model artifact
-                if model.final_model is not None:
-                    occurrence = data.occurrence
-                    x_sample = occurrence.drop(columns=["geometry", "class", "sample_weight"])
-                    x_sample = x_sample.iloc[0]
-                    input_example = pd.DataFrame(x_sample).T
-                    artifact_path = f"{model_identifier}_final_model"
-                    try:
-                        model_info = log_model(
-                            model.final_model,
-                            name=artifact_path,
-                            input_example=input_example,
-                        )
-                        logger.debug(f"✓ Model logged to MLflow: {model_info.model_uri}")
-                    except Exception as e:
-                        if "UNIQUE constraint" in str(e) or "duplicate" in str(e).lower():
-                            logger.warning(
-                                f"MLflow metric conflict for {model_identifier}, but model was saved. Error: {e}"
-                            )
-                        else:
-                            logger.error(
-                                f"Failed to log model {model_identifier} to MLflow: {e}"
-                            )
-                            raise
-                else:
-                    logger.error(f"Model is None for {model_identifier}")
-        
-        # Log summary information at the end of the parent run
-        active_run_after = mlflow.active_run()
-        parent_run_id = (
-            active_run_after.info.run_id if active_run_after else "N/A"
-        )
-        logger.debug(
-            f"MLflow logging complete - Run ID: {parent_run_id}, {len(models)} models logged"
-        )
 
 
 # ============================================================================
@@ -1560,6 +1206,7 @@ def train_models_with_setup(
     *,
     seed: int,
     fold_params: Optional[FoldParams] = None,
+    adapter: Optional[ModelAdapter] = None,
 ) -> tuple[List[TrainingResults], List[TrainingData]]:
     """Train models using pre-setup shared data.
     
@@ -1575,6 +1222,7 @@ def train_models_with_setup(
         max_threads_per_model: Maximum threads per model
         n_jobs: Number of parallel jobs
         verbose: Enable verbose logging
+        adapter: Resolved ModelAdapter (defaults to the MaxEnt adapter).
         
     Returns:
         Tuple of (List of TrainingResults, List of TrainingData)
@@ -1618,16 +1266,17 @@ def train_models_with_setup(
         seed=seed,
     )
 
-    logger.debug("Training %d models...", len(training_data))
-    models = train_models_parallel(
+    resolved = adapter or get_adapter(None)
+    logger.debug("Training %d models with adapter %s...", len(training_data), resolved.name)
+    bundle = resolved.train(
         training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
         seed=seed,
         fold_params=fold_params,
     )
-    
-    return models, training_data
+
+    return bundle.results, bundle.training_data
 
 
 def train_sdm_models(
@@ -1644,10 +1293,11 @@ def train_sdm_models(
     species: Optional[List[str]] = None,
     activity_types: Optional[List[str]] = None,
     verbose: bool = False,
-    # Species-specific processing parameters
-    d_min: float = 500,
-    d_max: float = np.inf,
-    sample_weight_n_neighbors: int = 10,
+    # Species-specific processing parameters (None → resolved from config)
+    d_min: Optional[float] = None,
+    d_max: Optional[float] = None,
+    sample_weight_n_neighbors: Optional[int] = None,
+    n_background_points: Optional[int] = None,
     allow_config_fallback: bool = False,
     cv_method: Optional[str] = None,
     cv_n_folds: Optional[int] = None,
@@ -1709,22 +1359,18 @@ def train_sdm_models(
         resolve_sdm_config_root(variables_config_path)
     )
     
-    # Get background config from model config (with defaults if not present)
-    background_config = base_model_cfg.background or BackgroundConfig()
-    # BackgroundConfig has default enum values, but add assertions for type checker
-    assert background_config.background_method is not None
-    assert background_config.transform_method is not None
-    logger.info(
-        f"Background point config: n={background_config.n_background_points}, "
-        f"method={background_config.background_method.value}, "
-        f"value={background_config.background_value}, sigma={background_config.sigma}, "
-        f"transform={background_config.transform_method.value}"
-    )
-    
-    # Get sampling config from model config (with defaults if not present)
-    sampling_config = base_model_cfg.sampling or SamplingConfig()
-    grid_size_m = sampling_config.grid_size_m
     training_seed = base_model_cfg.seed
+    background_settings = resolve_background_settings(
+        project_config=project_config,
+        model_config=base_model_cfg,
+        seed=training_seed,
+        n_background_points_override=n_background_points,
+        presence_exclusion_m_override=d_min,
+        presence_exclusion_max_m_override=d_max,
+        sample_weight_n_neighbors_override=sample_weight_n_neighbors,
+    )
+    logger.info("Background settings: %s", background_settings.to_metadata())
+
     fold_params = resolve_fold_params(
         base_model_cfg.cv,
         model_seed=training_seed,
@@ -1735,7 +1381,6 @@ def train_sdm_models(
         buffer_m_override=cv_buffer_m,
         buffered_loo_warn_above_override=cv_buffered_loo_warn_above,
     )
-    logger.info(f"Sampling config: grid_size_m={grid_size_m}")
     logger.info("Training seed (from model_config.yml): %s", training_seed)
     logger.info(
         "CV folds: method=%s params=%s",
@@ -1743,8 +1388,8 @@ def train_sdm_models(
         fold_params.to_metadata(),
     )
     
-    # Configure MLflow
-    _configure_mlflow_from_config(project_config)
+    mlflow_cfg = resolve_mlflow_config(project_config)
+    mlflow_enabled = configure_mlflow(mlflow_cfg)
     
     # Load data
     logger.info("Loading input data...")
@@ -1796,9 +1441,6 @@ def train_sdm_models(
     )
     
     # Prepare shared training data (presence/background annotated with EVs)
-    # Unpack background config for prepare_training_data (keeps interface simple for testing)
-    assert background_config.background_method is not None
-    assert background_config.transform_method is not None
     (
         presence_with_evs_gdf,
         background_with_evs_gdf,
@@ -1808,18 +1450,21 @@ def train_sdm_models(
         background_occurrence_gdf=all_bats_gdf,
         boundary=boundary,
         evs_to_model=evs_to_model,
-        n_background_points=background_config.n_background_points,
-        background_method=background_config.background_method,
-        background_value=background_config.background_value,
-        sigma=background_config.sigma,
-        transform_method=background_config.transform_method,
-        seed=training_seed,
+        n_background_points=background_settings.n_background_points,
+        background_method=background_settings.background_method,
+        background_value=background_settings.background_value,
+        sigma=background_settings.sigma,
+        transform_method=background_settings.transform_method,
+        seed=background_settings.seed,
+        surface=background_settings.surface,
+        grid_resolution=background_settings.surface_resolution_m,
     )
     
     # Create default model config from base config (used as fallback)
     default_model_config = DefaultMaxentConfig.from_config(
         config=base_model_cfg
     )
+    default_model_config.class_weights = background_settings.maxent_class_weights()
     
     # Generate training data for each species-activity combination
     logger.info("Generating training data for each species-activity combination...")
@@ -1840,11 +1485,18 @@ def train_sdm_models(
             latin_name=latin_name,
             activity_type=activity_type,
             ev_columns=ev_columns,
-            grid_size_m=grid_size_m,
-            d_min=d_min,
-            d_max=d_max,
-            sample_weight_n_neighbors=sample_weight_n_neighbors,
-            random_state=training_seed,
+            grid_size_m=background_settings.presence_thin_m,
+            d_min=background_settings.presence_exclusion_m,
+            d_max=background_settings.presence_exclusion_max_m,
+            sample_weight_n_neighbors=background_settings.sample_weight_n_neighbors,
+            random_state=background_settings.seed,
+            presence_thin_m=background_settings.presence_thin_m,
+            background_thin_m=background_settings.background_thin_m,
+            distance_weights=background_settings.distance_weights,
+            background_distance_weights=background_settings.background_distance_weights,
+            cap_ratio=background_settings.cap_ratio,
+            min_background=background_settings.min_background,
+            max_background=background_settings.max_background,
         )
         
         # Check if training data was generated
@@ -1937,6 +1589,9 @@ def train_sdm_models(
                     identifier,
                 )
 
+        # Run-level background.class_balance is the source of truth for balancing.
+        maxent_model_config.class_weights = background_settings.maxent_class_weights()
+
         training_data.append(
             TrainingData(
                 latin_name=latin_name,
@@ -1952,17 +1607,23 @@ def train_sdm_models(
         f"Generated training data for {len(training_data)} species-activity combinations"
     )
     
-    # Train models
-    logger.info(f"Training {len(training_data)} models...")
-    
-    models = train_models_parallel(
-        training_data=training_data,
+    # Train models via adapter registry (default maxent).
+    adapter = get_adapter(base_model_cfg.type)
+    logger.info(
+        "Training %d models with adapter %s...",
+        len(training_data),
+        adapter.name,
+    )
+
+    bundle = adapter.train(
+        training_data,
         max_threads_per_model=max_threads_per_model,
         n_jobs=n_jobs,
         seed=training_seed,
         fold_params=fold_params,
     )
-    
+    models = bundle.results
+
     # Prepare and save results
     logger.info("Saving results...")
     results_df = prepare_results_dataframe(models, training_data)
@@ -1970,7 +1631,12 @@ def train_sdm_models(
     logger.info("Writing model run to %s", run_uri)
 
     with model_run_write_context(run_uri) as (models_output_dir, written_uri):
-        model_paths = save_models(models, training_data, models_output_dir)
+        model_paths = save_models(
+            models,
+            training_data,
+            models_output_dir,
+            trainer=adapter.name,
+        )
 
         published_paths = {
             identifier: join_run_artifact(
@@ -1996,13 +1662,34 @@ def train_sdm_models(
             seed=training_seed,
             model_config_path=repo_relative_config_path(model_config_path),
             fold_params=fold_params,
+            trainer=adapter.name,
+            background_settings=background_settings,
         )
 
     logger.info("Model run outputs: %s", written_uri)
-    
-    # Log to MLflow
-    logger.info("Logging to MLflow...")
-    log_models_to_mlflow(models, training_data, results_df)
+    run_id = run_segment_from_uri(str(written_uri))
+    logger.info("To predict with this run: sdm predict --run %s", run_id)
+
+    if mlflow_enabled:
+        logger.info("Logging to MLflow...")
+        session_metadata = TrainingSessionMetadata(
+            occurrence_data=str(bats_uri),
+            ev_data=str(ev_uri),
+            model_config_path=str(model_config_path),
+            variables_config_path=(
+                str(variables_config_path) if variables_config_path else None
+            ),
+            model_run_uri=str(written_uri),
+        )
+        log_models_to_mlflow(
+            models,
+            training_data,
+            results_df,
+            session_metadata=session_metadata,
+            maxent_config_to_dict=_maxent_config_to_dict,
+        )
+    else:
+        logger.info("Skipping MLflow logging (disabled or unavailable).")
     
     logger.info("✓ Training pipeline complete")
 

@@ -1,0 +1,39 @@
+id: vom_woody_cover_share
+title: Woody canopy cover (cell share)
+kind: source
+family: vegetation
+summary: >-
+  Share of the 100 m cell with EA VOM canopy ≥ 2.5 m.
+shows:
+- Share of the 100 m cell with EA VOM canopy ≥ 2.5 m.
+does_not_show:
+- Vegetation shorter than 2.5 m
+- Understorey / vertical layering
+- Woodland vs trees-outside-woodland labelling (not built in #121)
+- Linear hedge detection (not built in #121)
+units: fraction
+native_resolution_m: 1.0
+model_resolution_m: 100.0
+crs: EPSG:27700
+temporal:
+  label: National LiDAR Programme surveys (winter / leaf-off)
+source_id: ea_vom
+pipeline:
+  rebuild_step: vom_bands
+  code: sdm/commands/data_preparation/environmental/generate_vom_height_bands.py
+processing:
+- 1 m EA VOM via tilearray (each chunk fetched once; map_blocks, no halo)
+- Cap heights above 40 m before summary
+- Coarsen to 100 m shares / canopy-only std
+
+caveats:
+- Official VOM keeps classified vegetation objects above 2.5 m only
+- Leaf-off National LiDAR; short hedges may be under-represented
+- Issue #121 deliberately omits woodland/TOW labelling and hedge detectors
+references:
+- title: LIDAR Vegetation Object Model (VOM) — data.gov.uk
+  url: >-
+    https://www.data.gov.uk/dataset/227ab487-e8f2-4cbb-b26a-9e6d3b662265/lidar-vegetation-object-model-vom
+- title: Product review — simpler woody vegetation layers (#121)
+  url: https://github.com/MatthewJWhittle/shefflied-bats/issues/121
+markdown: vom_woody_cover_share.md

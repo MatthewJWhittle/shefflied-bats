@@ -48,6 +48,17 @@ def test_canonicalize_band_names() -> None:
         canonicalize_band_name("vom_vegetation_height_mean_500m")
         == "vom_vegetation_height_mean_500m"
     )
+    # #121 simple height-band / woody-cover ids must not be rewritten.
+    assert canonicalize_band_name("vom_woody_cover_share") == "vom_woody_cover_share"
+    assert (
+        canonicalize_band_name("vom_woody_cover_share_500m")
+        == "vom_woody_cover_share_500m"
+    )
+    assert canonicalize_band_name("vom_canopy_height_std") == "vom_canopy_height_std"
+    assert (
+        canonicalize_band_name("vom_height_band_5_15_share")
+        == "vom_height_band_5_15_share"
+    )
 
 
 def test_apply_layer_clipping_fixed_and_quantile() -> None:

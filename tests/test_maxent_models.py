@@ -316,7 +316,8 @@ class TestFullTrainingWorkflow:
         - Saved model should have only the subset, not all features
         """
         from sdm.types import TrainingData, TrainingResults
-        from sdm.commands.modelling.train_sdm_models import train_single_model, save_models
+        from sdm.commands.modelling.train_sdm_models import save_models
+        from sdm.models.maxent.training import train_single_model
         from pathlib import Path
         import tempfile
         
@@ -395,7 +396,8 @@ class TestFullTrainingWorkflow:
         - After training and saving, the model should still only have the 20 features
         """
         from sdm.types import TrainingData, TrainingResults
-        from sdm.commands.modelling.train_sdm_models import train_single_model, save_models
+        from sdm.commands.modelling.train_sdm_models import save_models
+        from sdm.models.maxent.training import train_single_model
         from pathlib import Path
         import tempfile
         

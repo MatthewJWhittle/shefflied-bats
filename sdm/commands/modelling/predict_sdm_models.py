@@ -18,8 +18,14 @@ import geopandas as gpd
 from rasterio.crs import CRS
 
 from sdm.utils.logging_utils import setup_logging
-from sdm.utils.io import load_boundary, load_pickled_model, load_project_config
+from sdm.utils.io import load_boundary, load_project_config
+from sdm.utils.model_runs import resolve_predict_models_dir
+from sdm.utils.prediction_publish import (
+    publish_predictions_from_output_dir,
+    resolve_prediction_publish_root,
+)
 from sdm.raster.io import cogify_geotiff_inplace, export_geotiff, load_environmental_variables
+from sdm.models.adapters import ModelAdapter, get_adapter, resolve_run_trainer
 from sdm.models.maxent.maxent_model import apply_models_to_raster
 from sdm.models.core.pipeline_features import pipeline_selected_feature_names
 from sdm.commands.data_preparation.raster.split_raster_by_band import split_raster_by_band
@@ -51,10 +57,14 @@ def filter_models(
         
     return filtered
 
-def load_model(model_path: Path) -> Any:
-    """Load a pickled model from disk (supports ``model_results.csv`` package paths)."""
+def load_model(
+    model_path: Path,
+    *,
+    adapter: ModelAdapter,
+) -> Any:
+    """Load a model via the already-resolved adapter."""
     try:
-        return load_pickled_model(model_path)
+        return adapter.load_predictor(model_path)
     except Exception as e:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise
@@ -159,14 +169,23 @@ def make_predictions(
     *,
     prediction_crs: str,
     write_cog: bool = True,
-) -> None:
+    publish_root: Optional[str] = None,
+    publish_label: Optional[str] = None,
+    rebuild_metrics_path: Optional[Path] = None,
+    adapter: Optional[ModelAdapter] = None,
+) -> Optional[List[str]]:
     """Apply trained models to make predictions.
 
     Writes a staging GeoTIFF on the EV grid, then finalizes ``all_predictions.tif``
     (and optionally per-band splits) in *prediction_crs*; when *write_cog* is True,
     outputs are Cloud Optimized GeoTIFFs.
+
+    When *publish_root* is set, each per-model ``prediction_*.tif`` is also copied
+    into a new version folder under that root (never overwrites an existing
+    version). Requires ``split_files=True``.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_adapter = adapter or get_adapter(resolve_run_trainer(models_dir))
 
     with rio.open(ev_raster) as ev_ds:
         ev_crs = ev_ds.crs
@@ -180,7 +199,7 @@ def make_predictions(
         )
 
     # Load all models
-    logger.debug("Loading models...")
+    logger.debug("Loading models via adapter %s...", resolved_adapter.name)
     models: Dict[str, Any] = {}
     feature_names = None
 
@@ -191,7 +210,7 @@ def make_predictions(
         model_id = get_model_id([latin_name, activity_type])
 
         try:
-            model = load_model(model_path)
+            model = load_model(model_path, adapter=resolved_adapter)
 
             if feature_names is None and hasattr(model, "named_steps"):
                 if "feature_selection" in model.named_steps:
@@ -269,6 +288,29 @@ def make_predictions(
                     f"Failed to split predictions into separate files: {e}. Combined file available at {output_path}"
                 )
 
+        published: Optional[List[str]] = None
+        if publish_root:
+            if not split_files:
+                raise ValueError(
+                    "Publishing prediction versions requires split_files=True "
+                    "(per-model prediction_*.tif outputs)."
+                )
+            published = publish_predictions_from_output_dir(
+                output_dir=output_dir,
+                models_dir=models_dir,
+                publish_root=publish_root,
+                label=publish_label,
+                prediction_crs=prediction_crs,
+                write_cog=write_cog,
+                rebuild_metrics_path=rebuild_metrics_path,
+            )
+            logger.info(
+                "Published %d prediction version(s) under %s",
+                len(published),
+                publish_root,
+            )
+        return published
+
     except Exception as e:
         logger.error(f"Failed to generate predictions: {e}")
         staging_path.unlink(missing_ok=True)
@@ -285,50 +327,88 @@ def predict_sdm_models(
     split_files: bool = True,
     prediction_crs: Optional[str] = None,
     write_cog: bool = True,
+    publish: bool = False,
+    publish_root: Optional[Union[str, Path]] = None,
+    publish_label: Optional[str] = None,
+    rebuild_metrics_path: Optional[Path] = None,
+    run: Optional[str] = None,
     verbose: bool = False,
-) -> None:
+) -> Optional[List[str]]:
     """Run the model inference pipeline.
 
     Args:
         ev_path: Path to environmental variables raster.
-        models_dir: Directory containing trained models.
+        models_dir: Models root (``…/sdm_models``) or a concrete run folder
+            with ``model_results.csv``. When it is a root, the newest run under
+            ``runs/`` is used unless *run* is set.
+        run: Optional run id or unique prefix under ``models_dir/runs/``.
         output_dir: Directory for output prediction files.
         boundary_path: Optional path to boundary file for clipping output raster.
         species: Optional: Specific species to generate predictions for (Latin names).
         activity_types: Optional: Specific activity types to generate predictions for.
-        split_files: If True, write each model prediction as a separate file. If False, write all predictions in one combined file.
-        prediction_crs: CRS for outputs (e.g. ``EPSG:27700``). ``None`` uses ``ProjectConfig.crs`` from ``config.yml``.
+        split_files: If True, write each model prediction as a separate file.
+            If False, write all predictions in one combined file.
+        prediction_crs: CRS for outputs (e.g. ``EPSG:27700``). ``None`` uses
+            ``ProjectConfig.crs`` from ``config.yml``.
         write_cog: When True (default), emit Cloud Optimized GeoTIFFs.
+        publish: When True, also publish versioned maps under *publish_root*.
+        publish_root: Versioned publish root (local path or ``gs://``). Resolved from
+            CLI, else ``PREDICTION_PUBLISH_ROOT``, else ``prediction_publish.root``
+            in ``config.yml``. Required when publishing; there is no library default.
+        publish_label: Optional free-text label stored in each ``run.json``.
+        rebuild_metrics_path: Optional rebuild metrics JSON for per-layer versions.
         verbose: Enable verbose logging.
 
     Raises:
         FileNotFoundError: If model index or input files are not found.
-        ValueError: If no models match the specified criteria or if no models are successfully loaded.
+        ValueError: If no models match the specified criteria, if no models
+            are successfully loaded, or if ``--publish`` is set with no publish root.
+        FileExistsError: If a computed publish version folder already exists.
     """
     setup_logging(level=logging.INFO, verbose=verbose)
-    
+
     logger.info("Starting prediction pipeline...")
-    
+
+    models_dir = resolve_predict_models_dir(models_dir, run=run)
+
     # Load model index
     logger.debug("Loading model index...")
     model_index = load_model_index(models_dir)
     logger.info(f"Found {len(model_index)} models in index")
-    
+
     # Filter models
     filtered_index = filter_models(model_index, species, activity_types)
     logger.info(f"Selected {len(filtered_index)} models for prediction")
-    
+
     if len(filtered_index) == 0:
         logger.warning("No models match the specified criteria")
         raise ValueError("No models match the specified criteria")
-    
+
     # Load environmental variables
     logger.debug("Loading environmental variables...")
     _, ev_raster = load_environmental_variables(ev_path)
 
-    crs_out = prediction_crs if prediction_crs is not None else load_project_config().crs
+    project_config = load_project_config()
+    crs_out = prediction_crs if prediction_crs is not None else project_config.crs
 
-    make_predictions(
+    resolved_publish_root: Optional[str] = None
+    if publish or publish_root:
+        publish_cfg = None
+        if project_config.prediction_publish is not None:
+            publish_cfg = {
+                "prediction_publish": project_config.prediction_publish.model_dump()
+            }
+        resolved_publish_root = resolve_prediction_publish_root(
+            publish_root,
+            config=publish_cfg if publish_cfg is not None else {},
+        )
+
+    if rebuild_metrics_path is None:
+        candidate = Path(ev_path).expanduser().resolve().parent / "rebuild_metrics.json"
+        if candidate.is_file():
+            rebuild_metrics_path = candidate
+
+    published = make_predictions(
         filtered_index,
         models_dir,
         ev_raster,
@@ -337,6 +417,10 @@ def predict_sdm_models(
         split_files=split_files,
         prediction_crs=crs_out,
         write_cog=write_cog,
+        publish_root=resolved_publish_root,
+        publish_label=publish_label,
+        rebuild_metrics_path=rebuild_metrics_path,
     )
-    
-    logger.info("✓ Prediction pipeline complete") 
+
+    logger.info("✓ Prediction pipeline complete")
+    return published

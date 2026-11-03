@@ -10,6 +10,8 @@ General project principles for coding agents (and useful for contributors) live 
 git clone https://github.com/MatthewJWhittle/shefflied-bats.git
 cd shefflied-bats
 uv sync
+# Optional: GCS (gs://) paths and Google Secret Manager for MLflow passwords
+# uv sync --extra gcp
 uv run pytest
 ```
 

@@ -90,6 +90,7 @@ Written by `sdm train`. Key columns:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `trainer` | string | Modelling method / adapter id (e.g. `maxent`). Written by `sdm train`; predict defaults missing values to `maxent` for pre-adapter packages. See [modelling/adapters.md](modelling/adapters.md). |
 | `maxent_config` | object | Serialised MaxEnt / elapid hyperparameters |
 | `metrics` | object | e.g. `mean_cv_auc`, `std_cv_auc`, `n_presence`, `n_background`, `training_success` → hsm-app **`metadata.card`** via adapter |
 | `model_limited` | boolean | When `true`, publish no suitability cut-off (`thresholds.json` has `threshold: null` and `no_cutoff_reason`) |
@@ -103,6 +104,7 @@ Written by `sdm train`. Key columns:
   "model_id": "nyctalus_noctula_roost",
   "latin_name": "Nyctalus noctula",
   "activity_type": "Roost",
+  "trainer": "maxent",
   "feature_names": ["terrain_dtm", "terrain_slope", "ceh_broadleaved_500m"],
   "metrics": { "mean_cv_auc": 0.82, "std_cv_auc": 0.04, "n_presence": 120, "n_background": 4000 },
   "artifacts": { "model_pickle": "model.pkl" }
@@ -139,6 +141,10 @@ Produced by `sdm predict` under `{predictions_dir}/` (default `data/sdm_predicti
 - **CRS:** project CRS from `config.yml` (typically **EPSG:27700**)
 - **Encoding:** COG by default (`--cog/--no-cog`)
 - **Values:** continuous suitability / probability-style scores
+
+### Optional versioned bucket publish
+
+`sdm predict --publish` copies each per-model surface into a new folder under `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/` with QGIS-friendly names `prediction__<genus>_<species>_<behaviour>__<version>__suitability.tif`, `…__threshold_<rule>.tif` (METHOD.md cut-off when available), and `…__run.json`. Opt-in; never overwrites an existing version. See [data-layout.md](data-layout.md).
 
 ### hsm-app delivery requirements
 

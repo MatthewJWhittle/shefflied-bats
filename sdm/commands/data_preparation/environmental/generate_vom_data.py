@@ -12,7 +12,7 @@ from sdm.raster.layer_qa import (
     DEFAULT_NODATA_FILL_MAX_CELLS,
     fill_xarray_nodata_nearest,
 )
-from sdm.data import WCSDownloader
+from sdm.data.wcs_tilearray import EA_VOM_COVERAGE_ID, EA_VOM_WCS_ENDPOINT, fetch_wcs_dataset
 
 # Ecology review / #73: tallest plausible UK trees ~40–50 m; cells above this
 # are almost certainly masts, pylons or similar structures in the VOM.
@@ -29,12 +29,23 @@ def cap_vegetation_heights(
     Values above ``max_height_m`` are clipped; NaNs and values at or below the
     cap are unchanged. Applied on the fine-resolution VOM so mean/min/max/std
     all reflect the capped heights.
+
+    Lazy Dask arrays are clipped without an eager count (the #121 height-band
+    path keeps the mosaic lazy until ``map_blocks``).
     """
-    n_above = int((data_array > max_height_m).sum().item())
-    if n_above:
+    data = data_array.data
+    is_lazy = hasattr(data, "chunks") and data.chunks is not None
+    if not is_lazy:
+        n_above = int((data_array > max_height_m).sum().item())
+        if n_above:
+            logging.info(
+                "Capping %d VOM cells above %.0f m vegetation height (structures)",
+                n_above,
+                max_height_m,
+            )
+    else:
         logging.info(
-            "Capping %d VOM cells above %.0f m vegetation height (structures)",
-            n_above,
+            "Capping VOM cells above %.0f m vegetation height (lazy; count deferred)",
             max_height_m,
         )
     return data_array.clip(max=max_height_m)
@@ -59,31 +70,27 @@ async def fetch_and_process_vom_data(
     # model_resolution is the project's reference EV resolution, from spatial_config["resolution"]
     # summary_target_resolution_m is the resolution to which VOM stats are coarsened.
 
-    # VOM WCS Service Details
-    vom_wcs_endpoint = "https://environment.data.gov.uk/spatialdata/vegetation-object-model/wcs"
-    vom_coverage_id = "ecae3bef-1e1d-4051-887b-9dc613c928ec:Vegetation_Object_Model_Elevation_2022"
-    
-    wcs_downloader = WCSDownloader(
-        endpoint=vom_wcs_endpoint,
-        coverage_id=vom_coverage_id,
-        request_tile_pixels=wcs_tile_pixels,
-        use_temp_storage=wcs_temp_storage,
+    del wcs_temp_storage  # tilearray manages chunk fetch; kept for CLI compat
+
+    logging.info(
+        "Downloading VOM via tilearray at %sm resolution...",
+        wcs_download_resolution_m,
+    )
+    raw_vom_data = await asyncio.to_thread(
+        fetch_wcs_dataset,
+        endpoint=EA_VOM_WCS_ENDPOINT,
+        coverage_id=EA_VOM_COVERAGE_ID,
+        bbox=grid_bounds,
+        resolution_m=float(wcs_download_resolution_m),
+        chunk_size=wcs_tile_pixels,
+        max_concurrent=max_concurrent_downloads,
+        compute=True,
     )
 
-    logging.info(f"Downloading VOM data at {wcs_download_resolution_m}m resolution...")
-    # raw_vom_data will be an xr.Dataset, with the variable named after coverage_id
-    raw_vom_data = await wcs_downloader.get_coverage(
-        bbox=grid_bounds, 
-        resolution=float(wcs_download_resolution_m),
-        max_concurrent=max_concurrent_downloads
-    )
-    
-    # Extract the DataArray (assuming single variable in the Dataset from WCSDownloader)
     if not raw_vom_data.data_vars:
         logging.error("VOM WCS download returned no data variables.")
         raise ValueError("VOM WCS download failed to return data.")
-    # The variable name is set to coverage_id by WCSDownloader
-    vom_data_array = raw_vom_data[vom_coverage_id]
+    vom_data_array = raw_vom_data[EA_VOM_COVERAGE_ID]
     vom_data_array = cap_vegetation_heights(vom_data_array)
 
     logging.info(f"Summarising VOM data to {summary_target_resolution_m}m resolution metrics...")

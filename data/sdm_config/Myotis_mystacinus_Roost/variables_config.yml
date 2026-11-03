@@ -5,7 +5,7 @@ variables:
 - climate_bioclim_bio_9
 - terrain_stats_slope
 - climate_stats_wind_ann_avg
-- vom_vegetation_height_max
 - ceh_landcover_upland_heathland_500m
 - ceh_landcover_arable_500m
-- ceh_landcover_broadleaved_woodland_500m
+- vom_canopy_height_std  # canopy height variability (replaces old vegetation-height layers)
+- vom_woody_cover_share_500m  # woody cover share within 500 m

@@ -68,7 +68,39 @@ ev_stack:
         min: 0
         max: 40
 
-# MLflow configuration
+# MLflow run tracking (#93). Secrets and connection details live in the
+# gitignored mlflow.settings.yml (see mlflow.settings.example.yml). Tracking
+# stays off until that file is filled in and cloud resources are approved.
 mlflow:
-  tracking_uri: "sqlite:///mlflow.db"
+  enabled: false
+  settings_file: "mlflow.settings.yml"
   experiment_name: "species_sdm_experiment"
+
+# Versioned prediction publish (`sdm predict --publish`). Library code has no
+# project bucket default: set root here, or pass --publish-root / PREDICTION_PUBLISH_ROOT.
+# Publish file names come from each model's full Latin name (snake case) + behaviour;
+# there is no short-name → Latin translation map.
+prediction_publish:
+  root: "gs://habitat-suitability-modelling-data/predictions"
+
+# Global background defaults for `sdm train` (overridden by model_config.yml
+# `model.background`, then by CLI). Values match today's live-train behaviour.
+# Trial packaging: model_config.background-as-drawn.yml (#103).
+# See docs/background-points.md.
+background:
+  n_background_points: 8000
+  surface: all_bat
+  background_method: contrast
+  background_value: 0.025
+  sigma: 6.5
+  transform_method: presence
+  presence_exclusion_m: 500
+  background_thin_m: 2000
+  presence_thin_m: 2000
+  cap_ratio: 10
+  min_background: null
+  max_background: null
+  distance_weights: true
+  background_distance_weights: true
+  sample_weight_n_neighbors: 10
+  class_balance: true
