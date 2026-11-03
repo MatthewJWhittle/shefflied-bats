@@ -5,12 +5,14 @@ Lives outside ``sdm`` — imports ``qgis.review.generate`` only.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 
 from qgis.review.generate import (
+    BASEMAP_CRS,
     DEFAULT_MANIFEST_REL,
     DEFAULT_PROJECT_REL,
     _stable_layer_id,
@@ -168,3 +170,32 @@ def test_generator_is_outside_sdm() -> None:
     sdm_root = Path(sdm.__file__).resolve().parent
     generate_path = (REPO_ROOT / "qgis" / "review" / "generate.py").resolve()
     assert sdm_root not in generate_path.parents
+
+
+def test_non_xyz_layer_srs_matches_manifest_crs() -> None:
+    """Every prediction/cutoff maplayer authid must equal manifest.crs."""
+    manifest = load_manifest(REPO_ROOT / DEFAULT_MANIFEST_REL)
+    assert manifest.crs == "EPSG:27700"
+    text = (REPO_ROOT / DEFAULT_PROJECT_REL).read_text(encoding="utf-8")
+    # Split into maplayer blocks; skip XYZ basemaps (provider wms / type=xyz).
+    layers = re.findall(r"<maplayer\b[\s\S]*?</maplayer>", text)
+    assert layers
+    checked = 0
+    for block in layers:
+        if "type=xyz" in block or "<provider>wms</provider>" in block:
+            auth = re.search(r"<authid>([^<]+)</authid>", block)
+            assert auth is not None
+            assert auth.group(1) == BASEMAP_CRS
+            continue
+        auth = re.search(r"<authid>([^<]+)</authid>", block)
+        assert auth is not None, block[:200]
+        assert auth.group(1) == manifest.crs
+        checked += 1
+    assert checked >= 1
+    # Project CRS follows the same manifest value.
+    project_crs = re.search(
+        r"<projectCrs>\s*<spatialrefsys>[\s\S]*?<authid>([^<]+)</authid>",
+        text,
+    )
+    assert project_crs is not None
+    assert project_crs.group(1) == manifest.crs

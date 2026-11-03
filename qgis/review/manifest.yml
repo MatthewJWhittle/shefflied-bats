@@ -3,6 +3,8 @@
 # compare: optional; omit or leave models empty for a main-only project.
 title: Sheffield bats — review
 project: qgis/review/hsm-review.qgs
+# CRS of prediction / cutoff rasters (and the QGIS project). XYZ basemaps stay EPSG:3857.
+crs: EPSG:27700
 
 versions:
   main:

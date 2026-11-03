@@ -37,6 +37,8 @@ LAYER_ID_NAMESPACE = uuid.UUID("6b2f0c3e-9a41-4d7a-8f12-127000000001")
 DEFAULT_MANIFEST_REL = Path("qgis/review/manifest.yml")
 DEFAULT_PROJECT_REL = Path("qgis/review/hsm-review.qgs")
 PROJECT_TITLE = "Sheffield bats — review"
+DEFAULT_RASTER_CRS = "EPSG:27700"
+BASEMAP_CRS = "EPSG:3857"
 
 # Shared 0–1 suitability ramp (matches Matt's desktop reference styling).
 SUITABILITY_RAMP_ITEMS: tuple[tuple[float, str, str], ...] = (
@@ -113,6 +115,8 @@ class ReviewManifest:
     versions: tuple[VersionSpec, ...]
     title: str = PROJECT_TITLE
     project_relpath: Path = DEFAULT_PROJECT_REL
+    # Authid for prediction/cutoff rasters and the project (e.g. EPSG:27700).
+    crs: str = DEFAULT_RASTER_CRS
 
 
 @dataclass
@@ -272,10 +276,18 @@ def load_manifest(path: Path | str) -> ReviewManifest:
             versions.append(compare)
     title = str(payload.get("title") or PROJECT_TITLE)
     project_rel = Path(str(payload.get("project") or DEFAULT_PROJECT_REL))
+    crs_raw = payload.get("crs", DEFAULT_RASTER_CRS)
+    crs = str(crs_raw).strip() if crs_raw is not None else DEFAULT_RASTER_CRS
+    if not crs:
+        crs = DEFAULT_RASTER_CRS
+    if not re.fullmatch(r"EPSG:\d+", crs, flags=re.IGNORECASE):
+        raise ValueError(f"manifest.crs must look like EPSG:27700; got {crs!r}")
+    crs = f"EPSG:{crs.split(':', 1)[1]}"
     return ReviewManifest(
         versions=tuple(versions),
         title=title,
         project_relpath=project_rel,
+        crs=crs,
     )
 
 
@@ -310,18 +322,55 @@ def _extent_el(parent: Element, tag: str, extent: Sequence[float]) -> Element:
     return el
 
 
-def _srs_3857(parent: Element, tag: str = "srs") -> Element:
+def _fill_spatialrefsys(sys: Element, authid: str) -> Element:
+    """Populate *sys* (a ``spatialrefsys`` element) for a known EPSG authid."""
+    key = authid.upper()
+    _sub(sys, "wkt", "")
+    if key == "EPSG:27700":
+        _sub(
+            sys,
+            "proj4",
+            "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 "
+            "+y_0=-100000 +ellps=airy +units=m +no_defs",
+        )
+        _sub(sys, "srsid", "2437")
+        _sub(sys, "srid", "27700")
+        _sub(sys, "authid", "EPSG:27700")
+        _sub(sys, "description", "OSGB36 / British National Grid")
+        _sub(sys, "projectionacronym", "tmerc")
+        _sub(sys, "ellipsoidacronym", "EPSG:7001")
+    elif key == "EPSG:3857":
+        _sub(
+            sys,
+            "proj4",
+            "+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 "
+            "+k=1 +units=m +nadgrids=@null +wktext +no_defs",
+        )
+        _sub(sys, "srsid", "3857")
+        _sub(sys, "srid", "3857")
+        _sub(sys, "authid", "EPSG:3857")
+        _sub(sys, "description", "WGS 84 / Pseudo-Mercator")
+        _sub(sys, "projectionacronym", "merc")
+        _sub(sys, "ellipsoidacronym", "EPSG:7030")
+    else:
+        # Unknown EPSG: still emit authid/srid so QGIS can resolve on open.
+        code = key.split(":", 1)[1]
+        _sub(sys, "proj4", "")
+        _sub(sys, "srsid", code)
+        _sub(sys, "srid", code)
+        _sub(sys, "authid", key)
+        _sub(sys, "description", key)
+        _sub(sys, "projectionacronym", "")
+        _sub(sys, "ellipsoidacronym", "")
+    _sub(sys, "geographicflag", "false")
+    return sys
+
+
+def _srs_for_authid(parent: Element, authid: str, tag: str = "srs") -> Element:
+    """Attach ``<srs><spatialrefsys>…`` for a map layer."""
     srs = _sub(parent, tag)
     sys = _sub(srs, "spatialrefsys")
-    _sub(sys, "wkt", "")
-    _sub(sys, "proj4", "+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs")
-    _sub(sys, "srsid", "3857")
-    _sub(sys, "srid", "3857")
-    _sub(sys, "authid", "EPSG:3857")
-    _sub(sys, "description", "WGS 84 / Pseudo-Mercator")
-    _sub(sys, "projectionacronym", "merc")
-    _sub(sys, "ellipsoidacronym", "EPSG:7030")
-    _sub(sys, "geographicflag", "false")
+    _fill_spatialrefsys(sys, authid)
     return srs
 
 
@@ -375,6 +424,7 @@ def _maplayer_raster(
     provider: str = "gdal",
     with_suitability_ramp: bool = True,
     xyz: bool = False,
+    raster_crs: str = DEFAULT_RASTER_CRS,
 ) -> Element:
     layer = Element(
         "maplayer",
@@ -396,12 +446,8 @@ def _maplayer_raster(
     _sub(layer, "datasource", datasource)
     _sub(layer, "keywordList")
     _sub(layer, "layername", name)
-    if xyz:
-        _srs_3857(layer)
-    else:
-        # Published prediction COGs used in the desktop reference are EPSG:3857;
-        # QGIS refreshes extent/CRS from the file on open.
-        _srs_3857(layer)
+    # XYZ tiles are Web Mercator; prediction/cutoff rasters use the manifest CRS.
+    _srs_for_authid(layer, BASEMAP_CRS if xyz else raster_crs)
     _sub(layer, "provider", provider)
     flags = _sub(layer, "flags")
     _sub(flags, "Identifiable", "1")
@@ -713,6 +759,7 @@ def build_project_xml(manifest: ReviewManifest) -> BuiltProject:
                 provider=layer.provider,
                 with_suitability_ramp=(layer.kind in {"suitability", "cutoff"}),
                 xyz=(layer.kind == "basemap"),
+                raster_crs=manifest.crs,
             )
         )
 
@@ -725,30 +772,11 @@ def build_project_xml(manifest: ReviewManifest) -> BuiltProject:
     _extent_el(mapcanvas, "extent", DEFAULT_EXTENT)
     _sub(mapcanvas, "rotation", "0")
     dest = _sub(mapcanvas, "destinationsrs")
-    # destinationsrs wants spatialrefsys directly
-    sys = _sub(dest, "spatialrefsys")
-    _sub(sys, "wkt", "")
-    _sub(sys, "proj4", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs")
-    _sub(sys, "srsid", "2437")
-    _sub(sys, "srid", "27700")
-    _sub(sys, "authid", "EPSG:27700")
-    _sub(sys, "description", "OSGB36 / British National Grid")
-    _sub(sys, "projectionacronym", "tmerc")
-    _sub(sys, "ellipsoidacronym", "EPSG:7001")
-    _sub(sys, "geographicflag", "false")
+    _fill_spatialrefsys(_sub(dest, "spatialrefsys"), manifest.crs)
     _sub(mapcanvas, "rendermaptile", "0")
 
     project_crs = _sub(root, "projectCrs")
-    sys = _sub(project_crs, "spatialrefsys")
-    _sub(sys, "wkt", "")
-    _sub(sys, "proj4", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs")
-    _sub(sys, "srsid", "2437")
-    _sub(sys, "srid", "27700")
-    _sub(sys, "authid", "EPSG:27700")
-    _sub(sys, "description", "OSGB36 / British National Grid")
-    _sub(sys, "projectionacronym", "tmerc")
-    _sub(sys, "ellipsoidacronym", "EPSG:7001")
-    _sub(sys, "geographicflag", "false")
+    _fill_spatialrefsys(_sub(project_crs, "spatialrefsys"), manifest.crs)
 
     theme_els, theme_names = _build_themes(manifest, layers)
     presets = _sub(root, "visibility-presets")
