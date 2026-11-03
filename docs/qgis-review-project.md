@@ -1,6 +1,6 @@
 # QGIS review project
 
-In-repo QGIS project for reviewing citizen-science model maps straight from the bucket (issue #127). No download step: every prediction layer uses GDAL `/vsigs/` under `gs://habitat-suitability-modelling-data/…`.
+In-repo QGIS project for reviewing citizen-science model maps straight from the bucket (issue #127). Project tooling under `qgis/review/` — not part of the `sdm` modelling library or CLI. No download step: every prediction layer uses GDAL `/vsigs/` under `gs://habitat-suitability-modelling-data/…`.
 
 ## Open the project
 
@@ -29,7 +29,7 @@ In-repo QGIS project for reviewing citizen-science model maps straight from the 
 3. Regenerate:
 
    ```bash
-   uv run python scripts/generate_qgis_review_project.py
+   uv run python -m qgis.review.generate
    ```
 
 4. Commit both the manifest and the regenerated `.qgs`. CI regenerates from the manifest and fails if the committed project differs, if credentials/tokens appear, or if a layer path is not from the manifest (plus the fixed basemaps).

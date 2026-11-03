@@ -1,13 +1,19 @@
-"""Generate an in-repo QGIS review project from a YAML manifest.
+"""Generate the in-repo QGIS review project from a YAML manifest.
 
-Prediction layer paths use GDAL ``/vsigs/`` (via :func:`uri_for_rasterio`) so
-QGIS loads versioned maps from the bucket without downloading. Naming for the
-``main`` batch follows the prediction-version layout from prediction publish
-(#104). No credentials are written into the project file.
+Project tooling (not part of the ``sdm`` modelling library/CLI). Prediction
+layer paths use GDAL ``/vsigs/`` so QGIS loads versioned maps from the bucket
+without downloading. Naming for the ``main`` batch follows the
+prediction-version layout from prediction publish (#104). No credentials are
+written into the project file.
+
+Run from the repo root::
+
+    uv run python -m qgis.review.generate
 """
 
 from __future__ import annotations
 
+import argparse
 import html
 import re
 import uuid
@@ -18,7 +24,14 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 import yaml
 
-from sdm.utils.fs import uri_for_rasterio
+
+def uri_for_vsigs(uri_or_path: str | Path) -> str:
+    """Map ``gs://`` URIs to GDAL ``/vsigs/`` paths (local helper; no sdm import)."""
+    ref = str(uri_or_path)
+    if ref.startswith("gs://"):
+        return f"/vsigs/{ref[len('gs://'):]}"
+    return ref
+
 
 LAYER_ID_NAMESPACE = uuid.UUID("6b2f0c3e-9a41-4d7a-8f12-127000000001")
 DEFAULT_MANIFEST_REL = Path("qgis/review/manifest.yml")
@@ -193,7 +206,7 @@ def gs_join(run_folder: str, filename: str) -> str:
 
 
 def vsigs_path(run_folder: str, filename: str) -> str:
-    return uri_for_rasterio(gs_join(run_folder, filename))
+    return uri_for_vsigs(gs_join(run_folder, filename))
 
 
 def _parse_model_entry(model_id: str, raw: Mapping[str, Any]) -> ModelLayerSpec:
@@ -860,3 +873,30 @@ def assert_no_credentials(qgs_text: str) -> None:
     hits = find_credential_hits(qgs_text)
     if hits:
         raise AssertionError(f"Credential-like content in project: {sorted(set(hits))}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry: regenerate the committed review ``.qgs`` from the manifest."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    repo_root = Path(__file__).resolve().parents[2]
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=repo_root / DEFAULT_MANIFEST_REL,
+        help="Path to the review manifest YAML",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output .qgs path (default: project path from the manifest)",
+    )
+    args = parser.parse_args(argv)
+    manifest = load_manifest(args.manifest)
+    out = write_project(manifest, repo_root=repo_root, output_path=args.output)
+    print(f"Wrote {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

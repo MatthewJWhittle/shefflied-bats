@@ -1,4 +1,7 @@
-"""QGIS review project: regenerate-diff, credentials, and path allowlist (#127)."""
+"""QGIS review project tooling: regenerate-diff, credentials, path allowlist (#127).
+
+Lives outside ``sdm`` — imports ``qgis.review.generate`` only.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from sdm.utils.qgis_review_project import (
+from qgis.review.generate import (
     DEFAULT_MANIFEST_REL,
     DEFAULT_PROJECT_REL,
     _stable_layer_id,
@@ -86,7 +89,6 @@ def test_empty_compare_yields_main_only_project(tmp_path: Path) -> None:
     assert 'name="Main"' in built_text
     assert_no_credentials(built_text)
     assert_project_paths_allowed(built_text, manifest)
-    # Themes: Main only (no Compare / per-model Compare themes).
     assert built_text.count('name="Main"') >= 1
     assert 'name="Compare"' not in built_text
     assert "Pair:" not in built_text
@@ -105,7 +107,6 @@ def test_compare_groups_and_themes_present() -> None:
     assert "/vsigs/habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain/" in text
     assert "myotis_brandtii_roost__suitability.tif" in text
     assert "myotis_brandtii_roost__cutoff_p10.tif" in text
-    # Google Satellite must stay out.
     assert "google.cn" not in text.lower()
     assert "Google Satellite" not in text
 
@@ -156,3 +157,14 @@ def test_write_project_round_trip(tmp_path: Path) -> None:
     out = tmp_path / "out.qgs"
     write_project(manifest, repo_root=tmp_path, output_path=out)
     assert out.read_text(encoding="utf-8") == generate_project_text(manifest)
+
+
+def test_generator_is_outside_sdm() -> None:
+    """QGIS review tooling must not live under the modelling library."""
+    assert not (REPO_ROOT / "sdm" / "utils" / "qgis_review_project.py").exists()
+    assert (REPO_ROOT / "qgis" / "review" / "generate.py").is_file()
+    import sdm
+
+    sdm_root = Path(sdm.__file__).resolve().parent
+    generate_path = (REPO_ROOT / "qgis" / "review" / "generate.py").resolve()
+    assert sdm_root not in generate_path.parents
