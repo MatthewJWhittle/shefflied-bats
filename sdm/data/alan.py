@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -30,7 +31,12 @@ from rasterio.windows import Window, from_bounds
 from rasterio.warp import transform_bounds
 
 from sdm.raster.utils import reproject_data, squeeze_dataset
-from sdm.utils.fs import uri_exists, uri_for_rasterio
+from sdm.utils.fs import (
+    ensure_gcs_application_credentials_env,
+    gcs_adc_path_from_cloudsdk_config,
+    uri_exists,
+    uri_for_rasterio,
+)
 
 # Default local cache paths (not committed). Prefer these when present.
 DEFAULT_ALAN_SOURCE_PATH = Path("data/raw/big-files/alan/viirs_annual.tif")
@@ -63,18 +69,75 @@ _VNL_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
+_GCS_AUTH_MARKERS = (
+    "anonymous caller",
+    "default credentials were not found",
+    "credentials were not found",
+    "could not load credentials",
+    "permission denied",
+    "permission 'storage.",
+    "unauthorized",
+    "unauthenticated",
+    "forbidden",
+    "authentication",
+    "401",
+    "403",
+)
 
-def _uri_reachable(ref: str) -> bool:
-    """Like ``uri_exists``, but treat ``gs://`` auth/network errors as missing.
 
-    CI and offline machines must not fail when probing the private ALAN bucket
-    without credentials; operators with ADC still get the bucket fallback.
+class AlanUriAuthError(PermissionError):
+    """GCS credentials missing or rejected while probing an ALAN URI."""
+
+
+def _gcs_auth_hint() -> str:
+    """Operator-facing hint that includes ``CLOUDSDK_CONFIG`` state."""
+    cloudsdk = os.environ.get("CLOUDSDK_CONFIG", "").strip() or "(unset)"
+    adc = gcs_adc_path_from_cloudsdk_config()
+    adc_state = (
+        f"present at {adc}"
+        if adc is not None and adc.is_file()
+        else f"missing at {adc}" if adc is not None else "unknown"
+    )
+    app_creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip() or "(unset)"
+    return (
+        "GCS authentication failed for the ALAN bucket. "
+        "Run `gcloud auth application-default login`, set "
+        "GOOGLE_APPLICATION_CREDENTIALS to a service-account JSON key, or point "
+        "CLOUDSDK_CONFIG at a gcloud config dir that contains "
+        "application_default_credentials.json. "
+        f"CLOUDSDK_CONFIG={cloudsdk}; ADC file {adc_state}; "
+        f"GOOGLE_APPLICATION_CREDENTIALS={app_creds}."
+    )
+
+
+def _is_gcs_auth_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    if any(marker in text for marker in _GCS_AUTH_MARKERS):
+        return True
+    status = getattr(exc, "code", None)
+    if status in (401, 403):
+        return True
+    return False
+
+
+def alan_uri_exists(ref: str) -> bool:
+    """Return True when ``ref`` exists; False when missing.
+
+    Auth / permission failures on ``gs://`` raise :class:`AlanUriAuthError`
+    (never treated as "missing"). Aligns gcsfs and GDAL ADC via
+    :func:`ensure_gcs_application_credentials_env` so ``CLOUDSDK_CONFIG`` is
+    honoured.
     """
+    ensure_gcs_application_credentials_env()
     try:
         return bool(uri_exists(ref))
     except Exception as exc:  # noqa: BLE001 — gcsfs/fsspec raise HttpError/OSError/…
+        if str(ref).startswith("gs://") and _is_gcs_auth_error(exc):
+            raise AlanUriAuthError(f"{_gcs_auth_hint()} Probe of {ref} failed: {exc}") from exc
         if str(ref).startswith("gs://"):
-            logging.debug("ALAN URI probe failed for %s: %s", ref, exc)
+            # Network / not-found style errors from some backends surface as
+            # exceptions rather than False; treat non-auth as missing.
+            logging.warning("ALAN URI probe failed for %s: %s", ref, exc)
             return False
         raise
 
@@ -91,20 +154,20 @@ def resolve_alan_raster_uri(
     Local paths win when the file exists so offline rebuilds keep working.
     Bucket defaults are the canonical 2025 VNL v2.2 objects under
     ``gs://habitat-suitability-modelling-data/raw/big-files/alan/``.
-    Unauthenticated bucket probes count as missing (no hard CI failure).
+    Auth failures raise :class:`AlanUriAuthError` (not silent "missing").
     """
     if override is not None:
         ref = str(override)
-        if _uri_reachable(ref):
+        if alan_uri_exists(ref):
             return ref
         raise FileNotFoundError(
             f"ALAN {label} not found at {ref}. Place the GeoTIFF locally or "
             f"pass a reachable path / gs:// URI."
         )
     local_ref = str(local_default)
-    if _uri_reachable(local_ref):
+    if alan_uri_exists(local_ref):
         return local_ref
-    if _uri_reachable(bucket_default):
+    if alan_uri_exists(bucket_default):
         logging.info("ALAN %s: using bucket object %s", label, bucket_default)
         return bucket_default
     raise FileNotFoundError(
@@ -128,25 +191,67 @@ def resolve_alan_cf_cvg_uri(
     *,
     required: bool = False,
 ) -> Optional[str]:
-    """Resolve matching ``cf_cvg`` coverage; ``None`` when optional and absent."""
-    if override is not None:
-        return resolve_alan_raster_uri(
-            override,
-            local_default=DEFAULT_ALAN_CF_CVG_PATH,
-            bucket_default=DEFAULT_ALAN_CF_CVG_URI,
-            label="cf_cvg",
+    """Resolve matching ``cf_cvg`` coverage; ``None`` when optional and absent.
+
+    Optional probes that hit a GCS auth failure log a clear warning (including
+    ``CLOUDSDK_CONFIG``) and return ``None`` so a full rebuild can continue
+    without the coverage mask. Required probes re-raise.
+    """
+    try:
+        if override is not None:
+            return resolve_alan_raster_uri(
+                override,
+                local_default=DEFAULT_ALAN_CF_CVG_PATH,
+                bucket_default=DEFAULT_ALAN_CF_CVG_URI,
+                label="cf_cvg",
+            )
+        local_ref = str(DEFAULT_ALAN_CF_CVG_PATH)
+        if alan_uri_exists(local_ref):
+            return local_ref
+        if alan_uri_exists(DEFAULT_ALAN_CF_CVG_URI):
+            logging.info("ALAN cf_cvg: using bucket object %s", DEFAULT_ALAN_CF_CVG_URI)
+            return DEFAULT_ALAN_CF_CVG_URI
+    except AlanUriAuthError as exc:
+        if required:
+            raise
+        logging.warning(
+            "ALAN cf_cvg bucket probe failed authentication; continuing without "
+            "coverage mask. %s",
+            exc,
         )
-    local_ref = str(DEFAULT_ALAN_CF_CVG_PATH)
-    if _uri_reachable(local_ref):
-        return local_ref
-    if _uri_reachable(DEFAULT_ALAN_CF_CVG_URI):
-        logging.info("ALAN cf_cvg: using bucket object %s", DEFAULT_ALAN_CF_CVG_URI)
-        return DEFAULT_ALAN_CF_CVG_URI
+        return None
     if required:
         raise FileNotFoundError(
             f"ALAN cf_cvg not found at {local_ref} or {DEFAULT_ALAN_CF_CVG_URI}."
         )
     return None
+
+
+def load_model_grid_from_template(
+    template_path: Union[str, Path],
+) -> tuple[Any, Affine, tuple[float, float, float, float], float]:
+    """Read CRS, transform, bounds, and resolution from an existing EV GeoTIFF.
+
+    Used so ALAN matches the training-stack grid (same extent as other layers)
+    when ``paths.ev_tiff`` / a template is available.
+    """
+    ref = str(template_path)
+    if not uri_exists(ref):
+        raise FileNotFoundError(f"ALAN template raster not found: {ref}")
+    with rio.open(uri_for_rasterio(ref)) as src:
+        if src.crs is None:
+            raise ValueError(f"ALAN template has no CRS: {ref}")
+        transform = src.transform
+        resolution = float(abs(transform.a))
+        if resolution <= 0:
+            raise ValueError(f"ALAN template has non-positive resolution: {ref}")
+        bounds = (
+            float(src.bounds.left),
+            float(src.bounds.bottom),
+            float(src.bounds.right),
+            float(src.bounds.top),
+        )
+        return src.crs, transform, bounds, resolution
 
 
 def file_sha256(path: Union[str, Path], *, chunk_size: int = 1024 * 1024) -> str:
@@ -571,10 +676,13 @@ __all__ = [
     "DEFAULT_ALAN_SOURCE_PATH",
     "DEFAULT_ALAN_SOURCE_URI",
     "DEFAULT_INTERP_MARGIN_PIXELS",
+    "AlanUriAuthError",
+    "alan_uri_exists",
     "build_alan_provenance",
     "file_sha256",
     "load_alan_source",
     "load_alan_source_windowed",
+    "load_model_grid_from_template",
     "parse_vnl_source_metadata",
     "reproject_alan_to_model_grid",
     "resolve_alan_cf_cvg_uri",

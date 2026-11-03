@@ -10,7 +10,9 @@ import fsspec
 import pytest
 
 from sdm.utils.fs import (
+    ensure_gcs_application_credentials_env,
     filesystem_for_uri,
+    gcs_adc_path_from_cloudsdk_config,
     join_uri_path,
     local_materialized_path,
     put_local_tree,
@@ -33,6 +35,29 @@ def test_join_uri_path_local_and_remote() -> None:
 def test_uri_for_rasterio_maps_gs_to_vsigs() -> None:
     assert uri_for_rasterio("gs://bucket/evs/stack.tif") == "/vsigs/bucket/evs/stack.tif"
     assert uri_for_rasterio("/data/local.tif") == "/data/local.tif"
+
+
+def test_gcs_adc_path_respects_cloudsdk_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path))
+    assert gcs_adc_path_from_cloudsdk_config() == tmp_path / (
+        "application_default_credentials.json"
+    )
+
+
+def test_ensure_gcs_application_credentials_env_from_cloudsdk_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GDAL ignores CLOUDSDK_CONFIG; mirror ADC into GOOGLE_APPLICATION_CREDENTIALS."""
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.setenv("CLOUDSDK_CONFIG", str(tmp_path))
+    adc = tmp_path / "application_default_credentials.json"
+    adc.write_text('{"type": "authorized_user"}', encoding="utf-8")
+
+    set_path = ensure_gcs_application_credentials_env()
+    assert set_path == adc
+    assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == str(adc)
 
 
 def test_gs_uri_requires_gcp_extra_when_gcsfs_missing(

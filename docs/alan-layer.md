@@ -6,10 +6,11 @@ VIIRS night-lights radiance to the environmental variables stack.
 ## Status
 
 Rebuild step `alan` on the current environmental-variables pipeline. It
-**auto-skips** when the local VIIRS GeoTIFF is missing so existing rebuilds keep
-working (the model stack then omits `alan_viirs_radiance` from the selected
-subset). **Not enabled for any species yet** (brown long-eared / BLE wiring is
-a separate second pass). No radiance files are committed.
+resolves the source as **local cache → bucket**, and **auto-skips** only when
+both are absent (auth failures are reported clearly, not treated as missing).
+The model stack then omits `alan_viirs_radiance` from the selected subset.
+**Not enabled for any species yet** (brown long-eared / BLE wiring is a
+separate second pass). No radiance files are committed.
 
 ## Source
 
@@ -28,7 +29,8 @@ a separate second pass). No radiance files are committed.
 Keep the global download in the bucket / local cache only — **not in git**.
 Generation prefers the local cache when present, otherwise the bucket URIs above
 (via GDAL `/vsigs/`). Explicit `--alan-source-path` / `--alan-cf-cvg-path`
-(local or `gs://`) always win.
+(local or `gs://`) always win. `CLOUDSDK_CONFIG` is honoured for ADC (and
+mirrored into `GOOGLE_APPLICATION_CREDENTIALS` so GDAL sees the same file).
 
 ```bash
 # Optional: sync bucket objects into the local cache
@@ -49,16 +51,17 @@ trained without ALAN.
 
 ## How it is built (ML-safe)
 
-1. **Windowed read** of the study-area footprint (+ setup boundary buffer + a
-   small bilinear interpolation margin). The global ~11.6 GB array is never
-   loaded into `rio.reproject`.
+1. **Windowed read** of the target footprint (+ a small bilinear interpolation
+   margin). The global ~11.6 GB array is never loaded into `rio.reproject`.
 2. **Preserve valid zeros** from `average_masked` (dark background). Never set
    nodata=0.
 3. When `cf_cvg` is present, cells with coverage ≤ 0 become **NaN** (missing
    coverage). That is separate from radiance zeros.
-4. **Bilinear** warp onto the exact model template grid (CRS, origin, 100 m
-   cells, extent). Missing stays missing through the warp. 100 m cells still
-   hold coarse satellite information.
+4. **Bilinear** warp onto the training-stack template grid when
+   `paths.ev_tiff` (or `--alan-template-raster`) exists — same CRS, origin,
+   100 m cells, and extent as the other layers. Otherwise the grid comes from
+   the study boundary (as other EV builders do). Missing stays missing through
+   the warp. 100 m cells still hold coarse satellite information.
 5. Write `<output-dir>/alan_viirs_radiance.tif` with band name
    `alan_viirs_radiance` (same name in merge, selection CSV, and species
    configs). Provenance JSON records filename, year, product/version, checksum,
@@ -67,6 +70,11 @@ trained without ALAN.
 ```bash
 # Scratch / dry-run only — never write live data/evs/
 uv run sdm data --output-dir /path/to/scratch/evs-alan --only alan
+# Optional: explicit source / coverage / template (local or gs://)
+uv run sdm data --output-dir /path/to/scratch/evs-alan --only alan \
+  --alan-source-path gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_annual.tif \
+  --alan-cf-cvg-path gs://habitat-suitability-modelling-data/raw/big-files/alan/viirs_cf_cvg.tif \
+  --alan-template-raster data/evs/evs-to-model.tif
 ```
 
 ### Raw radiance vs log1p

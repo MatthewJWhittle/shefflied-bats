@@ -26,8 +26,11 @@ from sdm.data.alan import (
     ALAN_OUTPUT_NAME,
     DEFAULT_ALAN_CF_CVG_URI,
     DEFAULT_ALAN_SOURCE_URI,
+    AlanUriAuthError,
+    alan_uri_exists,
     load_alan_source,
     load_alan_source_windowed,
+    load_model_grid_from_template,
     reproject_alan_to_model_grid,
     resolve_alan_cf_cvg_uri,
     resolve_alan_source_uri,
@@ -304,10 +307,6 @@ def test_resolve_alan_prefers_local_over_bucket(tmp_path: Path, monkeypatch: pyt
     local = tmp_path / "viirs_annual.tif"
     local.write_bytes(b"x")
     monkeypatch.setattr("sdm.data.alan.DEFAULT_ALAN_SOURCE_PATH", local)
-    # Bucket must not be probed when local exists.
-    def boom(uri: str) -> bool:  # noqa: ARG001
-        raise AssertionError(f"unexpected uri_exists for {uri}")
-
     monkeypatch.setattr("sdm.data.alan.uri_exists", lambda ref: Path(str(ref)).exists())
     assert resolve_alan_source_uri() == str(local)
 
@@ -330,10 +329,13 @@ def test_resolve_cf_cvg_optional_when_absent(monkeypatch: pytest.MonkeyPatch) ->
     assert resolve_alan_cf_cvg_uri(required=False) is None
 
 
-def test_resolve_cf_cvg_soft_fails_bucket_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unauthenticated gs:// probes must not raise (CI has no GCS creds)."""
+def test_resolve_cf_cvg_reports_auth_without_raising_when_optional(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Optional cf_cvg: auth failure warns clearly (incl. CLOUDSDK_CONFIG), returns None."""
     missing = Path("/nonexistent/alan/viirs_cf_cvg.tif")
     monkeypatch.setattr("sdm.data.alan.DEFAULT_ALAN_CF_CVG_PATH", missing)
+    monkeypatch.setenv("CLOUDSDK_CONFIG", "/tmp/custom-gcloud-config")
 
     def boom(ref: str) -> bool:
         if str(ref).startswith("gs://"):
@@ -341,4 +343,99 @@ def test_resolve_cf_cvg_soft_fails_bucket_auth(monkeypatch: pytest.MonkeyPatch) 
         return Path(str(ref)).exists()
 
     monkeypatch.setattr("sdm.data.alan.uri_exists", boom)
-    assert resolve_alan_cf_cvg_uri(required=False) is None
+    with caplog.at_level("WARNING"):
+        assert resolve_alan_cf_cvg_uri(required=False) is None
+    assert any("CLOUDSDK_CONFIG" in record.message for record in caplog.records)
+
+
+def test_alan_uri_exists_raises_auth_error_with_cloudsdk_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLOUDSDK_CONFIG", "/tmp/custom-gcloud-config-alan")
+
+    def boom(ref: str) -> bool:
+        raise OSError("Anonymous caller does not have storage.objects.get access")
+
+    monkeypatch.setattr("sdm.data.alan.uri_exists", boom)
+    with pytest.raises(AlanUriAuthError, match="CLOUDSDK_CONFIG"):
+        alan_uri_exists(DEFAULT_ALAN_SOURCE_URI)
+
+
+def test_resolve_alan_source_auth_error_not_treated_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing = Path("/nonexistent/alan/viirs_annual.tif")
+    monkeypatch.setattr("sdm.data.alan.DEFAULT_ALAN_SOURCE_PATH", missing)
+
+    def boom(ref: str) -> bool:
+        if str(ref).startswith("gs://"):
+            raise OSError("401 Unauthorized: credentials were not found")
+        return False
+
+    monkeypatch.setattr("sdm.data.alan.uri_exists", boom)
+    with pytest.raises(AlanUriAuthError, match="authentication failed"):
+        resolve_alan_source_uri()
+
+
+def test_generate_alan_matches_template_extent(tmp_path: Path, monkeypatch) -> None:
+    """ALAN output locks to the training-stack template, not a smaller boundary."""
+    source_path = tmp_path / "viirs_annual.tif"
+    _write_coarse_viirs(source_path)
+
+    # Boundary is inset (would yield a smaller grid without the template).
+    boundary_path = tmp_path / "boundary.geojson"
+    gpd.GeoDataFrame(
+        geometry=[box(400_500, 400_500, 401_500, 401_500)],
+        crs="EPSG:27700",
+    ).to_file(boundary_path)
+
+    # Template = full 400000–402000 stack footprint (20×20 at 100 m).
+    template_path = tmp_path / "evs-to-model.tif"
+    transform, snapped = construct_transform_shift_bounds(
+        (400_000.0, 400_000.0, 402_000.0, 402_000.0), 100.0
+    )
+    height, width = grid_shape_from_bounds(snapped, 100.0)
+    template = xr.DataArray(
+        np.zeros((height, width), dtype=np.float32),
+        dims=("y", "x"),
+        coords={
+            "y": snapped[3] - (np.arange(height) + 0.5) * 100.0,
+            "x": snapped[0] + (np.arange(width) + 0.5) * 100.0,
+        },
+        name="dummy",
+    )
+    template = template.rio.write_crs("EPSG:27700")
+    template = template.rio.write_transform(transform)
+    template.rio.to_raster(template_path)
+
+    def _fake_load(boundary_path, buffer_distance=0):  # noqa: ARG001
+        boundary = gpd.read_file(boundary_path)
+        # Deliberately smaller than the template.
+        bounds = (400_500.0, 400_500.0, 401_500.0, 401_500.0)
+        t, s = construct_transform_shift_bounds(bounds, 100.0)
+        return boundary, t, s, {"crs": "EPSG:27700", "resolution": 100}
+
+    monkeypatch.setattr(
+        "sdm.commands.data_preparation.environmental.generate_alan_data.load_boundary_and_transform",
+        _fake_load,
+    )
+
+    written = generate_alan_data(
+        output_dir=tmp_path / "evs",
+        boundary_path=boundary_path,
+        alan_source_path=source_path,
+        template_raster=template_path,
+        buffer_distance_m=0,
+        compute_checksum=False,
+    )
+    with rio.open(written) as src, rio.open(template_path) as tmpl:
+        assert src.transform == tmpl.transform
+        assert src.width == tmpl.width
+        assert src.height == tmpl.height
+        assert src.bounds == tmpl.bounds
+
+    crs, out_transform, out_bounds, res = load_model_grid_from_template(template_path)
+    assert str(crs) == "EPSG:27700"
+    assert res == 100.0
+    assert out_transform == transform
+    assert out_bounds == snapped

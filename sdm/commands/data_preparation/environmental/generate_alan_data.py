@@ -19,6 +19,7 @@ from sdm.data.alan import (
     DEFAULT_INTERP_MARGIN_PIXELS,
     build_alan_provenance,
     load_alan_source_windowed,
+    load_model_grid_from_template,
     reproject_alan_to_model_grid,
     resolve_alan_cf_cvg_uri,
     resolve_alan_source_uri,
@@ -35,6 +36,7 @@ def generate_alan_data(
     *,
     alan_source_path: Optional[Union[str, Path]] = None,
     alan_cf_cvg_path: Optional[Union[str, Path]] = None,
+    template_raster: Optional[Union[str, Path]] = None,
     buffer_distance_m: float = 0,
     interp_margin_pixels: int = DEFAULT_INTERP_MARGIN_PIXELS,
     resampling: Resampling = Resampling.bilinear,
@@ -46,6 +48,11 @@ def generate_alan_data(
     Defaults resolve local cache first, then bucket objects under
     ``gs://habitat-suitability-modelling-data/raw/big-files/alan/``.
     Canonical product: 2025 EOG VNL v2.2 ``average_masked`` + matching ``cf_cvg``.
+
+    When ``template_raster`` exists (typically ``paths.ev_tiff``), the output
+    locks to that GeoTIFF's CRS / transform / extent so the layer matches the
+    training stack. Otherwise the grid comes from ``boundary_path`` (same as
+    other EV builders).
     """
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
     output_dir = Path(output_dir)
@@ -54,21 +61,43 @@ def generate_alan_data(
     cf_cvg_uri = resolve_alan_cf_cvg_uri(alan_cf_cvg_path, required=False)
 
     logging.info("Starting ALAN layer generation from %s", source_uri)
-    boundary_gdf, model_transform, grid_bounds, spatial_config = (
-        load_boundary_and_transform(boundary_path, buffer_distance=buffer_distance_m)
-    )
+    template_ref = str(template_raster) if template_raster is not None else None
+    if template_ref and uri_exists(template_ref):
+        target_crs, model_transform, grid_bounds, resolution = (
+            load_model_grid_from_template(template_ref)
+        )
+        logging.info(
+            "ALAN target grid from template %s (extent=%s, resolution=%sm)",
+            template_ref,
+            grid_bounds,
+            resolution,
+        )
+        spatial_config = {"crs": str(target_crs), "resolution": resolution}
+    else:
+        if template_ref:
+            logging.info(
+                "ALAN template %s not present; using boundary-derived grid",
+                template_ref,
+            )
+        boundary_gdf, model_transform, grid_bounds, spatial_config = (
+            load_boundary_and_transform(
+                boundary_path, buffer_distance=buffer_distance_m
+            )
+        )
+        target_crs = boundary_gdf.crs
+        resolution = spatial_config["resolution"]
     source = load_alan_source_windowed(
         source_uri,
         target_bounds=grid_bounds,
-        target_crs=boundary_gdf.crs,
+        target_crs=target_crs,
         margin_pixels=interp_margin_pixels,
         cf_cvg_path=cf_cvg_uri,
     )
     reprojected = reproject_alan_to_model_grid(
         source,
-        target_crs=boundary_gdf.crs,
+        target_crs=target_crs,
         target_transform=model_transform,
-        target_resolution=spatial_config["resolution"],
+        target_resolution=resolution,
         target_bounds=grid_bounds,
         resampling=resampling,
     )
@@ -87,7 +116,10 @@ def generate_alan_data(
     provenance["bucket_radiance"] = DEFAULT_ALAN_SOURCE_URI
     provenance["bucket_cf_cvg"] = DEFAULT_ALAN_CF_CVG_URI
     provenance["interp_margin_pixels"] = interp_margin_pixels
-    provenance["target_resolution_m"] = spatial_config["resolution"]
+    provenance["target_resolution_m"] = resolution
+    provenance["target_bounds"] = list(grid_bounds)
+    if template_ref and uri_exists(template_ref):
+        provenance["template_raster"] = template_ref
     provenance["note_100m_cells"] = (
         "Model cells are 100 m but still hold coarse (~500 m) satellite radiance"
     )
@@ -102,7 +134,7 @@ def generate_alan_data(
         provenance.get("year", ALAN_CANONICAL_YEAR),
         ALAN_CANONICAL_PRODUCT_VERSION,
         resampling.name,
-        spatial_config["resolution"],
+        resolution,
         bool(cf_cvg_uri and uri_exists(cf_cvg_uri)),
     )
     return output_path

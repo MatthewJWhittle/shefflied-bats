@@ -32,6 +32,9 @@ from sdm.data.alan import (
     ALAN_OUTPUT_NAME,
     DEFAULT_ALAN_CF_CVG_PATH,
     DEFAULT_ALAN_SOURCE_PATH,
+    AlanUriAuthError,
+    resolve_alan_cf_cvg_uri,
+    resolve_alan_source_uri,
 )
 from sdm.commands.data_preparation.processing.build_model_ev_stack import (
     DEFAULT_SELECTED_VARIABLES_CSV,
@@ -91,8 +94,9 @@ def rebuild_environmental_layers(
     fresh: bool = False,
     ceh_data_path: Path = DEFAULT_CEH_PATH,
     coastline_path: Path | None = None,
-    alan_source_path: Path | None = None,
-    alan_cf_cvg_path: Path | None = None,
+    alan_source_path: str | Path | None = None,
+    alan_cf_cvg_path: str | Path | None = None,
+    alan_template_raster: str | Path | None = None,
     buffer_distance_m: float = 0,
     config_evs: str | Path | None = None,
     config_ev_tiff: str | Path | None = None,
@@ -251,44 +255,47 @@ def rebuild_environmental_layers(
             ),
         )
 
-        alan_source = (
-            Path(alan_source_path)
-            if alan_source_path is not None
-            else DEFAULT_ALAN_SOURCE_PATH
-        )
-        alan_cf_cvg = (
-            Path(alan_cf_cvg_path)
-            if alan_cf_cvg_path is not None
-            else DEFAULT_ALAN_CF_CVG_PATH
-        )
         alan_output = evs_dir / ALAN_OUTPUT_NAME
         only_set = frozenset(only)
+        # Prefer an explicit template; otherwise the live training stack so
+        # --only alan matches other layers' extent (issue #37).
+        alan_template = (
+            alan_template_raster
+            if alan_template_raster is not None
+            else config_ev_tiff
+        )
         if "alan" in active:
-            if alan_source.exists():
+            # Resolve via local cache → bucket (sdm.data.alan). Do not gate on
+            # Path.exists() alone — that skipped the documented bucket fallback.
+            try:
+                resolved_source = resolve_alan_source_uri(alan_source_path)
+                resolved_cf_cvg = resolve_alan_cf_cvg_uri(
+                    alan_cf_cvg_path, required=False
+                )
+            except AlanUriAuthError as exc:
+                if only_set and "alan" in only_set:
+                    raise
+                logging.warning("Skipping alan (GCS auth): %s", exc)
+            except FileNotFoundError as exc:
+                if only_set and "alan" in only_set:
+                    raise
+                logging.warning(
+                    "Skipping alan: %s (use --skip alan to silence, or pass "
+                    "--alan-source-path / sync the bucket object)",
+                    exc,
+                )
+            else:
                 recorder.run(
                     "generate_alan_data",
                     lambda: generate_alan_data(
                         output_dir=evs_dir,
                         boundary_path=boundary_path,
-                        alan_source_path=alan_source,
-                        alan_cf_cvg_path=(
-                            alan_cf_cvg if alan_cf_cvg.exists() else None
-                        ),
+                        alan_source_path=resolved_source,
+                        alan_cf_cvg_path=resolved_cf_cvg,
+                        template_raster=alan_template,
                         buffer_distance_m=buffer_distance_m,
                         verbose=verbose,
                     ),
-                )
-            elif only_set and "alan" in only_set:
-                raise FileNotFoundError(
-                    f"ALAN source not found at {alan_source}. Place a yearly "
-                    "VIIRS night-lights GeoTIFF there (not in git) or pass "
-                    "alan_source_path."
-                )
-            else:
-                logging.warning(
-                    "Skipping alan: no VIIRS source at %s (use --skip alan to "
-                    "silence, or place the file to build the layer)",
-                    alan_source,
                 )
 
         # Omit CEH/coastal from merge only when explicitly ``--skip``'d.
