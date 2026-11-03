@@ -16,7 +16,7 @@ In-repo QGIS project for reviewing citizen-science model maps straight from the 
 
 ## Layout
 
-- **Manifest** (`qgis/review/manifest.yml`): required `versions.main` plus optional `versions.compare`. Each version has a short `label` and per-model `run_folder` + `prediction_file` (optional `cutoff_file`).
+- **Manifest** (`qgis/review/manifest.yml`): required `versions.main` plus optional `versions.compare`. Each version has a short `label` and per-model `run_folder` + `prediction_file` (optional `cutoff_file`). Top-level `crs` (default `EPSG:27700`) sets prediction/cutoff layer SRS and the project CRS; XYZ basemaps stay `EPSG:3857`.
 - **Main** paths use the prediction-version layout from [#104](https://github.com/MatthewJWhittle/shefflied-bats/pull/104): `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/prediction__…__suitability.tif`.
 - **Groups** in the project: one top-level group per version (`Main`, `Compare: <label>`), then the same per-species subgroups and layer names so maps line up.
 - **Basemaps**: OpenStreetMap and Carto only (no Google Satellite).
