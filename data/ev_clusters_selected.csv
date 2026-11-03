@@ -23,7 +23,7 @@ cluster_id,column_name,include
 4,climate_bioclim_bio_10,0
 4,climate_bioclim_bio_11,0
 4,climate_stats_wind_ann_var,0
-5,os_distance_distance_to_woodland,0
+5,os_distance_distance_to_woodland,1
 5,ceh_landcover_wetland,1
 5,os_distance_distance_to_buildings,1
 5,os_distance_distance_to_minor_roads,1
