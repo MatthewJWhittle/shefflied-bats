@@ -41,8 +41,7 @@ def test_prepare_training_data_uses_background_occurrence(monkeypatch):
         captured["n"] = len(occurrence_data)
         raise _Stop
 
-    monkeypatch.setattr(tsm, "convert_evs_to_geodataframe", lambda evs: None)
-    monkeypatch.setattr(tsm, "annotate_points_with_evs", lambda gdf, ev, tolerance: gdf)
+    monkeypatch.setattr(tsm, "annotate_points_with_evs", lambda gdf, evs, **kw: gdf)
     monkeypatch.setattr(tsm, "generate_background_points_from_data", fake_background)
 
     class _Rio:
