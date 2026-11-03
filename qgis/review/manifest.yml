@@ -1,0 +1,132 @@
+# QGIS review project manifest (#127).
+# main: prediction-version layout from #104 (latest runs per model).
+# compare: optional; omit or leave models empty for a main-only project.
+title: Sheffield bats — review
+project: qgis/review/hsm-review.qgs
+
+versions:
+  main:
+    label: Main
+    models:
+      myotis_brandtii_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/myotis_brandtii_roost/20261025_28297ec_cfg4cafa176
+        prediction_file: prediction__myotis_brandtii_roost__20261025_28297ec_cfg4cafa176__suitability.tif
+      myotis_daubentonii_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/myotis_daubentonii_roost/20261025_28297ec_cfge783b784
+        prediction_file: prediction__myotis_daubentonii_roost__20261025_28297ec_cfge783b784__suitability.tif
+      myotis_daubentonii_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/myotis_daubentonii_in_flight/20261025_28297ec_cfgdf9f06e5
+        prediction_file: prediction__myotis_daubentonii_in_flight__20261025_28297ec_cfgdf9f06e5__suitability.tif
+      myotis_mystacinus_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/myotis_mystacinus_roost/20261025_28297ec_cfg07ba8e31
+        prediction_file: prediction__myotis_mystacinus_roost__20261025_28297ec_cfg07ba8e31__suitability.tif
+      myotis_mystacinus_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/myotis_mystacinus_in_flight/20261025_28297ec_cfgb7c87175
+        prediction_file: prediction__myotis_mystacinus_in_flight__20261025_28297ec_cfgb7c87175__suitability.tif
+      myotis_nattereri_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/myotis_nattereri_roost/20261025_28297ec_cfgbf202b95
+        prediction_file: prediction__myotis_nattereri_roost__20261025_28297ec_cfgbf202b95__suitability.tif
+      myotis_nattereri_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/myotis_nattereri_in_flight/20261025_28297ec_cfg420770c3
+        prediction_file: prediction__myotis_nattereri_in_flight__20261025_28297ec_cfg420770c3__suitability.tif
+      nyctalus_leisleri_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/nyctalus_leisleri_roost/20261025_28297ec_cfgf90f95b6
+        prediction_file: prediction__nyctalus_leisleri_roost__20261025_28297ec_cfgf90f95b6__suitability.tif
+      nyctalus_leisleri_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/nyctalus_leisleri_in_flight/20261025_28297ec_cfg07ad9365
+        prediction_file: prediction__nyctalus_leisleri_in_flight__20261025_28297ec_cfg07ad9365__suitability.tif
+      nyctalus_noctula_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/nyctalus_noctula_roost/20261025_28297ec_cfg7dd166a2
+        prediction_file: prediction__nyctalus_noctula_roost__20261025_28297ec_cfg7dd166a2__suitability.tif
+      nyctalus_noctula_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/nyctalus_noctula_in_flight/20261025_28297ec_cfg8ac62f3a
+        prediction_file: prediction__nyctalus_noctula_in_flight__20261025_28297ec_cfg8ac62f3a__suitability.tif
+      pipistrellus_pipistrellus_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/pipistrellus_pipistrellus_roost/20261025_28297ec_cfgd93fc3dd
+        prediction_file: prediction__pipistrellus_pipistrellus_roost__20261025_28297ec_cfgd93fc3dd__suitability.tif
+      pipistrellus_pipistrellus_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/pipistrellus_pipistrellus_in_flight/20261025_28297ec_cfg144003aa
+        prediction_file: prediction__pipistrellus_pipistrellus_in_flight__20261025_28297ec_cfg144003aa__suitability.tif
+      pipistrellus_pygmaeus_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/pipistrellus_pygmaeus_roost/20261025_28297ec_cfg4bf873f9
+        prediction_file: prediction__pipistrellus_pygmaeus_roost__20261025_28297ec_cfg4bf873f9__suitability.tif
+      pipistrellus_pygmaeus_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/pipistrellus_pygmaeus_in_flight/20261025_28297ec_cfgb29bb502
+        prediction_file: prediction__pipistrellus_pygmaeus_in_flight__20261025_28297ec_cfgb29bb502__suitability.tif
+      plecotus_auritus_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/plecotus_auritus_roost/20261026_a7e1087_cfg5fbd377d
+        prediction_file: prediction__plecotus_auritus_roost__20261026_a7e1087_cfg5fbd377d__suitability.tif
+      plecotus_auritus_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/plecotus_auritus_in_flight/20261025_28297ec_cfg46c1b940
+        prediction_file: prediction__plecotus_auritus_in_flight__20261025_28297ec_cfg46c1b940__suitability.tif
+
+  compare:
+    label: Retrain 2 Nov
+    models:
+      myotis_brandtii_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: myotis_brandtii_roost__suitability.tif
+        cutoff_file: myotis_brandtii_roost__cutoff_p10.tif
+      myotis_daubentonii_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: myotis_daubentonii_roost__suitability.tif
+        cutoff_file: myotis_daubentonii_roost__cutoff_p10.tif
+      myotis_daubentonii_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: myotis_daubentonii_in_flight__suitability.tif
+        cutoff_file: myotis_daubentonii_in_flight__cutoff_p10.tif
+      myotis_mystacinus_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: myotis_mystacinus_roost__suitability.tif
+        cutoff_file: myotis_mystacinus_roost__cutoff_p10.tif
+      myotis_mystacinus_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: myotis_mystacinus_in_flight__suitability.tif
+      myotis_nattereri_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: myotis_nattereri_roost__suitability.tif
+        cutoff_file: myotis_nattereri_roost__cutoff_p10.tif
+      myotis_nattereri_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: myotis_nattereri_in_flight__suitability.tif
+        cutoff_file: myotis_nattereri_in_flight__cutoff_p10.tif
+      nyctalus_leisleri_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: nyctalus_leisleri_roost__suitability.tif
+        cutoff_file: nyctalus_leisleri_roost__cutoff_p10.tif
+      nyctalus_leisleri_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: nyctalus_leisleri_in_flight__suitability.tif
+        cutoff_file: nyctalus_leisleri_in_flight__cutoff_p10.tif
+      nyctalus_noctula_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: nyctalus_noctula_roost__suitability.tif
+        cutoff_file: nyctalus_noctula_roost__cutoff_p10.tif
+      nyctalus_noctula_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: nyctalus_noctula_in_flight__suitability.tif
+        cutoff_file: nyctalus_noctula_in_flight__cutoff_p10.tif
+      pipistrellus_pipistrellus_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: pipistrellus_pipistrellus_roost__suitability.tif
+        cutoff_file: pipistrellus_pipistrellus_roost__cutoff_p10.tif
+      pipistrellus_pipistrellus_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: pipistrellus_pipistrellus_in_flight__suitability.tif
+        cutoff_file: pipistrellus_pipistrellus_in_flight__cutoff_p10.tif
+      pipistrellus_pygmaeus_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: pipistrellus_pygmaeus_roost__suitability.tif
+        cutoff_file: pipistrellus_pygmaeus_roost__cutoff_p10.tif
+      pipistrellus_pygmaeus_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: pipistrellus_pygmaeus_in_flight__suitability.tif
+        cutoff_file: pipistrellus_pygmaeus_in_flight__cutoff_p10.tif
+      plecotus_auritus_roost:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: plecotus_auritus_roost__suitability.tif
+        cutoff_file: plecotus_auritus_roost__cutoff_p10.tif
+      plecotus_auritus_in_flight:
+        run_folder: gs://habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain
+        prediction_file: plecotus_auritus_in_flight__suitability.tif
+        cutoff_file: plecotus_auritus_in_flight__cutoff_p10.tif

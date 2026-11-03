@@ -172,7 +172,7 @@ Disable live download with `sdm setup --no-live-download` when working fully off
 
 ## Cloud bucket layout
 
-See [docs/data-layout.md](docs/data-layout.md) for every train/tune input and output path under `gs://habitat-suitability-modelling-data` (`inputs/` and `runs/`).
+See [docs/data-layout.md](docs/data-layout.md) for every train/tune input and output path under `gs://habitat-suitability-modelling-data` (`inputs/` and `runs/`). Review prediction maps in QGIS from the bucket without downloading: [docs/qgis-review-project.md](docs/qgis-review-project.md).
 
 ## Model-run output location
 
