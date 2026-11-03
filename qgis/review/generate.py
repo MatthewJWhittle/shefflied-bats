@@ -784,6 +784,9 @@ def build_project_xml(manifest: ReviewManifest) -> BuiltProject:
         presets.append(theme_el)
 
     properties = _sub(root, "properties")
+    # QGIS 4.x needs this or project CRS stays empty despite <projectCrs>.
+    spatial_ref = _sub(properties, "SpatialRefSys")
+    _sub(spatial_ref, "ProjectionsEnabled", "1", type="int")
     themes_prop = _sub(properties, "Themes", type="Map")
     _sub(themes_prop, "Option", type="QString", name="defaultPreset", value="Main")
 

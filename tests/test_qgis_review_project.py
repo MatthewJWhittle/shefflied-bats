@@ -199,3 +199,14 @@ def test_non_xyz_layer_srs_matches_manifest_crs() -> None:
     )
     assert project_crs is not None
     assert project_crs.group(1) == manifest.crs
+
+
+def test_projections_enabled_property_is_one() -> None:
+    """QGIS 4.x needs SpatialRefSys/ProjectionsEnabled=1 for a live project CRS."""
+    text = (REPO_ROOT / DEFAULT_PROJECT_REL).read_text(encoding="utf-8")
+    match = re.search(
+        r"<SpatialRefSys>\s*<ProjectionsEnabled type=\"int\">(\d+)</ProjectionsEnabled>\s*</SpatialRefSys>",
+        text,
+    )
+    assert match is not None
+    assert match.group(1) == "1"

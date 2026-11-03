@@ -7509,6 +7509,9 @@
     </visibility-preset>
   </visibility-presets>
   <properties>
+    <SpatialRefSys>
+      <ProjectionsEnabled type="int">1</ProjectionsEnabled>
+    </SpatialRefSys>
     <Themes type="Map">
       <Option type="QString" name="defaultPreset" value="Main" />
     </Themes>
