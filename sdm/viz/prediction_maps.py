@@ -15,6 +15,18 @@ import geopandas as gpd
 
 logger = logging.getLogger(__name__)
 
+
+def _mappable_from_axes(ax: plt.Axes):
+    """Return the AxesImage mappable after ``rasterio.plot.show``.
+
+    ``show(..., ax=ax)`` returns the Axes, not a ScalarMappable. ``plt.colorbar``
+    needs the image artist (``ax.images[0]``).
+    """
+    if not ax.images:
+        raise RuntimeError("No image artists on axes after rasterio.plot.show")
+    return ax.images[0]
+
+
 def plot_prediction_map(
     prediction_raster: Union[str, Path],
     output_path: Path,
@@ -43,8 +55,8 @@ def plot_prediction_map(
             # Create plot
             fig, ax = plt.subplots(figsize=(12, 12))
             
-            # Plot raster
-            im = show(
+            # Plot raster (show returns Axes; colorbar needs the image mappable)
+            show(
                 src,
                 ax=ax,
                 cmap=cmap,
@@ -53,7 +65,7 @@ def plot_prediction_map(
             )
             
             # Add colorbar
-            cbar = plt.colorbar(im, ax=ax)
+            cbar = plt.colorbar(_mappable_from_axes(ax), ax=ax)
             cbar.set_label('Predicted Probability')
             
             # Add boundary if provided
@@ -160,17 +172,14 @@ def plot_prediction_comparison(
         
         for i, (raster_path, ax) in enumerate(zip(raster_paths, axes)):
             with rasterio.open(raster_path) as src:
-                # Plot raster
-                im = show(
+                show(
                     src,
                     ax=ax,
                     cmap=cmap,
                     vmin=vmin,
                     vmax=vmax
                 )
-                
-                # Add colorbar
-                plt.colorbar(im, ax=ax)
+                plt.colorbar(_mappable_from_axes(ax), ax=ax)
                 
                 # Set title
                 if titles and i < len(titles):
@@ -211,14 +220,14 @@ def plot_prediction_uncertainty(
         
         # Plot mean
         with rasterio.open(mean_raster) as src:
-            im1 = show(src, ax=ax1, cmap=cmap)
-            plt.colorbar(im1, ax=ax1)
+            show(src, ax=ax1, cmap=cmap)
+            plt.colorbar(_mappable_from_axes(ax1), ax=ax1)
             ax1.set_title('Mean Prediction')
         
         # Plot standard deviation
         with rasterio.open(std_raster) as src:
-            im2 = show(src, ax=ax2, cmap='hot')
-            plt.colorbar(im2, ax=ax2)
+            show(src, ax=ax2, cmap='hot')
+            plt.colorbar(_mappable_from_axes(ax2), ax=ax2)
             ax2.set_title('Standard Deviation')
         
         # Set overall title
