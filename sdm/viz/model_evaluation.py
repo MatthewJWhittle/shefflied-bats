@@ -90,17 +90,17 @@ def plot_prediction_raster(
             # Create plot
             fig, ax = plt.subplots(figsize=(10, 10))
             
-            # Plot raster
-            im = show(
+            # show returns Axes; colorbar needs the AxesImage mappable
+            show(
                 src,
                 ax=ax,
                 cmap=cmap,
                 vmin=vmin,
                 vmax=vmax
             )
-            
-            # Add colorbar
-            plt.colorbar(im, ax=ax, label='Predicted Probability')
+            if not ax.images:
+                raise RuntimeError("No image artists on axes after rasterio.plot.show")
+            plt.colorbar(ax.images[0], ax=ax, label='Predicted Probability')
             
             # Add boundary if provided
             if boundary_gdf is not None:
