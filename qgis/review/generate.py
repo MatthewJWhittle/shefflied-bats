@@ -58,7 +58,15 @@ SUITABILITY_LABEL_PRECISION = "6"
 
 BASEMAP_SPECS: tuple[tuple[str, str], ...] = (
     (
-        # Same XYZ URL as the checked aerial in hsm-aerial-latest.qgz.
+        # Public aerial XYZ — preferred default (more stable than google.cn on open).
+        "Esri World Imagery",
+        "crs=EPSG:3857&format&type=xyz&url="
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/"
+        "MapServer/tile/%7Bz%7D/%7By%7D/%7Bx%7D"
+        "&zmax=19&zmin=0",
+    ),
+    (
+        # Same XYZ URL as the checked aerial in hsm-aerial-latest.qgz (optional).
         "Google Satellite",
         "crs=EPSG:3857&format&type=xyz&url="
         "http://www.google.cn/maps/vt?lyrs%3Ds@189%26gl%3Dcn%26x%3D%7Bx%7D"
@@ -78,7 +86,10 @@ BASEMAP_SPECS: tuple[tuple[str, str], ...] = (
         "&zmax=18&zmin=0&http-header:referer=",
     ),
 )
-DEFAULT_BASEMAP_NAME = "Google Satellite"
+DEFAULT_BASEMAP_NAME = "Esri World Imagery"
+# Map theme applied on project open — must not enable many /vsigs layers at once
+# (QGIS 3.44 can SIGSEGV under nested read + parallel GDAL /vsigs preload).
+DEFAULT_THEME_NAME = "Aerial only"
 
 # Study-area-ish default extent in EPSG:27700 (from the desktop reference).
 DEFAULT_EXTENT = (
@@ -582,12 +593,14 @@ def _layer_tree(manifest: ReviewManifest, layers: Sequence[BuiltLayer]) -> Eleme
     for version in manifest.versions:
         vtitle = version_group_title(version)
         group_paths.append(vtitle)
+        # Keep version groups collapsed and unchecked in the tree so a cold open
+        # does not invite mass /vsigs loads; Map Themes enable layers on demand.
         vgroup = _sub(
             root,
             "layer-tree-group",
             name=vtitle,
-            checked="Qt::Checked" if version.version_id == "main" else "Qt::Unchecked",
-            expanded="1" if version.version_id == "main" else "0",
+            checked="Qt::Unchecked",
+            expanded="0",
             groupLayer="",
         )
         for species, models in _iter_species_groups(version.models):
@@ -597,8 +610,8 @@ def _layer_tree(manifest: ReviewManifest, layers: Sequence[BuiltLayer]) -> Eleme
                 vgroup,
                 "layer-tree-group",
                 name=species,
-                checked="Qt::Checked",
-                expanded="1",
+                checked="Qt::Unchecked",
+                expanded="0",
                 groupLayer="",
             )
             for model in models:
@@ -663,32 +676,46 @@ def _theme_visibility(
     return preset
 
 
+def _default_basemap_id(layers: Sequence[BuiltLayer]) -> str:
+    for layer in layers:
+        if layer.kind == "basemap" and layer.name == DEFAULT_BASEMAP_NAME:
+            return layer.layer_id
+    for layer in layers:
+        if layer.kind == "basemap":
+            return layer.layer_id
+    raise ValueError("No basemap layers available for map themes")
+
+
 def _build_themes(
     manifest: ReviewManifest, layers: Sequence[BuiltLayer]
 ) -> tuple[list[Element], list[str]]:
     themes: list[Element] = []
     names: list[str] = []
-    basemap_ids = {layer.layer_id for layer in layers if layer.kind == "basemap"}
+    aerial_id = _default_basemap_id(layers)
+    aerial_only = {aerial_id}
     version_by_id = {version.version_id: version for version in manifest.versions}
 
-    def version_layer_ids(version_id: str, *, suitability_only: bool = False) -> set[str]:
-        out: set[str] = set()
-        for layer in layers:
-            if layer.version_id != version_id:
-                continue
-            if suitability_only and layer.kind != "suitability":
-                continue
-            out.add(layer.layer_id)
-        return out
+    # Cold-open theme: aerial only (matches hsm-aerial-latest "Imagery only" pattern).
+    themes.append(
+        _theme_visibility(
+            name=DEFAULT_THEME_NAME,
+            layers=layers,
+            visible_ids=aerial_only,
+            checked_groups=["Basemaps"],
+        )
+    )
+    names.append(DEFAULT_THEME_NAME)
 
     main = version_by_id["main"]
     main_title = version_group_title(main)
-    main_ids = version_layer_ids("main", suitability_only=True) | basemap_ids
+    # Main / Compare used to enable every suitability layer at once (~17 /vsigs),
+    # which crashes QGIS 3.44 under nested project read + GDAL preload. Keep the
+    # theme names for navigation, but only show the aerial until a per-model theme.
     themes.append(
         _theme_visibility(
             name="Main",
             layers=layers,
-            visible_ids=main_ids,
+            visible_ids=aerial_only,
             checked_groups=[main_title, "Basemaps"],
         )
     )
@@ -697,12 +724,11 @@ def _build_themes(
     compare = version_by_id.get("compare")
     if compare is not None:
         compare_title = version_group_title(compare)
-        compare_ids = version_layer_ids("compare", suitability_only=True) | basemap_ids
         themes.append(
             _theme_visibility(
                 name="Compare",
                 layers=layers,
-                visible_ids=compare_ids,
+                visible_ids=aerial_only,
                 checked_groups=[compare_title, "Basemaps"],
             )
         )
@@ -725,7 +751,7 @@ def _build_themes(
                     for layer in layers
                     if layer.version_id == version_id
                     and layer.model_id == model.model_id
-                } | basemap_ids
+                } | aerial_only
                 themes.append(
                     _theme_visibility(
                         name=theme_name,
@@ -750,14 +776,17 @@ def build_project_xml(manifest: ReviewManifest) -> BuiltProject:
         "qgis",
         {
             "projectname": manifest.title,
-            "version": "3.34.0-Prizren",
+            # Match Matt's QGIS 3.44.x; generator still emits plain-text .qgs.
+            "version": "3.44.14-Solothurn",
         },
     )
     _sub(root, "homePath", path="")
     _sub(root, "title", manifest.title)
     _sub(root, "autoTransaction", "false")
     _sub(root, "evaluateDefaultValues", "false")
-    _sub(root, "trustLayerMetadata", "false")
+    # Skip expensive provider metadata probes while many /vsigs layers are registered.
+    _sub(root, "trustLayerMetadata", "true")
+    _sub(root, "projectFlags", set="")
 
     tree = _layer_tree(manifest, layers)
     group_paths = tree.attrib.pop("data-group-paths", "").split("|")
@@ -802,7 +831,13 @@ def build_project_xml(manifest: ReviewManifest) -> BuiltProject:
     spatial_ref = _sub(properties, "SpatialRefSys")
     _sub(spatial_ref, "ProjectionsEnabled", "1", type="int")
     themes_prop = _sub(properties, "Themes", type="Map")
-    _sub(themes_prop, "Option", type="QString", name="defaultPreset", value="Main")
+    _sub(
+        themes_prop,
+        "Option",
+        type="QString",
+        name="defaultPreset",
+        value=DEFAULT_THEME_NAME,
+    )
 
     xml_body = tostring(root, encoding="unicode")
     # Deterministic, diff-friendly plain text.

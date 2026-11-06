@@ -15,6 +15,7 @@ from qgis.review.generate import (
     BASEMAP_CRS,
     DEFAULT_MANIFEST_REL,
     DEFAULT_PROJECT_REL,
+    DEFAULT_THEME_NAME,
     _stable_layer_id,
     assert_no_credentials,
     assert_project_paths_allowed,
@@ -109,6 +110,7 @@ def test_compare_groups_and_themes_present() -> None:
     assert "/vsigs/habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain/" in text
     assert "myotis_brandtii_roost__suitability.tif" in text
     assert "myotis_brandtii_roost__cutoff_p10.tif" in text
+    assert "Esri World Imagery" in text
     assert "Google Satellite" in text
     assert "www.google.cn/maps/vt" in text
     assert 'opacity="0.5"' in text
@@ -117,6 +119,9 @@ def test_compare_groups_and_themes_present() -> None:
     assert "0 — lower suitability" in text
     assert "1 — higher suitability" in text
     assert 'labelPrecision="6"' in text
+    assert 'name="Aerial only"' in text
+    assert 'name="defaultPreset" value="Aerial only"' in text
+    assert "<trustLayerMetadata>true</trustLayerMetadata>" in text
 
 
 def test_layer_names_include_species_and_version() -> None:
@@ -158,6 +163,28 @@ def test_per_model_themes_show_one_version_only() -> None:
     assert _visible(main_theme, compare_suit) == "0"
     assert _visible(compare_theme, compare_suit) == "1"
     assert _visible(compare_theme, main_suit) == "0"
+
+
+def test_cold_open_themes_do_not_enable_all_vsigs() -> None:
+    """Default / Main / Compare themes must not preload every suitability layer."""
+    manifest = load_manifest(REPO_ROOT / DEFAULT_MANIFEST_REL)
+    text = build_project_xml(manifest).xml
+    main_suit = _stable_layer_id("main", "myotis_brandtii_roost", "suitability")
+
+    def _preset_body(theme_name: str) -> str:
+        marker = f'<visibility-preset name="{theme_name}"'
+        assert marker in text
+        return text.split(marker, 1)[1].split("</visibility-preset>", 1)[0]
+
+    def _n_visible(theme_body: str) -> int:
+        return len(re.findall(r'\bvisible="1"', theme_body))
+
+    for theme in (DEFAULT_THEME_NAME, "Main", "Compare"):
+        body = _preset_body(theme)
+        assert _n_visible(body) == 1
+        # Suitability stays off until a per-model theme is chosen.
+        attrs = body.split(f'id="{main_suit}"', 1)[1].split("/>", 1)[0]
+        assert 'visible="0"' in attrs
 
 
 def test_write_project_round_trip(tmp_path: Path) -> None:
