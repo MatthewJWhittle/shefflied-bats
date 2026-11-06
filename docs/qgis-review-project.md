@@ -19,7 +19,7 @@ In-repo QGIS project for reviewing citizen-science model maps straight from the 
 - **Manifest** (`qgis/review/manifest.yml`): required `versions.main` plus optional `versions.compare`. Each version has a short `label` and per-model `run_folder` + `prediction_file` (optional `cutoff_file`). Top-level `crs` (default `EPSG:27700`) sets prediction/cutoff layer SRS and the project CRS; XYZ basemaps stay `EPSG:3857`.
 - **Main** paths use the prediction-version layout from [#104](https://github.com/MatthewJWhittle/shefflied-bats/pull/104): `predictions/<model_id>/<YYYYMMDD>_<sha7>_cfg<hash>/prediction__…__suitability.tif`.
 - **Groups** in the project: one top-level group per version (`Main`, `Compare: <label>`), then the same per-species subgroups and layer names so maps line up.
-- **Basemaps**: Esri World Imagery (default), OpenStreetMap, and Carto (no Google Satellite). Suitability/cutoff layers use a shared viridis 0–1 ramp at renderer opacity 0.8.
+- **Basemaps**: Google Satellite (default; same XYZ as the `hsm-aerial-latest.qgz` style reference), OpenStreetMap, and Carto. Suitability/cutoff layers use the shared plasma 0–1 ramp from that reference at renderer opacity 0.5.
 - **Map Themes** (QGIS *View → Map Themes*): `Main` (default), `Compare` when the compare block is present, and per-model themes (`Myotis brandtii Roost — Main` / `… — Compare`) that show only that model’s layers from one version plus the basemap. Layer names include species and version so Main and Compare stay distinguishable in the legend.
 
 ## Point compare at another run

@@ -109,13 +109,14 @@ def test_compare_groups_and_themes_present() -> None:
     assert "/vsigs/habitat-suitability-modelling-data/predictions/versions/2026-11-02-review/2_retrain/" in text
     assert "myotis_brandtii_roost__suitability.tif" in text
     assert "myotis_brandtii_roost__cutoff_p10.tif" in text
-    assert "google.cn" not in text.lower()
-    assert "Google Satellite" not in text
-    assert "Esri World Imagery" in text
-    assert "server.arcgisonline.com/ArcGIS/rest/services/World_Imagery" in text
-    assert 'opacity="0.8"' in text
-    assert 'color="#440154"' in text
-    assert 'color="#fde725"' in text
+    assert "Google Satellite" in text
+    assert "www.google.cn/maps/vt" in text
+    assert 'opacity="0.5"' in text
+    assert 'color="#0d0887"' in text
+    assert 'color="#f0f921"' in text
+    assert "0 — lower suitability" in text
+    assert "1 — higher suitability" in text
+    assert 'labelPrecision="6"' in text
 
 
 def test_layer_names_include_species_and_version() -> None:

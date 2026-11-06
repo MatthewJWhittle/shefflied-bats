@@ -40,29 +40,30 @@ PROJECT_TITLE = "Sheffield bats — review"
 DEFAULT_RASTER_CRS = "EPSG:27700"
 BASEMAP_CRS = "EPSG:3857"
 
-# Shared 0–1 suitability ramp: matplotlib viridis at the same nine stops
-# (0, 0.125, …, 1) previously used for the Blues desktop reference.
+# Shared 0–1 suitability ramp + opacity from Matt's working style example
+# (media/qgis-style-ref/hsm-aerial-latest.qgz — plasma stops, opacity 0.5).
 SUITABILITY_RAMP_ITEMS: tuple[tuple[float, str, str], ...] = (
-    (0.0, "#440154", "0"),
-    (0.125, "#472d7b", "0.125"),
-    (0.25, "#3b528b", "0.25"),
-    (0.375, "#2c728e", "0.375"),
-    (0.5, "#21918c", "0.5"),
-    (0.625, "#28ae80", "0.625"),
-    (0.75, "#5ec962", "0.75"),
-    (0.875, "#addc30", "0.875"),
-    (1.0, "#fde725", "1"),
+    (0.0, "#0d0887", "0 — lower suitability"),
+    (0.125, "#4b03a1", "0.125"),
+    (0.25, "#7e03a8", "0.25"),
+    (0.375, "#a82296", "0.375"),
+    (0.5, "#cc4778", "0.5"),
+    (0.625, "#e66c5c", "0.625"),
+    (0.75, "#f89540", "0.75"),
+    (0.875, "#fdc527", "0.875"),
+    (1.0, "#f0f921", "1 — higher suitability"),
 )
-# Renderer opacity for suitability/cutoff over basemap (was 0.9 on Blues).
-SUITABILITY_RENDERER_OPACITY = "0.8"
+SUITABILITY_RENDERER_OPACITY = "0.5"
+SUITABILITY_LABEL_PRECISION = "6"
 
 BASEMAP_SPECS: tuple[tuple[str, str], ...] = (
     (
-        "Esri World Imagery",
+        # Same XYZ URL as the checked aerial in hsm-aerial-latest.qgz.
+        "Google Satellite",
         "crs=EPSG:3857&format&type=xyz&url="
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/"
-        "MapServer/tile/%7Bz%7D/%7By%7D/%7Bx%7D"
-        "&zmax=19&zmin=0",
+        "http://www.google.cn/maps/vt?lyrs%3Ds@189%26gl%3Dcn%26x%3D%7Bx%7D"
+        "%26y%3D%7By%7D%26z%3D%7Bz%7D"
+        "&zmax=18&zmin=0&http-header:referer=",
     ),
     (
         "OpenStreetMap",
@@ -77,7 +78,7 @@ BASEMAP_SPECS: tuple[tuple[str, str], ...] = (
         "&zmax=18&zmin=0&http-header:referer=",
     ),
 )
-DEFAULT_BASEMAP_NAME = "Esri World Imagery"
+DEFAULT_BASEMAP_NAME = "Google Satellite"
 
 # Study-area-ish default extent in EPSG:27700 (from the desktop reference).
 DEFAULT_EXTENT = (
@@ -99,10 +100,12 @@ CREDENTIAL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     )
 )
 
+# Non-allowlisted aerial hosts stay blocked; Google Satellite is in BASEMAP_SPECS
+# (matched to hsm-aerial-latest.qgz). Keep other Google tile variants out.
 FORBIDDEN_BASEMAP_SNIPPETS: tuple[str, ...] = (
-    "google.cn",
-    "maps.google",
-    "Google Satellite",
+    "maps.google.com",
+    "mt1.google.com",
+    "khms.google",
 )
 
 
@@ -409,7 +412,7 @@ def _append_suitability_renderer(pipe: Element) -> None:
     ramp = _sub(
         shader,
         "colorrampshader",
-        labelPrecision="2",
+        labelPrecision=SUITABILITY_LABEL_PRECISION,
         minimumValue="0",
         classificationMode="1",
         colorRampType="INTERPOLATED",
