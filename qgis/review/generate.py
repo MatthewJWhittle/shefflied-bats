@@ -40,20 +40,30 @@ PROJECT_TITLE = "Sheffield bats — review"
 DEFAULT_RASTER_CRS = "EPSG:27700"
 BASEMAP_CRS = "EPSG:3857"
 
-# Shared 0–1 suitability ramp (matches Matt's desktop reference styling).
+# Shared 0–1 suitability ramp: matplotlib viridis at the same nine stops
+# (0, 0.125, …, 1) previously used for the Blues desktop reference.
 SUITABILITY_RAMP_ITEMS: tuple[tuple[float, str, str], ...] = (
-    (0.0, "#f7fbff", "0"),
-    (0.125, "#deebf7", "0.125"),
-    (0.25, "#c6dbef", "0.25"),
-    (0.375, "#9ecae1", "0.375"),
-    (0.5, "#6baed6", "0.5"),
-    (0.625, "#4292c6", "0.625"),
-    (0.75, "#2171b5", "0.75"),
-    (0.875, "#08519c", "0.875"),
-    (1.0, "#08306b", "1"),
+    (0.0, "#440154", "0"),
+    (0.125, "#472d7b", "0.125"),
+    (0.25, "#3b528b", "0.25"),
+    (0.375, "#2c728e", "0.375"),
+    (0.5, "#21918c", "0.5"),
+    (0.625, "#28ae80", "0.625"),
+    (0.75, "#5ec962", "0.75"),
+    (0.875, "#addc30", "0.875"),
+    (1.0, "#fde725", "1"),
 )
+# Renderer opacity for suitability/cutoff over basemap (was 0.9 on Blues).
+SUITABILITY_RENDERER_OPACITY = "0.8"
 
 BASEMAP_SPECS: tuple[tuple[str, str], ...] = (
+    (
+        "Esri World Imagery",
+        "crs=EPSG:3857&format&type=xyz&url="
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/"
+        "MapServer/tile/%7Bz%7D/%7By%7D/%7Bx%7D"
+        "&zmax=19&zmin=0",
+    ),
     (
         "OpenStreetMap",
         "crs=EPSG:3857&format&type=xyz&url="
@@ -67,6 +77,7 @@ BASEMAP_SPECS: tuple[tuple[str, str], ...] = (
         "&zmax=18&zmin=0&http-header:referer=",
     ),
 )
+DEFAULT_BASEMAP_NAME = "Esri World Imagery"
 
 # Study-area-ish default extent in EPSG:27700 (from the desktop reference).
 DEFAULT_EXTENT = (
@@ -383,7 +394,7 @@ def _append_suitability_renderer(pipe: Element) -> None:
         classificationMax="1",
         alphaBand="-1",
         nodataColor="",
-        opacity="0.9",
+        opacity=SUITABILITY_RENDERER_OPACITY,
         type="singlebandpseudocolor",
     )
     _sub(renderer, "rasterTransparency")
@@ -538,7 +549,7 @@ def build_layers(manifest: ReviewManifest) -> list[BuiltLayer]:
                 version_id=None,
                 model_id=None,
                 species_group=None,
-                checked=(name == "OpenStreetMap"),
+                checked=(name == DEFAULT_BASEMAP_NAME),
             )
         )
     return layers

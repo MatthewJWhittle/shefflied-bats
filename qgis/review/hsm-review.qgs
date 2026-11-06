@@ -97,7 +97,8 @@
       </layer-tree-group>
     </layer-tree-group>
     <layer-tree-group name="Basemaps" checked="Qt::Checked" expanded="0" groupLayer="">
-      <layer-tree-layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" name="OpenStreetMap" source="crs=EPSG:3857&amp;format&amp;type=xyz&amp;url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&amp;zmax=19&amp;zmin=0" providerKey="wms" checked="Qt::Checked" expanded="0" legend_exp="" legend_split_behavior="0" patch_size="-1,-1" />
+      <layer-tree-layer id="l_036fcf6f95b65bcab7919b58b28f036a" name="Esri World Imagery" source="crs=EPSG:3857&amp;format&amp;type=xyz&amp;url=https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%7Bz%7D/%7By%7D/%7Bx%7D&amp;zmax=19&amp;zmin=0" providerKey="wms" checked="Qt::Checked" expanded="0" legend_exp="" legend_split_behavior="0" patch_size="-1,-1" />
+      <layer-tree-layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" name="OpenStreetMap" source="crs=EPSG:3857&amp;format&amp;type=xyz&amp;url=https://tile.openstreetmap.org/%7Bz%7D/%7Bx%7D/%7By%7D.png&amp;zmax=19&amp;zmin=0" providerKey="wms" checked="Qt::Unchecked" expanded="0" legend_exp="" legend_split_behavior="0" patch_size="-1,-1" />
       <layer-tree-layer id="l_95a25510f1815570a6c96abea4b0ea38" name="Carto" source="crs=EPSG:3857&amp;format&amp;type=xyz&amp;url=https://a.basemaps.cartocdn.com/light_all/%7Bz%7D/%7Bx%7D/%7By%7D.png&amp;zmax=18&amp;zmin=0&amp;http-header:referer=" providerKey="wms" checked="Qt::Unchecked" expanded="0" legend_exp="" legend_split_behavior="0" patch_size="-1,-1" />
     </layer-tree-group>
   </layer-tree-group>
@@ -138,7 +139,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -150,15 +151,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -202,7 +203,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -214,15 +215,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -266,7 +267,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -278,15 +279,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -330,7 +331,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -342,15 +343,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -394,7 +395,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -406,15 +407,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -458,7 +459,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -470,15 +471,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -522,7 +523,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -534,15 +535,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -586,7 +587,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -598,15 +599,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -650,7 +651,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -662,15 +663,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -714,7 +715,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -726,15 +727,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -778,7 +779,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -790,15 +791,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -842,7 +843,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -854,15 +855,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -906,7 +907,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -918,15 +919,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -970,7 +971,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -982,15 +983,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1034,7 +1035,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1046,15 +1047,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1098,7 +1099,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1110,15 +1111,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1162,7 +1163,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1174,15 +1175,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1226,7 +1227,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1238,15 +1239,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1290,7 +1291,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1302,15 +1303,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1354,7 +1355,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1366,15 +1367,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1418,7 +1419,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1430,15 +1431,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1482,7 +1483,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1494,15 +1495,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1546,7 +1547,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1558,15 +1559,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1610,7 +1611,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1622,15 +1623,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1674,7 +1675,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1686,15 +1687,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1738,7 +1739,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1750,15 +1751,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1802,7 +1803,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1814,15 +1815,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1866,7 +1867,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1878,15 +1879,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1930,7 +1931,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -1942,15 +1943,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -1994,7 +1995,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2006,15 +2007,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2058,7 +2059,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2070,15 +2071,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2122,7 +2123,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2134,15 +2135,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2186,7 +2187,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2198,15 +2199,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2250,7 +2251,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2262,15 +2263,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2314,7 +2315,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2326,15 +2327,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2378,7 +2379,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2390,15 +2391,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2442,7 +2443,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2454,15 +2455,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2506,7 +2507,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2518,15 +2519,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2570,7 +2571,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2582,15 +2583,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2634,7 +2635,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2646,15 +2647,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2698,7 +2699,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2710,15 +2711,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2762,7 +2763,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2774,15 +2775,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2826,7 +2827,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2838,15 +2839,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2890,7 +2891,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2902,15 +2903,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -2954,7 +2955,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -2966,15 +2967,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -3018,7 +3019,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -3030,15 +3031,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -3082,7 +3083,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -3094,15 +3095,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -3146,7 +3147,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -3158,15 +3159,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -3210,7 +3211,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -3222,15 +3223,15 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
@@ -3274,7 +3275,7 @@
       </map-layer-style-manager>
       <pipe>
         <provider>gdal</provider>
-        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.9" type="singlebandpseudocolor">
+        <rasterrenderer band="1" classificationMin="0" classificationMax="1" alphaBand="-1" nodataColor="" opacity="0.8" type="singlebandpseudocolor">
           <rasterTransparency />
           <minMaxOrigin>
             <limits>None</limits>
@@ -3286,18 +3287,59 @@
           </minMaxOrigin>
           <rastershader>
             <colorrampshader labelPrecision="2" minimumValue="0" classificationMode="1" colorRampType="INTERPOLATED" maximumValue="1" clip="0">
-              <item label="0" alpha="255" value="0.0" color="#f7fbff" />
-              <item label="0.125" alpha="255" value="0.125" color="#deebf7" />
-              <item label="0.25" alpha="255" value="0.25" color="#c6dbef" />
-              <item label="0.375" alpha="255" value="0.375" color="#9ecae1" />
-              <item label="0.5" alpha="255" value="0.5" color="#6baed6" />
-              <item label="0.625" alpha="255" value="0.625" color="#4292c6" />
-              <item label="0.75" alpha="255" value="0.75" color="#2171b5" />
-              <item label="0.875" alpha="255" value="0.875" color="#08519c" />
-              <item label="1" alpha="255" value="1.0" color="#08306b" />
+              <item label="0" alpha="255" value="0.0" color="#440154" />
+              <item label="0.125" alpha="255" value="0.125" color="#472d7b" />
+              <item label="0.25" alpha="255" value="0.25" color="#3b528b" />
+              <item label="0.375" alpha="255" value="0.375" color="#2c728e" />
+              <item label="0.5" alpha="255" value="0.5" color="#21918c" />
+              <item label="0.625" alpha="255" value="0.625" color="#28ae80" />
+              <item label="0.75" alpha="255" value="0.75" color="#5ec962" />
+              <item label="0.875" alpha="255" value="0.875" color="#addc30" />
+              <item label="1" alpha="255" value="1.0" color="#fde725" />
             </colorrampshader>
           </rastershader>
         </rasterrenderer>
+      </pipe>
+      <blendMode>0</blendMode>
+      <opacity>1</opacity>
+    </maplayer>
+    <maplayer autoRefreshEnabled="0" autoRefreshTime="0" hasScaleBasedVisibilityFlag="0" legendPlaceholderImage="" maxScale="0" minScale="1e+08" refreshOnNotifyEnabled="0" refreshOnNotifyMessage="" styleCategories="AllStyleCategories" type="raster">
+      <extent>
+        <xmin>406745.1590511441</xmin>
+        <ymin>368708.3445680913</ymin>
+        <xmax>554321.3179088559</xmax>
+        <ymax>479441.74501086655</ymax>
+      </extent>
+      <id>l_036fcf6f95b65bcab7919b58b28f036a</id>
+      <datasource>crs=EPSG:3857&amp;format&amp;type=xyz&amp;url=https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/%7Bz%7D/%7By%7D/%7Bx%7D&amp;zmax=19&amp;zmin=0</datasource>
+      <keywordList />
+      <layername>Esri World Imagery</layername>
+      <srs>
+        <spatialrefsys>
+          <wkt />
+          <proj4>+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs</proj4>
+          <srsid>3857</srsid>
+          <srid>3857</srid>
+          <authid>EPSG:3857</authid>
+          <description>WGS 84 / Pseudo-Mercator</description>
+          <projectionacronym>merc</projectionacronym>
+          <ellipsoidacronym>EPSG:7030</ellipsoidacronym>
+          <geographicflag>false</geographicflag>
+        </spatialrefsys>
+      </srs>
+      <provider>wms</provider>
+      <flags>
+        <Identifiable>1</Identifiable>
+        <Removable>1</Removable>
+        <Searchable>1</Searchable>
+        <Private>0</Private>
+      </flags>
+      <map-layer-style-manager current="default">
+        <map-layer-style name="default" />
+      </map-layer-style-manager>
+      <pipe>
+        <provider>wms</provider>
+        <rasterrenderer opacity="1" alphaBand="-1" blueBand="-1" greenBand="-1" type="singlebandcolordata" grayBand="1" band="1" />
       </pipe>
       <blendMode>0</blendMode>
       <opacity>1</opacity>
@@ -3436,6 +3478,7 @@
     <layer id="l_1132ab89cdf151fd9a61a1662c0afcbf" />
     <layer id="l_91a0a95012cf59e095d5563c229a94f4" />
     <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+    <layer id="l_036fcf6f95b65bcab7919b58b28f036a" />
     <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
     <layer id="l_95a25510f1815570a6c96abea4b0ea38" />
   </layerorder>
@@ -3578,6 +3621,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -3689,6 +3734,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -3800,6 +3847,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -3912,6 +3961,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4024,6 +4075,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4136,6 +4189,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4248,6 +4303,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4360,6 +4417,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4472,6 +4531,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4584,6 +4645,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4696,6 +4759,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4808,6 +4873,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -4920,6 +4987,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5032,6 +5101,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5144,6 +5215,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5256,6 +5329,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5368,6 +5443,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5480,6 +5557,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5592,6 +5671,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5704,6 +5785,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5816,6 +5899,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -5928,6 +6013,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6040,6 +6127,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6152,6 +6241,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6264,6 +6355,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6376,6 +6469,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6488,6 +6583,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6600,6 +6697,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6712,6 +6811,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6824,6 +6925,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -6936,6 +7039,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -7048,6 +7153,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -7160,6 +7267,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -7272,6 +7381,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -7384,6 +7495,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="0" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
@@ -7496,6 +7609,8 @@
       <expanded-legend-nodes id="l_91a0a95012cf59e095d5563c229a94f4" />
       <layer id="l_e8b514c59b4c53a49793efb3c1a46f8d" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_e8b514c59b4c53a49793efb3c1a46f8d" />
+      <layer id="l_036fcf6f95b65bcab7919b58b28f036a" style="default" visible="1" expanded="0" />
+      <expanded-legend-nodes id="l_036fcf6f95b65bcab7919b58b28f036a" />
       <layer id="l_7985e8a061c158fe85de3f8bf2fc2f77" style="default" visible="1" expanded="0" />
       <expanded-legend-nodes id="l_7985e8a061c158fe85de3f8bf2fc2f77" />
       <layer id="l_95a25510f1815570a6c96abea4b0ea38" style="default" visible="1" expanded="0" />
