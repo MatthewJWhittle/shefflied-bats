@@ -15,3 +15,4 @@ General principles for work on this project. Setup, CLI preference, and PR check
 - This repo is public: no secrets or sensitive location data. Licensed or private data stays out of git.
 - Never overwrite existing production data or outputs.
 - In PRs, commits, and docs, write under a role heading. No bot or agent names, and no @-mentions.
+- `sdm` is the modelling library and CLI; project tooling (review projects, one-off scripts) lives outside it.
