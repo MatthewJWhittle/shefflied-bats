@@ -25,3 +25,8 @@ _Avoid_: backend, algorithm (vague)
 Continuous habitat suitability in [0, 1] produced by scoring a model on
 environmental predictors.
 _Avoid_: probability (unless literally class probability), prediction (broader)
+
+**Rebuild step**:
+One ordered unit of regenerating environmental layers that `--skip` / `--only`
+can name (including layer pieces, merge, and stack).
+_Avoid_: job, task, pipeline stage
