@@ -43,5 +43,6 @@ restack), and UK-scale tiling work (ADR 0002) can plug into clear rebuild-step
 pieces later.
 
 ## Revisit when
-- DBT-style selective rebuild / artefact caching is designed.
+- DBT-style selective rebuild / artefact caching is designed (direction for the
+  durable store: ADR 0007 + #41; open cache semantics tracked as GitHub issues).
 - A different product than `evs-to-model.tif` becomes a first-class stack output.
