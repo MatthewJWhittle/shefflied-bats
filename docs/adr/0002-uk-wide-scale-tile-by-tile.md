@@ -28,3 +28,6 @@ With this design, memory depends on the tile size rather than the area, so going
 - A source dataset can't be split into tiles (for example, a national statistic that needs the whole area at once).
 - Neighbourhood radii grow so large that the overlap stops being small next to the tile size.
 - Cloud or distributed compute is added.
+
+See also ADR 0007 (place-first operator extent; Zarr national compute/cache;
+COG publish) and issue #41 (versioned layer store).

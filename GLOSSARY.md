@@ -30,3 +30,16 @@ _Avoid_: probability (unless literally class probability), prediction (broader)
 One ordered unit of regenerating environmental layers that `--skip` / `--only`
 can name (including layer pieces, merge, and stack).
 _Avoid_: job, task, pipeline stage
+
+**Tile key**:
+Deterministic id for one interior square on the national ADR 0002 grid (10 240 m,
+EPSG:27700). Operators rarely name it; rebuild resolves a study-area polygon to
+tile keys, with a rare single-key escape hatch.
+_Avoid_: place id, cell index, Web Mercator XYZ tile
+
+**Inputs hash**:
+Canonical digest of everything that must force rebuilding one feature × tile
+(sources, recipe/code identity, pixel-affecting config, grid contract including
+halo width). Validity of a cached tile is this identity, not wall-clock age
+alone.
+_Avoid_: built_at as the sole freshness check
