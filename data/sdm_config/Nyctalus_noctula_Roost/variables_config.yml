@@ -1,9 +1,9 @@
 variables:
 - terrain_dtm
 - os_distance_distance_to_minor_roads
+- vom_vegetation_height_max
 - ceh_landcover_coniferous_woodland
 - os_distance_distance_to_buildings
 - os_cover_water
 - ceh_landcover_arable
-- vom_canopy_height_std  # canopy height variability (replaces old vegetation-height layers)
-- vom_woody_cover_share_500m  # woody cover share within 500 m
+- vom_vegetation_height_std_500m
