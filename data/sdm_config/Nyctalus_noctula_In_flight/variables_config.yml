@@ -1,10 +1,10 @@
 variables:
 - climate_stats_prec_ann_var
 - climate_stats_temp_mat_avg
+- vom_vegetation_height_std
+- os_distance_distance_to_buildings
 - ceh_landcover_suburban
 - os_distance_distance_to_water
 
 - ceh_landcover_wetland_1500m
 - ceh_landcover_suburban_1000m
-- vom_canopy_height_std  # canopy height variability (replaces old vegetation-height layers)
-- vom_woody_cover_share_500m  # woody cover share within 500 m

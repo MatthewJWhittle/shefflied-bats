@@ -1,6 +1,8 @@
 variables:
 - climate_bioclim_bio_9
 - os_distance_distance_to_buildings
+- vom_vegetation_height_std
+- vom_vegetation_height_mean
 - ceh_landcover_suburban
 - os_distance_distance_to_water
 - terrain_stats_twi
@@ -8,5 +10,3 @@ variables:
 - ceh_landcover_suburban_500m
 - ceh_landcover_arable_500m
 - ceh_landcover_suburban_1500m
-- vom_canopy_height_std  # canopy height variability (replaces old vegetation-height layers)
-- vom_woody_cover_share_500m  # woody cover share within 500 m

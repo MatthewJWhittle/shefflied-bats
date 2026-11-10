@@ -6,11 +6,11 @@ variables:
 - terrain_stats_roughness
 - climate_bioclim_bio_8
 - ceh_landcover_arable
+- vom_vegetation_height_max
 - ceh_landcover_suburban
 - os_cover_water
 - os_cover_water_500m
 - ceh_landcover_urban
 - ceh_landcover_wetland_1500m
+- ceh_landcover_broadleaved_woodland_500m 
 - ceh_landcover_improved_grassland_1000m
-- vom_canopy_height_std  # canopy height variability (replaces old vegetation-height layers)
-- vom_woody_cover_share_500m  # woody cover share within 500 m
